@@ -166,6 +166,7 @@ func (m *ShrinkMetrics) RecordSkipped(mediaType string) {
 	defer m.mu.Unlock()
 
 	stats := m.getOrCreateType(mediaType)
+	stats.Total++
 	stats.Skipped++
 }
 
@@ -278,7 +279,7 @@ func (m *ShrinkMetrics) PrintProgress() {
 		overallSpeed))
 
 	output := sb.String()
-	lineCount := strings.Count(output, "\n") + 1
+	lineCount := strings.Count(output, "\n")
 
 	// Move cursor up to the initial line of our progress display
 	// \x1b[F moves cursor to beginning of previous line (combines CR and up)
