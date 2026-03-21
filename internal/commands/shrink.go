@@ -194,6 +194,18 @@ func (c *ShrinkCmd) Run(ctx *kong.Context) error {
 		return nil
 	}
 
+	// Deduplicate by path to prevent processing the same file multiple times
+	// This can happen with archives or multiple database inputs
+	seenPaths := make(map[string]bool)
+	deduped := make([]ShrinkMedia, 0, len(toShrink))
+	for _, m := range toShrink {
+		if !seenPaths[m.Path] {
+			seenPaths[m.Path] = true
+			deduped = append(deduped, m)
+		}
+	}
+	toShrink = deduped
+
 	// Apply continue-from filter
 	if c.ContinueFrom != "" {
 		toShrink = c.applyContinueFrom(toShrink)
