@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"database/sql"
 	"io"
 	"log/slog"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"github.com/alecthomas/kong"
 	"github.com/chapmanjacobd/shrink/internal/models"
 	"github.com/chapmanjacobd/shrink/internal/testutils"
+	_ "github.com/mattn/go-sqlite3"
 )
 
 func runShrinkCmd(dbPath, tempDir string, args []string) error {
@@ -100,21 +102,21 @@ func TestShrinkArchive(t *testing.T) {
 		CLIArgs:     []string{"--no-confirm", "--preset=7", "--crf=40"},
 		Archives: []testutils.TestArchive{
 			{
-				Name:    "test_archive.zip",
-				SrcPath: "../testutils/testdata/test_archive.zip",
+				Name:    "test_archive_simple.zip",
+				SrcPath: "../testutils/testdata/test_archive_simple.zip",
 			},
 		},
 		ExpectFiles: []string{
-			"test_archive.zip.extracted/tiny.av1.mkv",
-			"test_archive.zip.extracted/tiny.avif",
+			"test_archive_simple.zip.extracted/tiny.av1.mkv",
+			"test_archive_simple.zip.extracted/tiny.avif",
 		},
 		ExpectMissing: []string{
-			"test_archive.zip",
-			"test_archive.zip.extracted/tiny.avi",
-			"test_archive.zip.extracted/tiny.bmp",
+			"test_archive_simple.zip",
+			"test_archive_simple.zip.extracted/tiny.avi",
+			"test_archive_simple.zip.extracted/tiny.bmp",
 		},
 		ExpectDBState: []testutils.ExpectedDBRecord{
-			{Path: "test_archive.zip", TimeDeleted: 1},
+			{Path: "test_archive_simple.zip", TimeDeleted: 1},
 		},
 	}
 
@@ -211,18 +213,18 @@ func TestShrinkMultiPartArchive(t *testing.T) {
 			{
 				Name:      "test_archive_multi.zip",
 				SrcPath:   "../testutils/testdata/test_archive_multi.zip",
-				MediaType: "archive/zip",
+				MediaType: "archive",
 			},
 			// Parts must exist on disk for unar to find them
 			{
 				Name:      "test_archive_multi.z01",
 				SrcPath:   "../testutils/testdata/test_archive_multi.z01",
-				MediaType: "application/octet-stream",
+				MediaType: "archive",
 			},
 			{
 				Name:      "test_archive_multi.z02",
 				SrcPath:   "../testutils/testdata/test_archive_multi.z02",
-				MediaType: "application/octet-stream",
+				MediaType: "archive",
 			},
 		},
 		ExpectFiles: []string{
@@ -243,6 +245,126 @@ func TestShrinkMultiPartArchive(t *testing.T) {
 	}
 
 	testutils.RunScenario(t, scenario, runShrinkCmd)
+}
+
+func TestShrinkBrokenArchive(t *testing.T) {
+	// Test that broken/incomplete archives (lsar returns empty) are moved to --move-broken
+	tempDir := t.TempDir()
+	moveBrokenDir := filepath.Join(tempDir, "broken")
+
+	// Copy multi-part archive files but remove one part to make it broken
+	copyFile(t, "../testutils/testdata/test_archive_multi.zip", filepath.Join(tempDir, "test_archive_multi.zip"))
+	copyFile(t, "../testutils/testdata/test_archive_multi.z02", filepath.Join(tempDir, "test_archive_multi.z02"))
+	// Intentionally NOT copying .z01 to make it broken
+
+	// Create database
+	dbPath := filepath.Join(tempDir, "test.db")
+	db, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		t.Fatalf("failed to open db: %v", err)
+	}
+
+	_, err = db.Exec(`CREATE TABLE media (
+		path TEXT PRIMARY KEY,
+		size INTEGER,
+		duration REAL,
+		video_count INTEGER,
+		audio_count INTEGER,
+		video_codecs TEXT,
+		audio_codecs TEXT,
+		subtitle_codecs TEXT,
+		media_type TEXT,
+		time_deleted INTEGER DEFAULT 0,
+		is_shrinked INTEGER DEFAULT 0
+	)`)
+	if err != nil {
+		t.Fatalf("failed to create table: %v", err)
+	}
+
+	archivePath := filepath.Join(tempDir, "test_archive_multi.zip")
+	info, _ := os.Stat(archivePath)
+	_, err = db.Exec(`INSERT INTO media (path, size, media_type) VALUES (?, ?, ?)`,
+		archivePath, info.Size(), "archive")
+	if err != nil {
+		t.Fatalf("failed to insert media: %v", err)
+	}
+	db.Close()
+
+	// Run shrink - extraction should fail due to missing part
+	args := []string{"--no-confirm", "--move-broken", moveBrokenDir}
+	_ = runShrinkCmd(dbPath, tempDir, args)
+
+	// Check that the archive was moved to broken directory with tidy structure
+	parentFolder := filepath.Base(tempDir)
+	brokenSubdir := filepath.Join(moveBrokenDir, parentFolder)
+
+	// The .zip and .z02 should be moved to broken
+	parts := []string{"test_archive_multi.zip", "test_archive_multi.z02"}
+	for _, part := range parts {
+		movedPath := filepath.Join(brokenSubdir, part)
+		if _, err := os.Stat(movedPath); os.IsNotExist(err) {
+			t.Errorf("expected broken archive part in broken dir: %s", movedPath)
+		}
+	}
+}
+
+func TestShrinkArchiveKeep(t *testing.T) {
+	// Test that archives with no processable content are skipped (not moved to broken)
+	tempDir := t.TempDir()
+	moveBrokenDir := filepath.Join(tempDir, "broken")
+
+	// Copy archive with non-media content
+	copyFile(t, "../testutils/testdata/test_archive_keep.zip", filepath.Join(tempDir, "test_archive_keep.zip"))
+
+	// Create database
+	dbPath := filepath.Join(tempDir, "test.db")
+	db, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		t.Fatalf("failed to open db: %v", err)
+	}
+
+	_, err = db.Exec(`CREATE TABLE media (
+		path TEXT PRIMARY KEY,
+		size INTEGER,
+		duration REAL,
+		video_count INTEGER,
+		audio_count INTEGER,
+		video_codecs TEXT,
+		audio_codecs TEXT,
+		subtitle_codecs TEXT,
+		media_type TEXT,
+		time_deleted INTEGER DEFAULT 0,
+		is_shrinked INTEGER DEFAULT 0
+	)`)
+	if err != nil {
+		t.Fatalf("failed to create table: %v", err)
+	}
+
+	archivePath := filepath.Join(tempDir, "test_archive_keep.zip")
+	info, _ := os.Stat(archivePath)
+	_, err = db.Exec(`INSERT INTO media (path, size, media_type) VALUES (?, ?, ?)`,
+		archivePath, info.Size(), "archive")
+	if err != nil {
+		t.Fatalf("failed to insert media: %v", err)
+	}
+	db.Close()
+
+	// Run shrink with --move-broken - archive should NOT be moved because it has content (just not processable)
+	args := []string{"--no-confirm", "--move-broken", moveBrokenDir}
+	_ = runShrinkCmd(dbPath, tempDir, args)
+
+	// Archive should still exist in original location (not moved to broken)
+	if _, err := os.Stat(archivePath); os.IsNotExist(err) {
+		t.Errorf("archive should not be moved to broken: %s", archivePath)
+	}
+
+	// Broken directory should be empty or not exist
+	if _, err := os.Stat(moveBrokenDir); err == nil {
+		entries, _ := os.ReadDir(moveBrokenDir)
+		if len(entries) > 0 {
+			t.Errorf("move-broken dir should be empty but has: %v", entries)
+		}
+	}
 }
 
 func copyFile(t *testing.T, src, dst string) {

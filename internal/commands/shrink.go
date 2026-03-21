@@ -136,6 +136,8 @@ type ShrinkMedia struct {
 	NewSize        int64
 	TimeDeleted    int64
 	Invalid        bool
+	IsBroken       bool     // For archives: lsar failed to read contents
+	PartFiles      []string // For multi-part archives: list of all part files
 }
 
 func (c *ShrinkCmd) Run(ctx *kong.Context) error {
@@ -620,6 +622,16 @@ func (c *ShrinkCmd) analyzeMedia(media []ShrinkMedia, cfg *ProcessorConfig,
 				var totalArchiveSize int64
 				futureSize, processingTime, hasProcessable, totalArchiveSize = archiveProc.EstimateSizeForArchive(m, cfg)
 				if !hasProcessable {
+					// Check if archive is broken (lsar returned empty or parts missing)
+					// totalArchiveSize == 0 means archive is broken (missing parts or unreadable)
+					// totalArchiveSize == m.Size means lsar worked but found no processable content
+					if totalArchiveSize == 0 {
+						m.IsBroken = true
+						// Get part files for multi-part archives
+						m.PartFiles = archiveProc.getPartFiles(m.Path)
+						// Add broken archives to toShrink so they can be moved to --move-broken
+						toShrink = append(toShrink, *m)
+					}
 					metrics.RecordSkipped(m.Category)
 					continue
 				}
@@ -752,6 +764,17 @@ func (c *ShrinkCmd) processMedia(media []ShrinkMedia, registry *ProcessorRegistr
 func (c *ShrinkCmd) processSingle(m ShrinkMedia, registry *ProcessorRegistry,
 	cfg *ProcessorConfig, metrics *ShrinkMetrics,
 ) ProcessResult {
+	// Handle broken archives - move to --move-broken without processing
+	if m.IsBroken {
+		slog.Info("Broken archive detected, moving to broken directory", "path", m.Path)
+		if cfg.MoveBroken != "" {
+			c.moveToBroken(m.Path, m.PartFiles)
+		}
+		c.markDeleted(m.Path)
+		metrics.RecordFailure(m.Category)
+		return ProcessResult{SourcePath: m.Path, Success: false}
+	}
+
 	// Capture original timestamps before processing
 	var originalAtime, originalMtime time.Time
 	if stat, err := os.Stat(m.Path); err != nil {

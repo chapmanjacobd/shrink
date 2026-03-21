@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/chapmanjacobd/shrink/internal/utils"
@@ -813,13 +814,9 @@ func (p *ArchiveProcessor) EstimateSizeForArchive(m *ShrinkMedia, cfg *Processor
 	}
 
 	// Get archive contents and check for multi-part volumes
-	contents := p.lsar(m.Path)
-	if len(contents) == 0 {
-		// Return m.Size so ShouldShrink can still evaluate, but hasProcessable=false
-		return 0, 0, false, m.Size
-	}
-
-	// Get total size of all parts for multi-part archives
+	contents, lsarFailed := p.lsarWithStatus(m.Path)
+	
+	// Check for multi-part archives and verify all parts exist
 	totalArchiveSize := m.Size
 	if lsarOutput, err := exec.Command("lsar", "-json", m.Path).CombinedOutput(); err == nil {
 		var lsarJSON struct {
@@ -830,18 +827,35 @@ func (p *ArchiveProcessor) EstimateSizeForArchive(m *ShrinkMedia, cfg *Processor
 		if json.Unmarshal(lsarOutput, &lsarJSON) == nil && len(lsarJSON.LsarProperties.XADVolumes) > 0 {
 			// Sum up sizes of all parts
 			totalArchiveSize = 0
+			allPartsExist := true
 			for _, partFile := range lsarJSON.LsarProperties.XADVolumes {
 				if !filepath.IsAbs(partFile) {
 					partFile = filepath.Join(filepath.Dir(m.Path), partFile)
 				}
 				if info, err := os.Stat(partFile); err == nil {
 					totalArchiveSize += info.Size()
+				} else {
+					// Part file missing - archive is broken
+					allPartsExist = false
+					lsarFailed = true
 				}
+			}
+			// If any part is missing, treat as broken archive
+			if !allPartsExist {
+				return 0, 0, false, 0
 			}
 		}
 	}
 
-	// Check if archive contains processable files
+	// If lsar failed (empty contents due to error), archive is broken
+	if lsarFailed && len(contents) == 0 {
+		return 0, 0, false, 0
+	}
+
+	if len(contents) == 0 {
+		// Archive has no contents but lsar didn't fail - just no processable content
+		return 0, 0, false, m.Size
+	}
 	var totalFutureSize int64
 	var totalProcessingTime int
 	hasProcessableContent := false
@@ -951,9 +965,106 @@ func (p *ArchiveProcessor) Process(ctx context.Context, m *ShrinkMedia, cfg *Pro
 
 // lsar lists archive contents
 func (p *ArchiveProcessor) lsar(path string) []ShrinkMedia {
+	contents, _ := p.lsarWithStatus(path)
+	return contents
+}
+
+// getPartFiles returns list of all part files for a multi-part archive
+func (p *ArchiveProcessor) getPartFiles(path string) []string {
+	partFilesMap := make(map[string]bool)
+	dir := filepath.Dir(path)
+	baseName := filepath.Base(path)
+	
+	// Get parts from lsar XADVolumes
+	if lsarOutput, err := exec.Command("lsar", "-json", path).CombinedOutput(); err == nil {
+		var lsarJSON struct {
+			LsarProperties struct {
+				XADVolumes []string `json:"XADVolumes"`
+			} `json:"lsarProperties"`
+		}
+		if json.Unmarshal(lsarOutput, &lsarJSON) == nil && len(lsarJSON.LsarProperties.XADVolumes) > 0 {
+			for _, partFile := range lsarJSON.LsarProperties.XADVolumes {
+				if !filepath.IsAbs(partFile) {
+					partFile = filepath.Join(dir, partFile)
+				}
+				// Only include files that exist
+				if _, err := os.Stat(partFile); err == nil {
+					partFilesMap[partFile] = true
+				}
+			}
+		}
+	}
+	
+	// Also use glob to find any additional part files that lsar might have missed
+	// Common multi-part archive patterns: .z01, .z02, .zip, .001, .002, .rar, etc.
+	ext := strings.ToLower(filepath.Ext(baseName))
+	baseWithoutExt := strings.TrimSuffix(baseName, ext)
+	
+	// Pattern 1: .zNN parts (Zip split files)
+	if pattern, err := filepath.Glob(filepath.Join(dir, baseWithoutExt+".z*")); err == nil {
+		for _, p := range pattern {
+			if _, err := os.Stat(p); err == nil {
+				partFilesMap[p] = true
+			}
+		}
+	}
+	
+	// Pattern 2: .NNN parts (generic split files)
+	if pattern, err := filepath.Glob(filepath.Join(dir, baseWithoutExt+".???")); err == nil {
+		for _, p := range pattern {
+			if _, err := os.Stat(p); err == nil {
+				partFilesMap[p] = true
+			}
+		}
+	}
+	
+	// Pattern 3: .partNN.rar or .rNN.rar (RAR split files)
+	if strings.HasSuffix(ext, ".rar") {
+		if pattern, err := filepath.Glob(filepath.Join(dir, baseWithoutExt+".part*.rar")); err == nil {
+			for _, p := range pattern {
+				if _, err := os.Stat(p); err == nil {
+					partFilesMap[p] = true
+				}
+			}
+		}
+		if pattern, err := filepath.Glob(filepath.Join(dir, baseWithoutExt+".r??")); err == nil {
+			for _, p := range pattern {
+				if _, err := os.Stat(p); err == nil {
+					partFilesMap[p] = true
+				}
+			}
+		}
+	}
+	
+	// Convert map to slice
+	var partFiles []string
+	for p := range partFilesMap {
+		partFiles = append(partFiles, p)
+	}
+	
+	// Sort for consistent ordering
+	sort.Strings(partFiles)
+	
+	return partFiles
+}
+
+// lsarWithStatus lists archive contents and returns whether lsar encountered an error
+func (p *ArchiveProcessor) lsarWithStatus(path string) ([]ShrinkMedia, bool) {
 	output, err := exec.Command("lsar", "-json", path).CombinedOutput()
+	lsarFailed := err != nil
+
+	// Parse JSON to check for lsarError field
+	var rawJSON map[string]interface{}
+	if jsonErr := json.Unmarshal(output, &rawJSON); jsonErr == nil {
+		if lsarErr, ok := rawJSON["lsarError"]; ok {
+			if lsarErrNum, ok := lsarErr.(float64); ok && lsarErrNum != 0 {
+				lsarFailed = true
+			}
+		}
+	}
+
 	if err != nil {
-		return nil
+		return nil, lsarFailed
 	}
 
 	var result struct {
@@ -966,7 +1077,7 @@ func (p *ArchiveProcessor) lsar(path string) []ShrinkMedia {
 
 	if err := json.Unmarshal(output, &result); err != nil {
 		slog.Error("Failed to unmarshal lsar output", "error", err, "path", path)
-		return nil
+		return nil, lsarFailed
 	}
 
 	var media []ShrinkMedia
@@ -982,7 +1093,7 @@ func (p *ArchiveProcessor) lsar(path string) []ShrinkMedia {
 			Ext:            ext,
 		})
 	}
-	return media
+	return media, lsarFailed
 }
 
 // detectMediaTypeFromExt determines media type from file extension
