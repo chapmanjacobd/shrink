@@ -1006,6 +1006,10 @@ func (c *ShrinkCmd) getTimeout(m ShrinkMedia) time.Duration {
 
 func (c *ShrinkCmd) markDeleted(path string) {
 	for _, dbPath := range c.Databases {
+		// Skip if this is a directory path (not a database file)
+		if isDatabaseDirectory(dbPath) {
+			continue
+		}
 		sqlDB, _, err := db.ConnectWithInit(dbPath)
 		if err == nil {
 			_, err := sqlDB.Exec("UPDATE media SET time_deleted = ? WHERE path = ?", time.Now().Unix(), path)
@@ -1013,8 +1017,6 @@ func (c *ShrinkCmd) markDeleted(path string) {
 				slog.Warn("Failed to mark file deleted in database", "path", path, "error", err)
 			}
 			sqlDB.Close()
-		} else {
-			slog.Warn("Failed to connect to database for marking deleted", "path", path, "error", err)
 		}
 	}
 }
@@ -1058,6 +1060,10 @@ func (c *ShrinkCmd) moveToBroken(path string, partFiles []string) {
 
 func (c *ShrinkCmd) updateDatabase(oldPath, newPath string, newSize int64, duration float64) {
 	for _, dbPath := range c.Databases {
+		// Skip if this is a directory path (not a database file)
+		if isDatabaseDirectory(dbPath) {
+			continue
+		}
 		sqlDB, _, err := db.ConnectWithInit(dbPath)
 		if err == nil {
 			_, _ = sqlDB.Exec("DELETE FROM media WHERE path = ?", newPath)
@@ -1075,8 +1081,6 @@ func (c *ShrinkCmd) updateDatabase(oldPath, newPath string, newSize int64, durat
 				slog.Warn("Failed to update database entry", "oldPath", oldPath, "newPath", newPath, "error", execErr)
 			}
 			sqlDB.Close()
-		} else {
-			slog.Warn("Failed to connect to database for update", "oldPath", oldPath, "error", err)
 		}
 	}
 }
@@ -1084,6 +1088,10 @@ func (c *ShrinkCmd) updateDatabase(oldPath, newPath string, newSize int64, durat
 // addDatabaseEntry adds a new file entry to the database (for split files or archive contents)
 func (c *ShrinkCmd) addDatabaseEntry(path string, size int64, duration float64) {
 	for _, dbPath := range c.Databases {
+		// Skip if this is a directory path (not a database file)
+		if isDatabaseDirectory(dbPath) {
+			continue
+		}
 		sqlDB, _, err := db.ConnectWithInit(dbPath)
 		if err == nil {
 			_, err := sqlDB.Exec("DELETE FROM media WHERE path = ?", path)
@@ -1104,14 +1112,16 @@ func (c *ShrinkCmd) addDatabaseEntry(path string, size int64, duration float64) 
 				slog.Warn("Failed to add database entry", "path", path, "error", execErr)
 			}
 			sqlDB.Close()
-		} else {
-			slog.Warn("Failed to connect to database for adding entry", "path", path, "error", err)
 		}
 	}
 }
 
 func (c *ShrinkCmd) markShrinked(path string) {
 	for _, dbPath := range c.Databases {
+		// Skip if this is a directory path (not a database file)
+		if isDatabaseDirectory(dbPath) {
+			continue
+		}
 		sqlDB, _, err := db.ConnectWithInit(dbPath)
 		if err == nil {
 			_, err := sqlDB.Exec("UPDATE media SET is_shrinked = 1 WHERE path = ?", path)
@@ -1119,8 +1129,6 @@ func (c *ShrinkCmd) markShrinked(path string) {
 				slog.Warn("Failed to mark file as shrinked in database", "path", path, "error", err)
 			}
 			sqlDB.Close()
-		} else {
-			slog.Warn("Failed to connect to database for marking shrinked", "path", path, "error", err)
 		}
 	}
 }
@@ -1184,4 +1192,13 @@ func applyTimestamps(path string, atime, mtime time.Time) {
 		os.Chtimes(p, atime, mtime)
 		return nil
 	})
+}
+
+// isDatabaseDirectory checks if a path is a directory (not a database file)
+func isDatabaseDirectory(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	return info.IsDir()
 }
