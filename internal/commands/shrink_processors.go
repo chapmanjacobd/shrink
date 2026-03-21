@@ -868,11 +868,11 @@ func (p *ArchiveProcessor) EstimateSizeForArchive(m *ShrinkMedia, cfg *Processor
 		var processingTime int
 		isProcessable := false
 
-		// Nested archives - estimate using compressed size
+		// Nested archives - use compressed size for estimation
+		// We don't extract during estimation to avoid temp space issues
+		// The actual contents will be analyzed during extraction
 		if content.MediaType == "archive" {
 			slog.Info("Found nested archive", "path", content.Path, "compressedSize", content.CompressedSize)
-			// For nested archives, use compressed size for estimation
-			// The actual contents will be processed during extraction
 			isProcessable = true
 			// Estimate based on compressed size (assume video content for simplicity)
 			duration := float64(content.CompressedSize) / float64(cfg.SourceVideoBitrate) * 8

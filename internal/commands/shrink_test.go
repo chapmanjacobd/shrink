@@ -459,10 +459,12 @@ func TestShrinkArchiveNoSavings(t *testing.T) {
 }
 
 func TestShrinkArchiveDoubleNestedNoSavings(t *testing.T) {
-	// Test that double-nested archives with optimized content are skipped
+	// Test that double-nested archives with optimized content are handled correctly
 	// Outer archive -> inner archive -> AVIF image
+	// The nested AVIF is already optimized, so no transcoding occurs
+	// But the archives are still extracted (nested archives are estimated by compressed size)
 	scenario := testutils.Scenario{
-		Description: "Double-nested archive with optimized content is skipped",
+		Description: "Double-nested archive extracts but inner AVIF is kept",
 		CLIArgs:     []string{"--no-confirm"},
 		InputFiles: []testutils.TestFile{
 			{
@@ -471,12 +473,18 @@ func TestShrinkArchiveDoubleNestedNoSavings(t *testing.T) {
 				MediaType: "archive",
 			},
 		},
-		// Archive should still exist (not processed because nested AVIF is already optimized)
-		ExpectFiles: []string{
+		// Outer and inner archives should be deleted after extraction
+		// AVIF content is kept (already optimized)
+		ExpectMissing: []string{
 			"test_archive_double_nested_optimized.zip",
+			"test_archive_double_nested_optimized.zip.extracted/inner_optimized.zip",
+		},
+		ExpectFiles: []string{
+			// AVIF should remain (already optimized)
+			"test_archive_double_nested_optimized.zip.extracted/inner_optimized.zip.extracted/tiny.avif",
 		},
 		ExpectDBState: []testutils.ExpectedDBRecord{
-			{Path: "test_archive_double_nested_optimized.zip", TimeDeleted: 0, IsShrinked: 0},
+			{Path: "test_archive_double_nested_optimized.zip", TimeDeleted: 1},
 		},
 	}
 
