@@ -200,6 +200,51 @@ func TestShrinkDirectory(t *testing.T) {
 	}
 }
 
+func TestShrinkMultiPartArchive(t *testing.T) {
+	// Multi-part archives are detected via lsar XADVolumes
+	// Only the main .zip file needs to be in the database
+	scenario := testutils.Scenario{
+		Description: "Multi-part archive extracts, processes media, and deletes all parts",
+		CLIArgs:     []string{"--no-confirm", "--preset=7", "--crf=40"},
+		// Only insert the main .zip file - parts are detected automatically
+		InputFiles: []testutils.TestFile{
+			{
+				Name:      "test_archive_multi.zip",
+				SrcPath:   "../testutils/testdata/test_archive_multi.zip",
+				MediaType: "archive/zip",
+			},
+			// Parts must exist on disk for unar to find them
+			{
+				Name:      "test_archive_multi.z01",
+				SrcPath:   "../testutils/testdata/test_archive_multi.z01",
+				MediaType: "application/octet-stream",
+			},
+			{
+				Name:      "test_archive_multi.z02",
+				SrcPath:   "../testutils/testdata/test_archive_multi.z02",
+				MediaType: "application/octet-stream",
+			},
+		},
+		ExpectFiles: []string{
+			"test_archive_multi.zip.extracted/tiny.av1.mkv",
+			"test_archive_multi.zip.extracted/tiny.avif",
+		},
+		ExpectMissing: []string{
+			"test_archive_multi.z01",
+			"test_archive_multi.z02",
+			"test_archive_multi.zip",
+			"test_archive_multi.zip.extracted/tiny.avi",
+			"test_archive_multi.zip.extracted/tiny.bmp",
+			"test_archive_multi.zip.extracted/tiny.wav",
+		},
+		ExpectDBState: []testutils.ExpectedDBRecord{
+			{Path: "test_archive_multi.zip", TimeDeleted: 1},
+		},
+	}
+
+	testutils.RunScenario(t, scenario, runShrinkCmd)
+}
+
 func copyFile(t *testing.T, src, dst string) {
 	t.Helper()
 	err := os.MkdirAll(filepath.Dir(dst), 0o755)

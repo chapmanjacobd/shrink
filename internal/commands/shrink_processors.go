@@ -24,6 +24,7 @@ type ProcessOutputFile struct {
 type ProcessResult struct {
 	SourcePath string              // Original file being processed
 	Outputs    []ProcessOutputFile // New files created
+	PartFiles  []string            // Multi-part archive part files (for cleanup)
 	Success    bool                // Whether the overall operation succeeded
 	Error      error               // Error if the operation failed
 }
@@ -697,7 +698,7 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *ShrinkMedia
 	// Extract archive - use -no-directory to prevent creating nested archive-name folders
 	outputDir := filepath.Join(filepath.Dir(m.Path), filepath.Base(m.Path)+".extracted")
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
-		return ProcessResult{SourcePath: m.Path, Error: err}
+		return ProcessResult{SourcePath: m.Path, PartFiles: partFiles, Error: err}
 	}
 
 	// Use -no-directory to extract files directly into outputDir without creating subfolders
@@ -706,7 +707,7 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *ShrinkMedia
 	if err != nil {
 		slog.Error("unar error", "path", m.Path, "error", err, "output", string(output))
 		os.RemoveAll(outputDir)
-		return ProcessResult{SourcePath: m.Path, Error: err}
+		return ProcessResult{SourcePath: m.Path, PartFiles: partFiles, Error: err}
 	}
 
 	// Flatten any wrapper folders that might have been created
@@ -787,23 +788,57 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *ShrinkMedia
 		return nil
 	})
 
+	// Delete multi-part archive files after successful extraction
+	for _, partFile := range partFiles {
+		if !filepath.IsAbs(partFile) {
+			partFile = filepath.Join(filepath.Dir(m.Path), partFile)
+		}
+		os.Remove(partFile)
+		slog.Debug("Deleted multi-part archive part", "path", partFile)
+	}
+
 	return ProcessResult{
 		SourcePath: m.Path,
 		Outputs:    []ProcessOutputFile{{Path: outputDir, Size: utils.FolderSize(outputDir)}},
+		PartFiles:  partFiles,
 		Success:    true,
 	}
 }
 
 // EstimateSizeForArchive estimates size using compressed size and inspects archive contents
-func (p *ArchiveProcessor) EstimateSizeForArchive(m *ShrinkMedia, cfg *ProcessorConfig) (int64, int, bool) {
+// Returns: futureSize, processingTime, hasProcessableContent, totalArchiveSize
+func (p *ArchiveProcessor) EstimateSizeForArchive(m *ShrinkMedia, cfg *ProcessorConfig) (int64, int, bool, int64) {
 	if !p.unarInstalled {
-		return 0, 0, false
+		return 0, 0, false, 0
 	}
 
-	// Get archive contents
+	// Get archive contents and check for multi-part volumes
 	contents := p.lsar(m.Path)
 	if len(contents) == 0 {
-		return 0, 0, false
+		// Return m.Size so ShouldShrink can still evaluate, but hasProcessable=false
+		return 0, 0, false, m.Size
+	}
+
+	// Get total size of all parts for multi-part archives
+	totalArchiveSize := m.Size
+	if lsarOutput, err := exec.Command("lsar", "-json", m.Path).CombinedOutput(); err == nil {
+		var lsarJSON struct {
+			LsarProperties struct {
+				XADVolumes []string `json:"XADVolumes"`
+			} `json:"lsarProperties"`
+		}
+		if json.Unmarshal(lsarOutput, &lsarJSON) == nil && len(lsarJSON.LsarProperties.XADVolumes) > 0 {
+			// Sum up sizes of all parts
+			totalArchiveSize = 0
+			for _, partFile := range lsarJSON.LsarProperties.XADVolumes {
+				if !filepath.IsAbs(partFile) {
+					partFile = filepath.Join(filepath.Dir(m.Path), partFile)
+				}
+				if info, err := os.Stat(partFile); err == nil {
+					totalArchiveSize += info.Size()
+				}
+			}
+		}
 	}
 
 	// Check if archive contains processable files
@@ -840,7 +875,7 @@ func (p *ArchiveProcessor) EstimateSizeForArchive(m *ShrinkMedia, cfg *Processor
 							Ext:       ext,
 							MediaType: "archive/" + strings.TrimPrefix(ext, "."),
 						}
-						fs, pt, hp := p.EstimateSizeForArchive(nestedMedia, cfg)
+						fs, pt, hp, _ := p.EstimateSizeForArchive(nestedMedia, cfg)
 						if hp {
 							isProcessable = true
 							futureSize = fs
@@ -900,11 +935,11 @@ func (p *ArchiveProcessor) EstimateSizeForArchive(m *ShrinkMedia, cfg *Processor
 		}
 	}
 
-	return totalFutureSize, totalProcessingTime, hasProcessableContent
+	return totalFutureSize, totalProcessingTime, hasProcessableContent, totalArchiveSize
 }
 
 func (p *ArchiveProcessor) EstimateSize(m *ShrinkMedia, cfg *ProcessorConfig) (int64, int) {
-	futureSize, processingTime, _ := p.EstimateSizeForArchive(m, cfg)
+	futureSize, processingTime, _, _ := p.EstimateSizeForArchive(m, cfg)
 	return futureSize, processingTime
 }
 

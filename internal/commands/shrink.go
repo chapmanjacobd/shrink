@@ -617,14 +617,15 @@ func (c *ShrinkCmd) analyzeMedia(media []ShrinkMedia, cfg *ProcessorConfig,
 		if m.Category == "Archived" {
 			if archiveProc, ok := processor.(*ArchiveProcessor); ok {
 				var hasProcessable bool
-				futureSize, processingTime, hasProcessable = archiveProc.EstimateSizeForArchive(m, cfg)
+				var totalArchiveSize int64
+				futureSize, processingTime, hasProcessable, totalArchiveSize = archiveProc.EstimateSizeForArchive(m, cfg)
 				if !hasProcessable {
 					metrics.RecordSkipped(m.Category)
 					continue
 				}
-				// Use compressed size for savings calculation
-				if m.CompressedSize > 0 {
-					m.Size = m.CompressedSize
+				// Use total archive size for multi-part archives
+				if totalArchiveSize > 0 {
+					m.Size = totalArchiveSize
 				}
 			}
 		}
@@ -784,7 +785,7 @@ func (c *ShrinkCmd) processSingle(m ShrinkMedia, registry *ProcessorRegistry,
 		slog.Error("Processing failed", "path", m.Path, "error", result.Error)
 		metrics.RecordFailure(m.Category)
 		if cfg.MoveBroken != "" {
-			c.moveToBroken(m.Path)
+			c.moveToBroken(m.Path, result.PartFiles)
 		}
 		return result
 	}
@@ -923,12 +924,33 @@ func (c *ShrinkCmd) markDeleted(path string) {
 	}
 }
 
-func (c *ShrinkCmd) moveToBroken(path string) {
-	if c.MoveBroken != "" && path != "" {
-		if _, err := os.Stat(path); err == nil {
-			dest := filepath.Join(c.MoveBroken, filepath.Base(path))
-			os.MkdirAll(c.MoveBroken, 0o755)
-			os.Rename(path, dest)
+func (c *ShrinkCmd) moveToBroken(path string, partFiles []string) {
+	if c.MoveBroken == "" || path == "" {
+		return
+	}
+
+	// Get the parent folder name for tidy organization
+	parentFolder := filepath.Base(filepath.Dir(path))
+	destDir := filepath.Join(c.MoveBroken, parentFolder)
+
+	// Move the main file
+	if _, err := os.Stat(path); err == nil {
+		os.MkdirAll(destDir, 0o755)
+		dest := filepath.Join(destDir, filepath.Base(path))
+		os.Rename(path, dest)
+		slog.Info("Moved broken file", "from", path, "to", dest)
+	}
+
+	// Move multi-part archive files if present
+	for _, partFile := range partFiles {
+		if !filepath.IsAbs(partFile) {
+			partFile = filepath.Join(filepath.Dir(path), partFile)
+		}
+		if _, err := os.Stat(partFile); err == nil {
+			os.MkdirAll(destDir, 0o755)
+			dest := filepath.Join(destDir, filepath.Base(partFile))
+			os.Rename(partFile, dest)
+			slog.Info("Moved broken archive part", "from", partFile, "to", dest)
 		}
 	}
 }
