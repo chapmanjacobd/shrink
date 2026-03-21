@@ -36,7 +36,7 @@ CREATE TABLE IF NOT EXISTS media (
     video_codecs TEXT,
     audio_codecs TEXT,
     subtitle_codecs TEXT,
-    type TEXT,
+    media_type TEXT,
     mime_type TEXT,
     ext TEXT,
     time_created INTEGER,
@@ -46,16 +46,94 @@ CREATE TABLE IF NOT EXISTS media (
     play_count INTEGER DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_media_path ON media(path);
-CREATE INDEX IF NOT EXISTS idx_media_type ON media(type);
+CREATE INDEX IF NOT EXISTS idx_media_type ON media(media_type);
 CREATE INDEX IF NOT EXISTS idx_media_deleted ON media(time_deleted);
 `
 }
 
-// InitDB initializes the database with the required schema
+// InitDB initializes the database with the required schema and runs migrations
 func InitDB(db *sql.DB) error {
 	schema := GetSchema()
-	_, err := db.Exec(schema)
-	return err
+	if _, err := db.Exec(schema); err != nil {
+		return fmt.Errorf("failed to create schema: %w", err)
+	}
+
+	if err := MigrateDB(db); err != nil {
+		return fmt.Errorf("failed to migrate database: %w", err)
+	}
+
+	return nil
+}
+
+// MigrateDB adds any missing columns to the media table
+func MigrateDB(db *sql.DB) error {
+	columns, err := getTableColumns(db, "media")
+	if err != nil {
+		return err
+	}
+
+	// Rename 'type' to 'media_type' if needed
+	if columns["type"] && !columns["media_type"] {
+		if _, err := db.Exec("ALTER TABLE media RENAME COLUMN type TO media_type"); err != nil {
+			return fmt.Errorf("failed to rename column 'type' to 'media_type': %w", err)
+		}
+		columns["media_type"] = true
+		delete(columns, "type")
+	}
+
+	// Columns to add if missing (path and size are mandatory in CREATE TABLE)
+	migrations := map[string]string{
+		"duration":        "REAL DEFAULT 0",
+		"video_count":     "INTEGER DEFAULT 0",
+		"audio_count":     "INTEGER DEFAULT 0",
+		"video_codecs":    "TEXT",
+		"audio_codecs":    "TEXT",
+		"subtitle_codecs": "TEXT",
+		"media_type":      "TEXT",
+		"mime_type":       "TEXT",
+		"ext":             "TEXT",
+		"time_created":    "INTEGER",
+		"time_modified":   "INTEGER",
+		"time_deleted":    "INTEGER DEFAULT 0",
+		"is_shrinked":     "INTEGER DEFAULT 0",
+		"play_count":      "INTEGER DEFAULT 0",
+	}
+
+	for col, definition := range migrations {
+		if !columns[col] {
+			query := fmt.Sprintf("ALTER TABLE media ADD COLUMN %s %s", col, definition)
+			if _, err := db.Exec(query); err != nil {
+				return fmt.Errorf("failed to add column %s: %w", col, err)
+			}
+		}
+	}
+
+	return nil
+}
+
+func getTableColumns(db *sql.DB, tableName string) (map[string]bool, error) {
+	rows, err := db.Query(fmt.Sprintf("PRAGMA table_info(%s)", tableName))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	columns := make(map[string]bool)
+	for rows.Next() {
+		var (
+			cid       int
+			name      string
+			ctype     string
+			notnull   int
+			dfltValue sql.NullString
+			pk        int
+		)
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dfltValue, &pk); err != nil {
+			return nil, err
+		}
+		columns[name] = true
+	}
+	return columns, nil
 }
 
 // DatabaseExists checks if a database file exists and is valid

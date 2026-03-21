@@ -1,16 +1,58 @@
 package commands
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"maps"
+	"os"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/chapmanjacobd/shrink/internal/utils"
+	"golang.org/x/term"
 )
+
+// ProgressLogHandler is a custom slog.Handler that coordinates logs with the progress bar.
+// It clears the progress bar before writing a log message.
+type ProgressLogHandler struct {
+	handler slog.Handler
+	metrics *ShrinkMetrics
+}
+
+func NewProgressLogHandler(handler slog.Handler, metrics *ShrinkMetrics) *ProgressLogHandler {
+	return &ProgressLogHandler{
+		handler: handler,
+		metrics: metrics,
+	}
+}
+
+func (h *ProgressLogHandler) Enabled(ctx context.Context, level slog.Level) bool {
+	return h.handler.Enabled(ctx, level)
+}
+
+func (h *ProgressLogHandler) Handle(ctx context.Context, r slog.Record) error {
+	if h.metrics.IsTTY() {
+		h.metrics.ClearProgress()
+	}
+	return h.handler.Handle(ctx, r)
+}
+
+func (h *ProgressLogHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	return &ProgressLogHandler{
+		handler: h.handler.WithAttrs(attrs),
+		metrics: h.metrics,
+	}
+}
+
+func (h *ProgressLogHandler) WithGroup(name string) slog.Handler {
+	return &ProgressLogHandler{
+		handler: h.handler.WithGroup(name),
+		metrics: h.metrics,
+	}
+}
 
 // MediaTypeStats tracks processing statistics for a specific media type
 type MediaTypeStats struct {
@@ -65,6 +107,7 @@ type ShrinkMetrics struct {
 	currentFile   string
 	lastPrintTime time.Time
 	linesPrinted  int // Track how many lines we printed for cursor repositioning
+	isTTY         bool
 }
 
 // NewShrinkMetrics creates a new metrics tracker
@@ -72,7 +115,13 @@ func NewShrinkMetrics() *ShrinkMetrics {
 	return &ShrinkMetrics{
 		started: time.Now(),
 		types:   make(map[string]*MediaTypeStats),
+		isTTY:   term.IsTerminal(int(os.Stdout.Fd())),
 	}
+}
+
+// IsTTY returns whether the output is a TTY
+func (m *ShrinkMetrics) IsTTY() bool {
+	return m.isTTY
 }
 
 // RecordStarted records that a media item is being processed
@@ -134,8 +183,12 @@ func (m *ShrinkMetrics) getOrCreateType(mediaType string) *MediaTypeStats {
 // Errors are printed normally via slog and will temporarily overwrite progress
 // Progress is reprinted on next update cycle
 func (m *ShrinkMetrics) PrintProgress() {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+	if !m.isTTY {
+		return
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
 	// Rate limit to avoid excessive updates (max 2 per second)
 	now := time.Now()
@@ -244,10 +297,35 @@ func (m *ShrinkMetrics) PrintProgress() {
 	m.linesPrinted = lineCount
 }
 
+// ClearProgress erases the currently printed progress block from the screen
+func (m *ShrinkMetrics) ClearProgress() {
+	if !m.isTTY {
+		return
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.linesPrinted == 0 {
+		return
+	}
+
+	// Move cursor up to the initial line of our progress display
+	fmt.Printf("\033[%dF", m.linesPrinted)
+	// Clear each line moving down
+	for i := 0; i < m.linesPrinted; i++ {
+		fmt.Print("\033[K\n")
+	}
+	// Move back up to where we started clearing
+	fmt.Printf("\033[%dF", m.linesPrinted)
+
+	m.linesPrinted = 0
+}
+
 // LogSummary logs the final metrics summary
 func (m *ShrinkMetrics) LogSummary() {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
 	m.completed = time.Now()
 	duration := m.completed.Sub(m.started)

@@ -1,0 +1,4 @@
+lets make a plan for comparing all the aspects of the python version of the shrink command (in ../library) and getting it all ready to be professionally published. including any additional tests which may be needed.
+
+
+also lets add at least limited support for using directory paths directly instead of databases. lets also test relative paths INSIDE archives--not just repeating the archive name as a subfolder of the extracted folder...

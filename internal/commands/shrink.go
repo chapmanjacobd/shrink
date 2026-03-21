@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -23,14 +24,34 @@ import (
 
 // ShrinkCmd is the main command for shrinking media files
 type ShrinkCmd struct {
-	models.CoreFlags        `embed:""`
-	models.PathFilterFlags  `embed:""`
-	models.FilterFlags      `embed:""`
-	models.MediaFilterFlags `embed:""`
-	models.TimeFilterFlags  `embed:""`
-	models.DeletedFlags     `embed:""`
+	// CoreFlags
+	Verbose   bool `short:"v" help:"Enable verbose logging"`
+	Simulate  bool `help:"Dry run; don't actually do anything"`
+	NoConfirm bool `short:"y" help:"Don't ask for confirmation"`
 
-	Databases []string `arg:"" required:"" help:"SQLite database files" type:"existingfile"`
+	// PathFilterFlags
+	Include []string `short:"s" help:"Include paths matching pattern" group:"PathFilter"`
+	Exclude []string `short:"E" help:"Exclude paths matching pattern" group:"PathFilter"`
+
+	// FilterFlags
+	Search []string `help:"Search terms" group:"Filter"`
+
+	// MediaFilterFlags
+	VideoOnly bool `help:"Only video files" group:"MediaFilter"`
+	AudioOnly bool `help:"Only audio files" group:"MediaFilter"`
+	ImageOnly bool `help:"Only image files" group:"MediaFilter"`
+	TextOnly  bool `help:"Only text/ebook files" group:"MediaFilter"`
+
+	// TimeFilterFlags
+	CreatedAfter   string `help:"Created after date" group:"Time"`
+	ModifiedAfter  string `help:"Modified after date" group:"Time"`
+	ModifiedBefore string `help:"Modified before date" group:"Time"`
+
+	// DeletedFlags
+	HideDeleted bool `default:"true" help:"Exclude deleted files" group:"Deleted"`
+	OnlyDeleted bool `help:"Include only deleted files" group:"Deleted"`
+
+	Databases []string `arg:"" required:"" help:"SQLite database files or directories to scan"`
 
 	Valid   bool `default:"true" help:"Attempt to process files with valid metadata"`
 	Invalid bool `help:"Attempt to process files with invalid metadata"`
@@ -87,7 +108,7 @@ type ShrinkCmd struct {
 	ImageTimeout     string  `default:"10m" help:"Image timeout"`
 	TextTimeout      string  `default:"20m" help:"Text timeout"`
 
-	ForceReshrink bool `help:"Force reprocessing of already shrinked files"`
+	ForceShrink bool `help:"Force reprocessing of already shrinked files"`
 }
 
 // ShrinkMedia represents a media file to be processed
@@ -97,12 +118,15 @@ type ShrinkMedia struct {
 	Duration       float64
 	VideoCount     int
 	AudioCount     int
+	SubtitleCount  int
+	Width          int
+	Height         int
 	VideoCodecs    string
 	AudioCodecs    string
 	SubtitleCodecs string
-	Type           string
-	Ext            string
 	MediaType      string
+	Ext            string
+	Category       string
 	FutureSize     int64
 	Savings        int64
 	ProcessingTime int
@@ -127,6 +151,13 @@ func (c *ShrinkCmd) Run(ctx *kong.Context) error {
 	ffmpeg := NewFFmpegProcessor(cfg)
 	registry := NewProcessorRegistry(ffmpeg)
 	metrics := NewShrinkMetrics()
+
+	// Wrap the default logger to coordinate with the progress bar
+	defaultHandler := &models.PlainHandler{
+		Level: models.LogLevel,
+		Out:   os.Stderr,
+	}
+	slog.SetDefault(slog.New(NewProgressLogHandler(defaultHandler, metrics)))
 
 	// Load all media from databases
 	allMedia, err := c.loadAllMedia()
@@ -227,6 +258,7 @@ func (c *ShrinkCmd) buildProcessorConfig() *ProcessorConfig {
 		MoveBroken:           c.MoveBroken,
 		Valid:                c.Valid,
 		Invalid:              c.Invalid,
+		ForceShrink:          c.ForceShrink,
 	}
 }
 
@@ -234,20 +266,235 @@ func (c *ShrinkCmd) loadAllMedia() ([]ShrinkMedia, error) {
 	var allMedia []ShrinkMedia
 
 	for _, dbPath := range c.Databases {
-		sqlDB, _, err := db.ConnectWithInit(dbPath)
-		if err != nil {
-			return nil, err
-		}
+		// Check if this is a database file or a directory
+		if isDatabaseFile(dbPath) {
+			sqlDB, _, err := db.ConnectWithInit(dbPath)
+			if err != nil {
+				return nil, err
+			}
 
-		media, err := c.loadMediaFromDB(sqlDB)
-		sqlDB.Close()
-		if err != nil {
-			return nil, err
+			media, err := c.loadMediaFromDB(sqlDB)
+			sqlDB.Close()
+			if err != nil {
+				return nil, err
+			}
+			allMedia = append(allMedia, media...)
+		} else {
+			// Treat as directory and scan for media files
+			media, err := c.scanDirectory(dbPath)
+			if err != nil {
+				return nil, err
+			}
+			allMedia = append(allMedia, media...)
 		}
-		allMedia = append(allMedia, media...)
 	}
 
 	return allMedia, nil
+}
+
+// isDatabaseFile checks if a path is a SQLite database file
+func isDatabaseFile(path string) bool {
+	ext := strings.ToLower(filepath.Ext(path))
+	if slices.Contains(utils.SQLiteExtensions, ext) {
+		return true
+	}
+	// Also check if file exists and has .db extension pattern
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	if !info.IsDir() {
+		// File exists and is not a directory - treat as database if it has unknown extension
+		// This allows explicit database files without standard extensions
+		for _, dbExt := range utils.SQLiteExtensions {
+			if strings.HasSuffix(strings.ToLower(path), dbExt) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// scanDirectory scans a directory recursively for media files
+func (c *ShrinkCmd) scanDirectory(dirPath string) ([]ShrinkMedia, error) {
+	var media []ShrinkMedia
+
+	err := filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			slog.Warn("Error accessing path", "path", path, "error", err)
+			return nil
+		}
+
+		// Skip directories
+		if info.IsDir() {
+			return nil
+		}
+
+		// Skip hidden files
+		if strings.HasPrefix(info.Name(), ".") {
+			return nil
+		}
+
+		ext := strings.ToLower(filepath.Ext(path))
+
+		// Check if this is a media file
+		isMedia := utils.MediaExtensionMap[ext] || utils.ArchiveExtensionMap[ext]
+		if !isMedia {
+			return nil
+		}
+
+		// Apply media type filters if specified
+		if c.VideoOnly && !utils.VideoExtensionMap[ext] {
+			return nil
+		}
+		if c.AudioOnly && !utils.AudioExtensionMap[ext] {
+			return nil
+		}
+		if c.ImageOnly && !utils.ImageExtensionMap[ext] {
+			return nil
+		}
+		if c.TextOnly && !utils.TextExtensionMap[ext] {
+			return nil
+		}
+
+		// Create media entry with basic info
+		m := ShrinkMedia{
+			Path:      path,
+			Size:      info.Size(),
+			Ext:       ext,
+			MediaType: detectMediaTypeFromExt(ext),
+		}
+
+		// Set video/audio counts for extension-based detection
+		if utils.VideoExtensionMap[ext] {
+			m.VideoCount = 1
+		}
+		if utils.AudioExtensionMap[ext] {
+			m.AudioCount = 1
+		}
+
+		// Try to get accurate metadata using ffprobe for video/audio files
+		if utils.VideoExtensionMap[ext] || utils.AudioExtensionMap[ext] {
+			if probed, err := c.probeMedia(path); err == nil {
+				m.Duration = probed.Duration
+				if probed.VideoCount > 0 {
+					m.VideoCount = probed.VideoCount
+				}
+				if probed.AudioCount > 0 {
+					m.AudioCount = probed.AudioCount
+				}
+				m.SubtitleCount = probed.SubtitleCount
+				if probed.VideoCodecs != "" {
+					m.VideoCodecs = probed.VideoCodecs
+				}
+				if probed.AudioCodecs != "" {
+					m.AudioCodecs = probed.AudioCodecs
+				}
+				if probed.SubtitleCodecs != "" {
+					m.SubtitleCodecs = probed.SubtitleCodecs
+				}
+			}
+		}
+
+		media = append(media, m)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return media, nil
+}
+
+// probeMedia uses ffprobe to get accurate stream counts and metadata
+func (c *ShrinkCmd) probeMedia(path string) (*ShrinkMedia, error) {
+	if !utils.CommandExists("ffprobe") {
+		return nil, fmt.Errorf("ffprobe not available")
+	}
+
+	cmd := exec.Command("ffprobe",
+		"-v", "quiet",
+		"-hide_banner",
+		"-show_format",
+		"-show_streams",
+		"-of", "json",
+		path)
+
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+
+	var data struct {
+		Streams []struct {
+			CodecType   string            `json:"codec_type"`
+			CodecName   string            `json:"codec_name"`
+			Width       int               `json:"width"`
+			Height      int               `json:"height"`
+			RFrameRate  string            `json:"r_frame_rate"`
+			Channels    int               `json:"channels"`
+			SampleRate  string            `json:"sample_rate"`
+			Tags        map[string]string `json:"tags"`
+			Disposition map[string]int    `json:"disposition"`
+		} `json:"streams"`
+		Format struct {
+			Duration string            `json:"duration"`
+			Tags     map[string]string `json:"tags"`
+		} `json:"format"`
+	}
+
+	if err := json.Unmarshal(output, &data); err != nil {
+		return nil, err
+	}
+
+	m := &ShrinkMedia{
+		Path: path,
+	}
+
+	var vCodecs, aCodecs, sCodecs []string
+
+	for _, s := range data.Streams {
+		switch s.CodecType {
+		case "video":
+			// Skip attached pics (album art)
+			if s.Disposition["attached_pic"] == 1 || s.CodecName == "mjpeg" || s.CodecName == "png" {
+				continue
+			}
+			m.VideoCount++
+			codecInfo := s.CodecName
+			vCodecs = append(vCodecs, codecInfo)
+
+			if m.Width == 0 {
+				m.Width = s.Width
+				m.Height = s.Height
+			}
+		case "audio":
+			m.AudioCount++
+			codecInfo := s.CodecName
+			if s.Channels > 0 {
+				codecInfo += fmt.Sprintf(" %dch", s.Channels)
+			}
+			aCodecs = append(aCodecs, codecInfo)
+		case "subtitle":
+			m.SubtitleCount++
+			label := s.CodecName
+			if lang := s.Tags["language"]; lang != "" {
+				label = lang
+			}
+			sCodecs = append(sCodecs, label)
+		}
+	}
+
+	// Format info
+	if d, err := strconv.ParseFloat(data.Format.Duration, 64); err == nil {
+		m.Duration = d
+	}
+
+	m.VideoCodecs = strings.Join(vCodecs, ", ")
+	m.AudioCodecs = strings.Join(aCodecs, ", ")
+	m.SubtitleCodecs = strings.Join(sCodecs, ", ")
+
+	return m, nil
 }
 
 func (c *ShrinkCmd) loadMediaFromDB(sqlDB *sql.DB) ([]ShrinkMedia, error) {
@@ -260,29 +507,29 @@ func (c *ShrinkCmd) loadMediaFromDB(sqlDB *sql.DB) ([]ShrinkMedia, error) {
             COALESCE(video_codecs, ''),
             COALESCE(audio_codecs, ''),
             COALESCE(subtitle_codecs, ''),
-            COALESCE(type, '')
+            COALESCE(media_type, '')
 		FROM media
 		WHERE COALESCE(time_deleted, 0) = 0
             AND size > 0
 	`
 
-	if !c.ForceReshrink {
+	if !c.ForceShrink {
 		query += " AND COALESCE(is_shrinked, 0) = 0"
 	}
 
 	// Filter by media type (prefilter in database)
 	var typeConditions []string
 	if c.VideoOnly {
-		typeConditions = append(typeConditions, "type = 'video'")
+		typeConditions = append(typeConditions, "media_type = 'video'")
 	}
 	if c.AudioOnly {
-		typeConditions = append(typeConditions, "type = 'audio'", "type = 'audiobook'")
+		typeConditions = append(typeConditions, "media_type = 'audio'", "media_type = 'audiobook'")
 	}
 	if c.ImageOnly {
-		typeConditions = append(typeConditions, "type = 'image'")
+		typeConditions = append(typeConditions, "media_type = 'image'")
 	}
 	if c.TextOnly {
-		typeConditions = append(typeConditions, "type = 'text'")
+		typeConditions = append(typeConditions, "media_type = 'text'")
 	}
 	if len(typeConditions) > 0 {
 		query += " AND (" + strings.Join(typeConditions, " OR ") + ")"
@@ -298,7 +545,7 @@ func (c *ShrinkCmd) loadMediaFromDB(sqlDB *sql.DB) ([]ShrinkMedia, error) {
 	for rows.Next() {
 		var m ShrinkMedia
 		err := rows.Scan(&m.Path, &m.Size, &m.Duration, &m.VideoCount, &m.AudioCount,
-			&m.VideoCodecs, &m.AudioCodecs, &m.SubtitleCodecs, &m.Type)
+			&m.VideoCodecs, &m.AudioCodecs, &m.SubtitleCodecs, &m.MediaType)
 		if err != nil {
 			slog.Error("Scan error", "error", err)
 			continue
@@ -315,7 +562,7 @@ func (c *ShrinkCmd) filterByTools(media []ShrinkMedia, tools InstalledTools) []S
 
 	for _, m := range media {
 		canProcess := false
-		filetype := strings.ToLower(m.Type)
+		filetype := strings.ToLower(m.MediaType)
 
 		// Audio/Video
 		if ((strings.HasPrefix(filetype, "audio/") || strings.Contains(filetype, " audio")) ||
@@ -359,20 +606,20 @@ func (c *ShrinkCmd) analyzeMedia(media []ShrinkMedia, cfg *ProcessorConfig,
 			continue
 		}
 
-		// Get processor's media type
-		m.MediaType = processor.MediaType()
-		metrics.RecordStarted(m.MediaType, m.Path)
+		// Get processor's category
+		m.Category = processor.Category()
+		metrics.RecordStarted(m.Category, m.Path)
 
 		// Estimate size and time
 		futureSize, processingTime := processor.EstimateSize(m, cfg)
 
 		// For archives, check if they contain processable content
-		if m.MediaType == "Archived" {
+		if m.Category == "Archived" {
 			if archiveProc, ok := processor.(*ArchiveProcessor); ok {
 				var hasProcessable bool
 				futureSize, processingTime, hasProcessable = archiveProc.EstimateSizeForArchive(m, cfg)
 				if !hasProcessable {
-					metrics.RecordSkipped(m.MediaType)
+					metrics.RecordSkipped(m.Category)
 					continue
 				}
 				// Use compressed size for savings calculation
@@ -389,7 +636,7 @@ func (c *ShrinkCmd) analyzeMedia(media []ShrinkMedia, cfg *ProcessorConfig,
 			m.Savings = m.Size - futureSize
 			toShrink = append(toShrink, *m)
 		} else {
-			metrics.RecordSkipped(m.MediaType)
+			metrics.RecordSkipped(m.Category)
 		}
 	}
 
@@ -479,7 +726,7 @@ func (c *ShrinkCmd) processMedia(media []ShrinkMedia, registry *ProcessorRegistr
 		go func(original ShrinkMedia) {
 			defer wg.Done()
 
-			sem := sems[original.MediaType]
+			sem := sems[original.Category]
 			if sem == nil {
 				sem = sems["Archived"]
 			}
@@ -509,7 +756,7 @@ func (c *ShrinkCmd) processSingle(m ShrinkMedia, registry *ProcessorRegistry,
 	if stat, err := os.Stat(m.Path); err != nil {
 		// File doesn't exist - mark as skipped (deleted)
 		slog.Warn("File not found, marking as skipped", "path", m.Path)
-		metrics.RecordSkipped(m.MediaType)
+		metrics.RecordSkipped(m.Category)
 		c.markDeleted(m.Path)
 		return ProcessResult{SourcePath: m.Path, Error: err}
 	} else {
@@ -519,12 +766,12 @@ func (c *ShrinkCmd) processSingle(m ShrinkMedia, registry *ProcessorRegistry,
 
 	slog.Info("Processing",
 		"path", m.Path,
-		"type", m.MediaType,
+		"category", m.Category,
 		"size", utils.FormatSize(m.Size))
 
 	processor := registry.GetProcessor(&m)
 	if processor == nil {
-		metrics.RecordFailure(m.MediaType)
+		metrics.RecordFailure(m.Category)
 		return ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("no processor found")}
 	}
 
@@ -535,74 +782,84 @@ func (c *ShrinkCmd) processSingle(m ShrinkMedia, registry *ProcessorRegistry,
 
 	if result.Error != nil {
 		slog.Error("Processing failed", "path", m.Path, "error", result.Error)
-		metrics.RecordFailure(m.MediaType)
+		metrics.RecordFailure(m.Category)
 		if cfg.MoveBroken != "" {
 			c.moveToBroken(m.Path)
 		}
+		return result
 	}
 
-	// 1. Handle Deletions
-	for _, path := range result.ToDelete {
-		if path == m.Path {
-			c.markDeleted(path)
+	if !result.Success {
+		// Processing succeeded but produced no valid output (e.g. invalid file)
+		if cfg.DeleteUnplayable {
+			c.markDeleted(m.Path)
+			os.Remove(m.Path)
 		}
-		if _, err := os.Stat(path); err == nil {
-			os.Remove(path)
-		}
+		metrics.RecordFailure(m.Category)
+		return result
 	}
 
-	// 2. Handle New Files & Database Updates
+	// 1. Calculate new size and compare with original
 	var totalNewSize int64
-	for i, out := range result.Outputs {
+	for _, out := range result.Outputs {
 		totalNewSize += out.Size
+	}
 
-		// Determine if we should update existing record or add new one
-		// We use updateDatabase when the original is replaced by a single output
-		// to preserve metadata like play_count, etc.
-		if len(result.Outputs) == 1 && out.Path != m.Path && result.Success {
-			c.updateDatabase(m.Path, out.Path, out.Size, m.Duration)
-		} else if out.Path != m.Path {
-			c.addDatabaseEntry(out.Path, out.Size, m.Duration)
-		} else {
-			c.markShrinked(out.Path)
-		}
+	keepNewFiles := true
+	if cfg.DeleteLarger && !cfg.ForceShrink && totalNewSize > m.Size {
+		keepNewFiles = false
+	}
 
-		// Apply timestamps to the first output
-		if i == 0 && !originalAtime.IsZero() {
-			applyTimestamps(out.Path, originalAtime, originalMtime)
-
-			// For audio/video, update duration from transcoded file
-			if m.MediaType == "Audio" || m.MediaType == "Video" {
-				if newDuration := c.getActualDuration(out.Path); newDuration > 0 {
-					m.Duration = newDuration
-					slog.Debug("Updated duration from transcoded file",
-						"path", out.Path, "duration", newDuration)
+	if keepNewFiles {
+		// Keep new files, delete original
+		if m.Path != "" {
+			foundInOutputs := false
+			for _, out := range result.Outputs {
+				if out.Path == m.Path {
+					foundInOutputs = true
+					break
 				}
 			}
-		}
-	}
-
-	// 3. Handle Moves
-	for _, path := range result.ToMove {
-		c.moveTo(path)
-	}
-
-	// Special case: if original file was updated in place and no move was requested
-	if len(result.ToMove) == 0 && result.Success {
-		found := false
-		for _, out := range result.Outputs {
-			if out.Path == m.Path {
-				found = true
-				break
+			if !foundInOutputs {
+				c.markDeleted(m.Path)
+				os.Remove(m.Path)
 			}
 		}
-		if found {
-			c.moveTo(m.Path)
-		}
-	}
 
-	if result.Success {
-		metrics.RecordSuccess(m.MediaType, m.Size, totalNewSize, m.ProcessingTime, int64(m.Duration))
+		// Update database and apply timestamps
+		for i, out := range result.Outputs {
+			// We use updateDatabase when the original is replaced by a single output
+			// to preserve metadata like play_count, etc.
+			// Except for archives, where we want to keep the archive record as deleted.
+			if len(result.Outputs) == 1 && out.Path != m.Path && m.Category != "Archived" {
+				c.updateDatabase(m.Path, out.Path, out.Size, m.Duration)
+			} else if out.Path != m.Path {
+				c.addDatabaseEntry(out.Path, out.Size, m.Duration)
+			} else {
+				c.markShrinked(out.Path)
+			}
+
+			if i == 0 && !originalAtime.IsZero() {
+				applyTimestamps(out.Path, originalAtime, originalMtime)
+				// Update duration if needed
+				if m.Category == "Audio" || m.Category == "Video" {
+					if newDuration := c.getActualDuration(out.Path); newDuration > 0 {
+						m.Duration = newDuration
+					}
+				}
+			}
+			c.moveTo(out.Path)
+		}
+		metrics.RecordSuccess(m.Category, m.Size, totalNewSize, m.ProcessingTime, int64(m.Duration))
+	} else {
+		// Delete new files, keep original
+		for _, out := range result.Outputs {
+			if out.Path != m.Path {
+				os.RemoveAll(out.Path) // RemoveAll because it might be a directory (TextProcessor/ArchiveProcessor)
+			}
+		}
+		c.markShrinked(m.Path)
+		metrics.RecordSuccess(m.Category, m.Size, m.Size, m.ProcessingTime, int64(m.Duration))
 	}
 
 	return result
@@ -634,7 +891,7 @@ func (c *ShrinkCmd) getActualDuration(path string) float64 {
 }
 
 func (c *ShrinkCmd) getTimeout(m ShrinkMedia) time.Duration {
-	switch m.MediaType {
+	switch m.Category {
 	case "Video":
 		duration := utils.GetDurationForTimeout(m.Duration, m.Size, m.Ext)
 		if duration > 30 {
@@ -683,11 +940,11 @@ func (c *ShrinkCmd) updateDatabase(oldPath, newPath string, newSize int64, durat
 			_, _ = sqlDB.Exec("DELETE FROM media WHERE path = ?", newPath)
 			if duration > 0 {
 				_, _ = sqlDB.Exec(
-					"UPDATE media SET path = ?, size = ?, duration = ? WHERE path = ?",
+					"UPDATE media SET path = ?, size = ?, duration = ?, time_deleted = 0, is_shrinked = 1 WHERE path = ?",
 					newPath, newSize, duration, oldPath)
 			} else {
 				_, _ = sqlDB.Exec(
-					"UPDATE media SET path = ?, size = ? WHERE path = ?",
+					"UPDATE media SET path = ?, size = ?, time_deleted = 0, is_shrinked = 1 WHERE path = ?",
 					newPath, newSize, oldPath)
 			}
 			sqlDB.Close()

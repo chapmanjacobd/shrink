@@ -2,14 +2,17 @@ package models
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 )
 
 // PlainHandler is a simple slog handler that outputs plain text
 type PlainHandler struct {
 	Level *slog.LevelVar
 	Out   *os.File
+	Attrs []slog.Attr
 }
 
 func (h *PlainHandler) Enabled(ctx context.Context, level slog.Level) bool {
@@ -17,55 +20,31 @@ func (h *PlainHandler) Enabled(ctx context.Context, level slog.Level) bool {
 }
 
 func (h *PlainHandler) Handle(ctx context.Context, record slog.Record) error {
-	_, err := h.Out.WriteString(record.Level.String() + " " + record.Message + "\n")
+	var msg strings.Builder
+	msg.WriteString(record.Level.String())
+	msg.WriteString(" ")
+	msg.WriteString(record.Message)
+	for _, a := range h.Attrs {
+		msg.WriteString(fmt.Sprintf("\n    %s=%v", a.Key, a.Value.Any()))
+	}
+	record.Attrs(func(a slog.Attr) bool {
+		msg.WriteString(fmt.Sprintf("\n    %s=%v", a.Key, a.Value.Any()))
+		return true
+	})
+	msg.WriteString("\n")
+	_, err := h.Out.WriteString(msg.String())
 	return err
 }
 
 func (h *PlainHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
-	return h
+	newAttrs := make([]slog.Attr, len(h.Attrs)+len(attrs))
+	copy(newAttrs, h.Attrs)
+	copy(newAttrs[len(h.Attrs):], attrs)
+	return &PlainHandler{Level: h.Level, Out: h.Out, Attrs: newAttrs}
 }
 
 func (h *PlainHandler) WithGroup(name string) slog.Handler {
 	return h
-}
-
-// CoreFlags are essential flags shared across commands
-type CoreFlags struct {
-	Verbose   bool   `short:"v" help:"Enable verbose logging"`
-	Simulate  bool   `help:"Dry run; don't actually do anything"`
-	NoConfirm bool   `short:"y" help:"Don't ask for confirmation"`
-}
-
-// PathFilterFlags for path-based filtering
-type PathFilterFlags struct {
-	Include []string `short:"s" help:"Include paths matching pattern" group:"PathFilter"`
-	Exclude []string `short:"E" help:"Exclude paths matching pattern" group:"PathFilter"`
-}
-
-// FilterFlags for general filtering
-type FilterFlags struct {
-	Search []string `help:"Search terms" group:"Filter"`
-}
-
-// MediaFilterFlags for media type filtering
-type MediaFilterFlags struct {
-	VideoOnly bool `help:"Only video files" group:"MediaFilter"`
-	AudioOnly bool `help:"Only audio files" group:"MediaFilter"`
-	ImageOnly bool `help:"Only image files" group:"MediaFilter"`
-	TextOnly  bool `help:"Only text/ebook files" group:"MediaFilter"`
-}
-
-// TimeFilterFlags for time-based filtering
-type TimeFilterFlags struct {
-	CreatedAfter   string `help:"Created after date" group:"Time"`
-	ModifiedAfter  string `help:"Modified after date" group:"Time"`
-	ModifiedBefore string `help:"Modified before date" group:"Time"`
-}
-
-// DeletedFlags for deleted file filtering
-type DeletedFlags struct {
-	HideDeleted bool `default:"true" help:"Exclude deleted files" group:"Deleted"`
-	OnlyDeleted bool `help:"Include only deleted files" group:"Deleted"`
 }
 
 var LogLevel = &slog.LevelVar{}

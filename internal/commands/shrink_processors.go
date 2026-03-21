@@ -24,8 +24,6 @@ type ProcessOutputFile struct {
 type ProcessResult struct {
 	SourcePath string              // Original file being processed
 	Outputs    []ProcessOutputFile // New files created
-	ToMove     []string            // Paths that should be moved to final destination
-	ToDelete   []string            // Paths that should be deleted
 	Success    bool                // Whether the overall operation succeeded
 	Error      error               // Error if the operation failed
 }
@@ -42,8 +40,8 @@ type MediaProcessor interface {
 	// Returns a single ProcessResult containing all outputs and cleanup tasks
 	Process(ctx context.Context, m *ShrinkMedia, cfg *ProcessorConfig) ProcessResult
 
-	// MediaType returns the type identifier for this processor
-	MediaType() string
+	// Category returns the type identifier for this processor
+	Category() string
 }
 
 // ProcessorConfig contains configuration for media processing
@@ -94,26 +92,17 @@ type ProcessorConfig struct {
 	MoveBroken       string
 	Valid            bool
 	Invalid          bool
-}
-
-// ShrinkDecision indicates whether a file should be shrinked
-type ShrinkDecision struct {
-	ShouldShrink   bool
-	MediaType      string
-	FutureSize     int64
-	Savings        int64
-	ProcessingTime int
-	Invalid        bool
+	ForceShrink      bool
 }
 
 // BaseProcessor provides common functionality for all processors
 type BaseProcessor struct {
-	mediaType string
+	category string
 }
 
-// MediaType returns the media type for this processor
-func (b *BaseProcessor) MediaType() string {
-	return b.mediaType
+// Category returns the media type for this processor
+func (b *BaseProcessor) Category() string {
+	return b.category
 }
 
 // VideoProcessor handles video file processing
@@ -124,13 +113,13 @@ type VideoProcessor struct {
 
 func NewVideoProcessor(ffmpeg *FFmpegProcessor) *VideoProcessor {
 	return &VideoProcessor{
-		BaseProcessor: BaseProcessor{mediaType: "Video"},
+		BaseProcessor: BaseProcessor{category: "Video"},
 		ffmpeg:        ffmpeg,
 	}
 }
 
 func (p *VideoProcessor) CanProcess(m *ShrinkMedia) bool {
-	filetype := strings.ToLower(m.Type)
+	filetype := strings.ToLower(m.MediaType)
 	return (strings.HasPrefix(filetype, "video/") || strings.Contains(filetype, " video")) ||
 		(utils.VideoExtensionMap[m.Ext] && m.VideoCount >= 1)
 }
@@ -159,13 +148,13 @@ type AudioProcessor struct {
 
 func NewAudioProcessor(ffmpeg *FFmpegProcessor) *AudioProcessor {
 	return &AudioProcessor{
-		BaseProcessor: BaseProcessor{mediaType: "Audio"},
+		BaseProcessor: BaseProcessor{category: "Audio"},
 		ffmpeg:        ffmpeg,
 	}
 }
 
 func (p *AudioProcessor) CanProcess(m *ShrinkMedia) bool {
-	filetype := strings.ToLower(m.Type)
+	filetype := strings.ToLower(m.MediaType)
 	return (strings.HasPrefix(filetype, "audio/") || strings.Contains(filetype, " audio")) ||
 		(utils.AudioExtensionMap[m.Ext] && m.VideoCount == 0)
 }
@@ -193,12 +182,12 @@ type ImageProcessor struct {
 
 func NewImageProcessor() *ImageProcessor {
 	return &ImageProcessor{
-		BaseProcessor: BaseProcessor{mediaType: "Image"},
+		BaseProcessor: BaseProcessor{category: "Image"},
 	}
 }
 
 func (p *ImageProcessor) CanProcess(m *ShrinkMedia) bool {
-	filetype := strings.ToLower(m.Type)
+	filetype := strings.ToLower(m.MediaType)
 	return (strings.HasPrefix(filetype, "image/") || strings.Contains(filetype, " image")) ||
 		(shouldConvertToAVIF(m.Ext) && m.Duration == 0)
 }
@@ -240,9 +229,6 @@ func (p *ImageProcessor) processImage(ctx context.Context, m *ShrinkMedia, cfg *
 			slog.Info("Unsupported image format, keeping original", "path", m.Path)
 			return ProcessResult{SourcePath: m.Path, Success: true, Outputs: []ProcessOutputFile{{Path: m.Path, Size: m.Size}}}
 		} else if isFileError {
-			if cfg.DeleteUnplayable {
-				return ProcessResult{SourcePath: m.Path, ToDelete: []string{m.Path}, Success: false, Error: err}
-			}
 			return ProcessResult{SourcePath: m.Path, Error: err}
 		}
 
@@ -256,22 +242,9 @@ func (p *ImageProcessor) processImage(ctx context.Context, m *ShrinkMedia, cfg *
 		return ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("output file empty or missing")}
 	}
 
-	// Check if we should delete the transcode
-	if cfg.DeleteLarger && outputStats.Size() > m.Size {
-		os.Remove(outputPath)
-		return ProcessResult{SourcePath: m.Path, Success: true, Outputs: []ProcessOutputFile{{Path: m.Path, Size: m.Size}}}
-	}
-
-	toDelete := []string{}
-	if cfg.DeleteLarger {
-		toDelete = append(toDelete, m.Path)
-	}
-
 	return ProcessResult{
 		SourcePath: m.Path,
 		Outputs:    []ProcessOutputFile{{Path: outputPath, Size: outputStats.Size()}},
-		ToDelete:   toDelete,
-		ToMove:     []string{outputPath},
 		Success:    true,
 	}
 }
@@ -334,7 +307,7 @@ type TextProcessor struct {
 
 func NewTextProcessor() *TextProcessor {
 	return &TextProcessor{
-		BaseProcessor: BaseProcessor{mediaType: "Text"},
+		BaseProcessor: BaseProcessor{category: "Text"},
 	}
 }
 
@@ -409,28 +382,12 @@ func (p *TextProcessor) processText(ctx context.Context, m *ShrinkMedia, cfg *Pr
 	// Step 5: Update references in HTML files
 	p.updateImageReferences(outputDir)
 
-	// Step 6: Compare sizes
+	// Step 6: Return result
 	outputSize := utils.FolderSize(outputDir)
-	originalStats, err := os.Stat(m.Path)
-	deleteOriginal := false
-	if err == nil {
-		if cfg.DeleteLarger && outputSize > originalStats.Size() {
-			os.RemoveAll(outputDir)
-			return ProcessResult{SourcePath: m.Path, Success: true, Outputs: []ProcessOutputFile{{Path: m.Path, Size: m.Size}}}
-		}
-		deleteOriginal = cfg.DeleteLarger
-	}
-
-	toDelete := []string{}
-	if deleteOriginal {
-		toDelete = append(toDelete, m.Path)
-	}
 
 	return ProcessResult{
 		SourcePath: m.Path,
 		Outputs:    []ProcessOutputFile{{Path: outputDir, Size: outputSize}},
-		ToDelete:   toDelete,
-		ToMove:     []string{outputDir},
 		Success:    true,
 	}
 }
@@ -697,25 +654,27 @@ func (p *TextProcessor) folderExists(path string) bool {
 // ArchiveProcessor handles archive file processing
 type ArchiveProcessor struct {
 	BaseProcessor
+	ffmpeg        *FFmpegProcessor
 	unarInstalled bool
 }
 
-func NewArchiveProcessor() *ArchiveProcessor {
+func NewArchiveProcessor(ffmpeg *FFmpegProcessor) *ArchiveProcessor {
 	return &ArchiveProcessor{
-		BaseProcessor: BaseProcessor{mediaType: "Archived"},
+		BaseProcessor: BaseProcessor{category: "Archived"},
+		ffmpeg:        ffmpeg,
 		unarInstalled: utils.CommandExists("lsar"),
 	}
 }
 
 func (p *ArchiveProcessor) CanProcess(m *ShrinkMedia) bool {
-	filetype := strings.ToLower(m.Type)
+	filetype := strings.ToLower(m.MediaType)
 	return strings.HasPrefix(filetype, "archive/") || strings.HasSuffix(filetype, "+zip") ||
 		strings.Contains(filetype, " archive") || utils.ArchiveExtensionMap[m.Ext]
 }
 
-// ExtractAndProcess extracts archive contents and processes images recursively
+// ExtractAndProcess extracts archive contents and processes media recursively
 func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *ShrinkMedia, cfg *ProcessorConfig,
-	imageProc *ImageProcessor,
+	imageProc *ImageProcessor, ffmpeg *FFmpegProcessor,
 ) ProcessResult {
 	if !p.unarInstalled {
 		return ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("unar not installed")}
@@ -735,79 +694,102 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *ShrinkMedia
 		}
 	}
 
-	// Extract archive
+	// Extract archive - use -no-directory to prevent creating nested archive-name folders
 	outputDir := filepath.Join(filepath.Dir(m.Path), filepath.Base(m.Path)+".extracted")
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
 		return ProcessResult{SourcePath: m.Path, Error: err}
 	}
 
-	cmd := exec.CommandContext(ctx, "unar", "-o", outputDir, m.Path)
+	// Use -no-directory to extract files directly into outputDir without creating subfolders
+	cmd := exec.CommandContext(ctx, "unar", "-no-directory", "-o", outputDir, m.Path)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		slog.Error("unar error", "path", m.Path, "error", err, "output", string(output))
 		os.RemoveAll(outputDir)
-
-		if cfg.DeleteUnplayable {
-			toDelete := []string{m.Path}
-			for _, part := range partFiles {
-				if part != m.Path {
-					toDelete = append(toDelete, part)
-				}
-			}
-			return ProcessResult{SourcePath: m.Path, ToDelete: toDelete, Success: false, Error: err}
-		} else if cfg.MoveBroken != "" {
-			// Move parts logic stays in processor for complex multi-part moves
-			for _, part := range partFiles {
-				if part != m.Path {
-					dest := filepath.Join(cfg.MoveBroken, filepath.Base(part))
-					os.MkdirAll(cfg.MoveBroken, 0o755)
-					os.Rename(part, dest)
-				}
-			}
-			return ProcessResult{SourcePath: m.Path, ToDelete: []string{m.Path}, Success: false, Error: err}
-		}
 		return ProcessResult{SourcePath: m.Path, Error: err}
 	}
 
-	toDelete := []string{m.Path}
-	for _, part := range partFiles {
-		if part != m.Path {
-			toDelete = append(toDelete, part)
-		}
-	}
+	// Flatten any wrapper folders that might have been created
+	flattenWrapperFolders(outputDir)
 
-	var outputs []ProcessOutputFile
-	var toMove []string
-	outputs = append(outputs, ProcessOutputFile{Path: outputDir, Size: utils.FolderSize(outputDir)})
-	toMove = append(toMove, outputDir)
-
-	// Find and process all images recursively
+	// Find and process all media recursively
 	filepath.Walk(outputDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() {
 			return nil
 		}
 		ext := strings.ToLower(filepath.Ext(path))
+		fileSize := info.Size()
+
 		if shouldConvertToAVIF(ext) {
-			imgMedia := &ShrinkMedia{Path: path, Size: info.Size(), Ext: ext}
-			res := imageProc.processImage(ctx, imgMedia, cfg)
-			outputs = append(outputs, res.Outputs...)
-			toDelete = append(toDelete, res.ToDelete...)
-			toMove = append(toMove, res.ToMove...)
+			imgMedia := &ShrinkMedia{Path: path, Size: fileSize, Ext: ext, Category: "Image"}
+			futureSize, _ := imageProc.EstimateSize(imgMedia, cfg)
+			if ShouldShrink(imgMedia, futureSize, cfg) {
+				res := imageProc.processImage(ctx, imgMedia, cfg)
+				if res.Success && len(res.Outputs) > 0 {
+					var totalSize int64
+					for _, out := range res.Outputs {
+						totalSize += out.Size
+					}
+					// Only keep if smaller
+					if totalSize < fileSize {
+						os.Remove(path)
+					} else {
+						// Delete transcode and keep original
+						for _, out := range res.Outputs {
+							os.Remove(out.Path)
+						}
+					}
+				}
+			}
+		} else if utils.VideoExtensionMap[ext] || utils.AudioExtensionMap[ext] {
+			category := "Video"
+			processor := MediaProcessor(NewVideoProcessor(ffmpeg))
+			if utils.AudioExtensionMap[ext] {
+				category = "Audio"
+				processor = NewAudioProcessor(ffmpeg)
+			}
+			media := &ShrinkMedia{Path: path, Size: fileSize, Ext: ext, Category: category}
+			futureSize, _ := processor.EstimateSize(media, cfg)
+			if ShouldShrink(media, futureSize, cfg) {
+				res := ffmpeg.Process(ctx, media, cfg)
+				if res.Success && len(res.Outputs) > 0 {
+					var totalSize int64
+					for _, out := range res.Outputs {
+						totalSize += out.Size
+					}
+					// Only keep if smaller
+					if totalSize < fileSize {
+						os.Remove(path)
+					} else {
+						// Delete transcode and keep original
+						for _, out := range res.Outputs {
+							os.Remove(out.Path)
+						}
+					}
+				}
+			}
 		} else if utils.ArchiveExtensionMap[ext] {
-			nestedMedia := &ShrinkMedia{Path: path, Size: info.Size(), Ext: ext, Type: "archive/" + strings.TrimPrefix(ext, ".")}
-			res := p.ExtractAndProcess(ctx, nestedMedia, cfg, imageProc)
-			outputs = append(outputs, res.Outputs...)
-			toDelete = append(toDelete, res.ToDelete...)
-			toMove = append(toMove, res.ToMove...)
+			nestedMedia := &ShrinkMedia{Path: path, Size: info.Size(), Ext: ext, MediaType: "archive/" + strings.TrimPrefix(ext, ".")}
+			res := p.ExtractAndProcess(ctx, nestedMedia, cfg, imageProc, ffmpeg)
+			if res.Success {
+				// ArchiveProcessor returns the extracted directory as the first output
+				if len(res.Outputs) > 0 {
+					extractedDir := res.Outputs[0].Path
+					totalSize := utils.FolderSize(extractedDir)
+					if totalSize < fileSize {
+						os.Remove(path)
+					} else {
+						os.RemoveAll(extractedDir)
+					}
+				}
+			}
 		}
 		return nil
 	})
 
 	return ProcessResult{
 		SourcePath: m.Path,
-		Outputs:    outputs,
-		ToDelete:   toDelete,
-		ToMove:     toMove,
+		Outputs:    []ProcessOutputFile{{Path: outputDir, Size: utils.FolderSize(outputDir)}},
 		Success:    true,
 	}
 }
@@ -831,7 +813,7 @@ func (p *ArchiveProcessor) EstimateSizeForArchive(m *ShrinkMedia, cfg *Processor
 
 	for _, content := range contents {
 		ext := content.Ext
-		filetype := content.Type
+		filetype := content.MediaType
 		slog.Debug("Checking archive content", "path", content.Path, "ext", ext, "type", filetype)
 
 		// Determine if this file is processable
@@ -854,9 +836,9 @@ func (p *ArchiveProcessor) EstimateSizeForArchive(m *ShrinkMedia, cfg *Processor
 					nestedPath := filepath.Join(tempDir, filepath.Base(content.Path))
 					if _, err := os.Stat(nestedPath); err == nil {
 						nestedMedia := &ShrinkMedia{
-							Path: nestedPath,
-							Ext:  ext,
-							Type: "archive/" + strings.TrimPrefix(ext, "."),
+							Path:      nestedPath,
+							Ext:       ext,
+							MediaType: "archive/" + strings.TrimPrefix(ext, "."),
 						}
 						fs, pt, hp := p.EstimateSizeForArchive(nestedMedia, cfg)
 						if hp {
@@ -929,7 +911,7 @@ func (p *ArchiveProcessor) EstimateSize(m *ShrinkMedia, cfg *ProcessorConfig) (i
 func (p *ArchiveProcessor) Process(ctx context.Context, m *ShrinkMedia, cfg *ProcessorConfig) ProcessResult {
 	// Archives are handled by extracting and processing contents separately
 	imageProc := NewImageProcessor()
-	return p.ExtractAndProcess(ctx, m, cfg, imageProc)
+	return p.ExtractAndProcess(ctx, m, cfg, imageProc, p.ffmpeg)
 }
 
 // lsar lists archive contents
@@ -961,7 +943,7 @@ func (p *ArchiveProcessor) lsar(path string) []ShrinkMedia {
 			Path:           f.Filename,
 			Size:           f.Size,
 			CompressedSize: f.CompressedSize,
-			Type:           mediaType,
+			MediaType:      mediaType,
 			Ext:            ext,
 		})
 	}
@@ -986,6 +968,78 @@ func detectMediaTypeFromExt(ext string) string {
 	}
 }
 
+// flattenWrapperFolders moves files from single subfolders up to the parent directory
+// This handles archives that contain a single wrapper folder
+func flattenWrapperFolders(rootDir string) {
+	entries, err := os.ReadDir(rootDir)
+	if err != nil {
+		return
+	}
+
+	// Filter out hidden files
+	var nonHidden []string
+	for _, entry := range entries {
+		if !strings.HasPrefix(entry.Name(), ".") {
+			nonHidden = append(nonHidden, entry.Name())
+		}
+	}
+
+	// Only flatten if there's exactly one entry
+	if len(nonHidden) != 1 {
+		return
+	}
+
+	singleEntry := nonHidden[0]
+	singlePath := filepath.Join(rootDir, singleEntry)
+
+	// Check if it's a directory
+	info, err := os.Stat(singlePath)
+	if err != nil || !info.IsDir() {
+		return
+	}
+
+	slog.Info("Flattening wrapper folder", "folder", singleEntry)
+
+	// Move all items up
+	innerEntries, err := os.ReadDir(singlePath)
+	if err != nil {
+		return
+	}
+
+	// Check for conflict item (file/folder with same name as the wrapper folder)
+	var conflictItem string
+	for _, entry := range innerEntries {
+		if filepath.Join(rootDir, entry.Name()) == singlePath {
+			conflictItem = entry.Name()
+			break
+		}
+	}
+
+	// Move non-conflict items first
+	for _, entry := range innerEntries {
+		if entry.Name() == conflictItem {
+			continue
+		}
+		oldPath := filepath.Join(singlePath, entry.Name())
+		newPath := filepath.Join(rootDir, entry.Name())
+		if err := os.Rename(oldPath, newPath); err != nil {
+			slog.Debug("flattenWrapperFolders: rename error", "from", oldPath, "to", newPath, "error", err)
+		}
+	}
+
+	// Handle conflict item if it exists
+	if conflictItem != "" {
+		oldPath := filepath.Join(singlePath, conflictItem)
+		tempPath := filepath.Join(rootDir, conflictItem+".tmp")
+		finalPath := filepath.Join(rootDir, conflictItem)
+		os.Rename(oldPath, tempPath)
+		os.RemoveAll(singlePath)
+		os.Rename(tempPath, finalPath)
+	} else {
+		os.RemoveAll(singlePath)
+	}
+}
+
 // ProcessorRegistry manages all media processors
 type ProcessorRegistry struct {
 	processors []MediaProcessor
@@ -999,7 +1053,7 @@ func NewProcessorRegistry(ffmpeg *FFmpegProcessor) *ProcessorRegistry {
 			NewAudioProcessor(ffmpeg),
 			NewImageProcessor(),
 			NewTextProcessor(),
-			NewArchiveProcessor(),
+			NewArchiveProcessor(ffmpeg),
 		},
 	}
 }
@@ -1021,12 +1075,15 @@ func (r *ProcessorRegistry) GetAllProcessors() []MediaProcessor {
 
 // ShouldShrink determines if a file should be shrinked based on savings threshold
 func ShouldShrink(m *ShrinkMedia, futureSize int64, cfg *ProcessorConfig) bool {
+	if cfg.ForceShrink {
+		return true
+	}
 	shouldShrinkBuffer := int64(float64(futureSize) * getMinSavings(m, cfg))
 	return m.Size > (futureSize + shouldShrinkBuffer)
 }
 
 func getMinSavings(m *ShrinkMedia, cfg *ProcessorConfig) float64 {
-	switch strings.ToLower(m.MediaType) {
+	switch strings.ToLower(m.Category) {
 	case "video":
 		return cfg.MinSavingsVideo
 	case "audio":

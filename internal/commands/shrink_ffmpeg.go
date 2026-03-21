@@ -35,19 +35,12 @@ func (p *FFmpegProcessor) Process(ctx context.Context, m *ShrinkMedia, cfg *Proc
 	// Probe the file
 	probe, err := p.ffprobe(m.Path)
 	if err != nil {
-		if cfg.DeleteUnplayable {
-			slog.Warn("Deleting unplayable (ffprobe failed)", "path", m.Path)
-			return ProcessResult{SourcePath: m.Path, ToDelete: []string{m.Path}, Success: false, Error: err}
-		}
 		return ProcessResult{SourcePath: m.Path, Error: err}
 	}
 
 	// Check for streams
 	if len(probe.Streams) == 0 {
 		slog.Error("No media streams", "path", m.Path)
-		if cfg.DeleteUnplayable {
-			return ProcessResult{SourcePath: m.Path, ToDelete: []string{m.Path}, Success: false, Error: fmt.Errorf("no media streams")}
-		}
 		return ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("no media streams")}
 	}
 
@@ -55,9 +48,6 @@ func (p *FFmpegProcessor) Process(ctx context.Context, m *ShrinkMedia, cfg *Proc
 	if m.Ext == ".gif" || m.Ext == ".webp" {
 		isAnimation := p.isAnimationFromProbe(probe)
 		if isAnimation == nil {
-			if cfg.DeleteUnplayable {
-				return ProcessResult{SourcePath: m.Path, ToDelete: []string{m.Path}, Success: false, Error: fmt.Errorf("could not determine animation status")}
-			}
 			return ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("could not determine animation status")}
 		}
 		if !*isAnimation {
@@ -109,6 +99,7 @@ func (p *FFmpegProcessor) Process(ctx context.Context, m *ShrinkMedia, cfg *Proc
 	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
+		slog.Error("FFmpeg failed", "path", m.Path, "error", err, "output", string(output))
 		// Categorize FFmpeg errors
 		errorLog := strings.Split(string(output), "\n")
 		isUnsupported := p.isUnsupportedError(errorLog)
@@ -131,7 +122,7 @@ func (p *FFmpegProcessor) Process(ctx context.Context, m *ShrinkMedia, cfg *Proc
 		}
 
 		if p.config.DeleteUnplayable {
-			return ProcessResult{SourcePath: m.Path, ToDelete: []string{m.Path}, Success: false, Error: err}
+			return ProcessResult{SourcePath: m.Path, Success: false, Error: err}
 		}
 		return ProcessResult{SourcePath: m.Path, Error: err}
 	}
@@ -207,11 +198,6 @@ func (p *FFmpegProcessor) buildFFmpegArgs(inputPath, outputPath string, probe *F
 	args = append(args, logLevel...)
 	args = append(args,
 		"-i", inputPath,
-		"-movflags", "use_metadata_tags",
-		"-map_metadata", "0",
-		"-map_chapters", "0",
-		"-dn",
-		"-max_interleave_delta", "0",
 	)
 
 	// Video options
@@ -265,6 +251,15 @@ func (p *FFmpegProcessor) buildFFmpegArgs(inputPath, outputPath string, probe *F
 	if p.config.IncludeTimecode {
 		args = append(args, "-map", "0:t")
 	}
+
+	// Metadata and global flags (matching Python order)
+	args = append(args,
+		"-movflags", "use_metadata_tags",
+		"-map_metadata", "0",
+		"-map_chapters", "0",
+		"-dn",
+		"-max_interleave_delta", "0",
+	)
 
 	args = append(args, outputPath)
 	return args
@@ -395,7 +390,7 @@ func (p *FFmpegProcessor) buildScaleFilter(stereoMode string, width, height int)
 		} else if float64(height) > float64(p.config.MaxVideoHeight)*(1+p.config.MaxHeightBuffer) {
 			filters = append(filters, fmt.Sprintf("scale=-2:%d", p.config.MaxVideoHeight))
 		} else {
-			filters = append(filters, "pad='if(mod(iw,2),iw+1,iw)':'if(mod(ih,2),ih+1,ih)'")
+			filters = append(filters, "pad=trunc((iw+1)/2)*2:trunc((ih+1)/2)*2")
 		}
 	case "ou":
 		perEyeHeight := height / 2
@@ -407,7 +402,7 @@ func (p *FFmpegProcessor) buildScaleFilter(stereoMode string, width, height int)
 		} else if float64(width) > float64(p.config.MaxVideoWidth)*(1+p.config.MaxWidthBuffer) {
 			filters = append(filters, fmt.Sprintf("scale=%d:-2", p.config.MaxVideoWidth))
 		} else {
-			filters = append(filters, "pad='if(mod(iw,2),iw+1,iw)':'if(mod(ih,2),ih+1,ih)'")
+			filters = append(filters, "pad=trunc((iw+1)/2)*2:trunc((ih+1)/2)*2")
 		}
 	default:
 		if float64(width) > float64(p.config.MaxVideoWidth)*(1+p.config.MaxWidthBuffer) {
@@ -415,7 +410,7 @@ func (p *FFmpegProcessor) buildScaleFilter(stereoMode string, width, height int)
 		} else if float64(height) > float64(p.config.MaxVideoHeight)*(1+p.config.MaxHeightBuffer) {
 			filters = append(filters, fmt.Sprintf("scale=-2:%d", p.config.MaxVideoHeight))
 		} else {
-			filters = append(filters, "pad='if(mod(iw,2),iw+1,iw)':'if(mod(ih,2),ih+1,ih)'")
+			filters = append(filters, "pad=trunc((iw+1)/2)*2:trunc((ih+1)/2)*2")
 		}
 	}
 
@@ -438,19 +433,9 @@ func (p *FFmpegProcessor) validateTranscode(m ShrinkMedia, outputPath string, or
 			return ProcessResult{SourcePath: m.Path, Success: false}
 		}
 
-		originalStats, err := os.Stat(m.Path)
-		if err != nil {
-			return ProcessResult{SourcePath: m.Path, Success: false}
-		}
-
 		deleteTranscode := false
-		deleteLarger := p.config.DeleteLarger
-
 		// Check for invalid transcode
 		if outputStats.Size() == 0 {
-			deleteTranscode = true
-		} else if deleteLarger && outputStats.Size() > originalStats.Size() {
-			deleteLarger = false
 			deleteTranscode = true
 		} else {
 			// Validate duration
@@ -468,29 +453,13 @@ func (p *FFmpegProcessor) validateTranscode(m ShrinkMedia, outputPath string, or
 		}
 
 		if deleteTranscode {
-			if p.config.DeleteUnplayable {
-				return ProcessResult{SourcePath: m.Path, ToDelete: []string{m.Path}, Success: false}
-			}
 			os.Remove(outputPath)
 			return ProcessResult{SourcePath: m.Path, Success: false}
-		}
-
-		// Don't delete original if extracting audio from video and --no-preserve-video is not set
-		if len(originalProbe.VideoStreams) > 0 &&
-			p.config.AudioOnly && !p.config.NoPreserveVideo {
-			deleteLarger = false
-		}
-
-		toDelete := []string{}
-		if deleteLarger {
-			toDelete = append(toDelete, m.Path)
 		}
 
 		return ProcessResult{
 			SourcePath: m.Path,
 			Outputs:    []ProcessOutputFile{{Path: outputPath, Size: outputStats.Size()}},
-			ToDelete:   toDelete,
-			ToMove:     []string{outputPath},
 			Success:    true,
 		}
 	}
@@ -499,10 +468,6 @@ func (p *FFmpegProcessor) validateTranscode(m ShrinkMedia, outputPath string, or
 	pattern := strings.Replace(outputPath, "%03d", "*", 1)
 	matches, err := filepath.Glob(pattern)
 	if err != nil || len(matches) == 0 {
-		// No split files found - treat as failure
-		if p.config.DeleteUnplayable {
-			return ProcessResult{SourcePath: m.Path, ToDelete: []string{m.Path}, Success: false}
-		}
 		return ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("no split files found")}
 	}
 
@@ -526,40 +491,12 @@ func (p *FFmpegProcessor) validateTranscode(m ShrinkMedia, outputPath string, or
 		for _, match := range matches {
 			os.Remove(match)
 		}
-		if p.config.DeleteUnplayable {
-			return ProcessResult{SourcePath: m.Path, ToDelete: []string{m.Path}, Success: false}
-		}
 		return ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("invalid split file")}
-	}
-
-	// Check total size vs original
-	originalStats, err := os.Stat(m.Path)
-	deleteLarger := p.config.DeleteLarger
-	if err == nil && deleteLarger && totalNewSize > originalStats.Size() {
-		deleteLarger = false
-	}
-
-	// Don't delete original if extracting audio from video and --no-preserve-video is not set
-	if len(originalProbe.VideoStreams) > 0 &&
-		p.config.AudioOnly && !p.config.NoPreserveVideo {
-		deleteLarger = false
-	}
-
-	toDelete := []string{}
-	if deleteLarger {
-		toDelete = append(toDelete, m.Path)
-	}
-
-	toMove := []string{}
-	for _, vf := range validFiles {
-		toMove = append(toMove, vf.Path)
 	}
 
 	return ProcessResult{
 		SourcePath: m.Path,
 		Outputs:    validFiles,
-		ToDelete:   toDelete,
-		ToMove:     toMove,
 		Success:    true,
 	}
 }
@@ -572,6 +509,7 @@ func (p *FFmpegProcessor) ffprobe(path string) (*FFProbeResult, error) {
 		"-show_format",
 		"-show_streams",
 		path)
+	cmd.Stdin = nil
 
 	output, err := cmd.Output()
 	if err != nil {
@@ -620,13 +558,15 @@ func (p *FFmpegProcessor) isAnimationFromProbe(probe *FFProbeResult) *bool {
 	for _, s := range probe.VideoStreams {
 		frames := parseInt(s.NbFrames)
 		if frames == 0 {
-			output, err := exec.Command("ffprobe",
+			cmd := exec.Command("ffprobe",
 				"-v", "error",
 				"-count_frames",
 				"-select_streams", "v:0",
 				"-show_entries", "stream=nb_read_frames",
 				"-of", "default=nokey=1:noprint_wrappers=1",
-				probe.Path).Output()
+				probe.Path)
+			cmd.Stdin = nil
+			output, err := cmd.Output()
 			if err == nil {
 				frames = parseInt(strings.TrimSpace(string(output)))
 			}
@@ -642,13 +582,15 @@ func (p *FFmpegProcessor) isAnimationFromProbe(probe *FFProbeResult) *bool {
 }
 
 func (p *FFmpegProcessor) countFrames(path string) int {
-	output, err := exec.Command("ffprobe",
+	cmd := exec.Command("ffprobe",
 		"-v", "fatal",
 		"-select_streams", "v:0",
 		"-count_frames",
 		"-show_entries", "stream=nb_read_frames",
 		"-of", "default=noprint_wrappers=1:nokey=1",
-		path).Output()
+		path)
+	cmd.Stdin = nil
+	output, err := cmd.Output()
 	if err != nil {
 		return 0
 	}
@@ -657,6 +599,7 @@ func (p *FFmpegProcessor) countFrames(path string) int {
 
 func (p *FFmpegProcessor) detectSilence(path string) []string {
 	args := []string{
+		"-nostdin",
 		"-hide_banner", "-v", "warning",
 		"-i", path,
 		"-af", "silencedetect=-55dB:d=0.3,ametadata=mode=print:file=-:key=lavfi.silence_start",
