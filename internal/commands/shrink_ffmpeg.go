@@ -99,7 +99,12 @@ func (p *FFmpegProcessor) Process(ctx context.Context, m *ShrinkMedia, cfg *Proc
 	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		slog.Error("FFmpeg failed", "path", m.Path, "error", err, "output", string(output))
+		// Check for timeout
+		if ctx.Err() == context.DeadlineExceeded {
+			slog.Error("FFmpeg timed out", "path", m.Path, "error", err, "output", string(output))
+		} else {
+			slog.Error("FFmpeg failed", "path", m.Path, "error", err, "output", string(output))
+		}
 		// Categorize FFmpeg errors
 		errorLog := strings.Split(string(output), "\n")
 		isUnsupported := p.isUnsupportedError(errorLog)

@@ -218,6 +218,12 @@ func (p *ImageProcessor) processImage(ctx context.Context, m *ShrinkMedia, cfg *
 	cmd := exec.CommandContext(ctx, "magick", args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
+		// Check for timeout
+		if ctx.Err() == context.DeadlineExceeded {
+			slog.Error("ImageMagick timed out", "path", m.Path, "error", err, "output", string(output))
+		} else {
+			slog.Error("ImageMagick error", "output", string(output), "path", m.Path)
+		}
 		// Categorize ImageMagick errors
 		errorLog := strings.Split(string(output), "\n")
 		isUnsupported := isImageMagickUnsupportedError(errorLog)
@@ -234,7 +240,6 @@ func (p *ImageProcessor) processImage(ctx context.Context, m *ShrinkMedia, cfg *
 			return ProcessResult{SourcePath: m.Path, Error: err}
 		}
 
-		slog.Error("ImageMagick error", "output", string(output), "path", m.Path)
 		return ProcessResult{SourcePath: m.Path, Error: err}
 	}
 
@@ -364,7 +369,12 @@ func (p *TextProcessor) processText(ctx context.Context, m *ShrinkMedia, cfg *Pr
 	cmd := exec.CommandContext(ctx, "ebook-convert", args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		slog.Error("Calibre error", "output", string(output), "path", m.Path)
+		// Check for timeout
+		if ctx.Err() == context.DeadlineExceeded {
+			slog.Error("Calibre timed out", "path", m.Path, "error", err, "output", string(output))
+		} else {
+			slog.Error("Calibre error", "output", string(output), "path", m.Path)
+		}
 		os.RemoveAll(outputDir)
 		return ProcessResult{SourcePath: m.Path, Error: err}
 	}
@@ -558,6 +568,7 @@ func (p *TextProcessor) findImages(dir string) []string {
 	var images []string
 	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
+			slog.Warn("Error accessing path while finding images", "path", path, "error", err)
 			return nil
 		}
 		ext := strings.ToLower(filepath.Ext(path))
@@ -587,6 +598,7 @@ func (p *TextProcessor) processEbookImages(ctx context.Context, images []string,
 
 		cmd := exec.CommandContext(ctx, "magick", args...)
 		if err := cmd.Run(); err != nil {
+			slog.Warn("Failed to convert ebook image", "path", img, "error", err)
 			continue
 		}
 
@@ -705,7 +717,12 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *ShrinkMedia
 	cmd := exec.CommandContext(ctx, "unar", "-no-directory", "-force-rename", "-o", outputDir, m.Path)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		slog.Error("unar error", "path", m.Path, "error", err, "output", string(output))
+		// Check for timeout
+		if ctx.Err() == context.DeadlineExceeded {
+			slog.Error("unar timed out", "path", m.Path, "error", err, "output", string(output))
+		} else {
+			slog.Error("unar error", "path", m.Path, "error", err, "output", string(output))
+		}
 		os.RemoveAll(outputDir)
 		return ProcessResult{SourcePath: m.Path, PartFiles: partFiles, Error: err}
 	}
@@ -772,6 +789,9 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *ShrinkMedia
 		} else if utils.ArchiveExtensionMap[ext] {
 			nestedMedia := &ShrinkMedia{Path: path, Size: info.Size(), Ext: ext, MediaType: "archive"}
 			res := p.ExtractAndProcess(ctx, nestedMedia, cfg, imageProc, ffmpeg)
+			if res.Error != nil {
+				slog.Warn("Failed to extract nested archive", "path", path, "error", res.Error)
+			}
 			if res.Success {
 				// Delete the nested archive file and all its part files after extraction
 				os.Remove(path)
@@ -1146,7 +1166,7 @@ func flattenWrapperFolders(rootDir string) {
 		oldPath := filepath.Join(singlePath, entry.Name())
 		newPath := filepath.Join(rootDir, entry.Name())
 		if err := os.Rename(oldPath, newPath); err != nil {
-			slog.Debug("flattenWrapperFolders: rename error", "from", oldPath, "to", newPath, "error", err)
+			slog.Warn("Failed to flatten wrapper folder entry", "from", oldPath, "to", newPath, "error", err)
 		}
 	}
 

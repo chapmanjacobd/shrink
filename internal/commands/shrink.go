@@ -937,8 +937,13 @@ func (c *ShrinkCmd) markDeleted(path string) {
 	for _, dbPath := range c.Databases {
 		sqlDB, _, err := db.ConnectWithInit(dbPath)
 		if err == nil {
-			_, _ = sqlDB.Exec("UPDATE media SET time_deleted = ? WHERE path = ?", time.Now().Unix(), path)
+			_, err := sqlDB.Exec("UPDATE media SET time_deleted = ? WHERE path = ?", time.Now().Unix(), path)
+			if err != nil {
+				slog.Warn("Failed to mark file deleted in database", "path", path, "error", err)
+			}
 			sqlDB.Close()
+		} else {
+			slog.Warn("Failed to connect to database for marking deleted", "path", path, "error", err)
 		}
 	}
 }
@@ -956,8 +961,11 @@ func (c *ShrinkCmd) moveToBroken(path string, partFiles []string) {
 	if _, err := os.Stat(path); err == nil {
 		os.MkdirAll(destDir, 0o755)
 		dest := filepath.Join(destDir, filepath.Base(path))
-		os.Rename(path, dest)
-		slog.Info("Moved broken file", "from", path, "to", dest)
+		if err := os.Rename(path, dest); err != nil {
+			slog.Warn("Failed to move broken file", "from", path, "to", dest, "error", err)
+		} else {
+			slog.Info("Moved broken file", "from", path, "to", dest)
+		}
 	}
 
 	// Move multi-part archive files if present
@@ -968,8 +976,11 @@ func (c *ShrinkCmd) moveToBroken(path string, partFiles []string) {
 		if _, err := os.Stat(partFile); err == nil {
 			os.MkdirAll(destDir, 0o755)
 			dest := filepath.Join(destDir, filepath.Base(partFile))
-			os.Rename(partFile, dest)
-			slog.Info("Moved broken archive part", "from", partFile, "to", dest)
+			if err := os.Rename(partFile, dest); err != nil {
+				slog.Warn("Failed to move broken archive part", "from", partFile, "to", dest, "error", err)
+			} else {
+				slog.Info("Moved broken archive part", "from", partFile, "to", dest)
+			}
 		}
 	}
 }
@@ -979,16 +990,22 @@ func (c *ShrinkCmd) updateDatabase(oldPath, newPath string, newSize int64, durat
 		sqlDB, _, err := db.ConnectWithInit(dbPath)
 		if err == nil {
 			_, _ = sqlDB.Exec("DELETE FROM media WHERE path = ?", newPath)
+			var execErr error
 			if duration > 0 {
-				_, _ = sqlDB.Exec(
+				_, execErr = sqlDB.Exec(
 					"UPDATE media SET path = ?, size = ?, duration = ?, time_deleted = 0, is_shrinked = 1 WHERE path = ?",
 					newPath, newSize, duration, oldPath)
 			} else {
-				_, _ = sqlDB.Exec(
+				_, execErr = sqlDB.Exec(
 					"UPDATE media SET path = ?, size = ?, time_deleted = 0, is_shrinked = 1 WHERE path = ?",
 					newPath, newSize, oldPath)
 			}
+			if execErr != nil {
+				slog.Warn("Failed to update database entry", "oldPath", oldPath, "newPath", newPath, "error", execErr)
+			}
 			sqlDB.Close()
+		} else {
+			slog.Warn("Failed to connect to database for update", "oldPath", oldPath, "error", err)
 		}
 	}
 }
@@ -998,17 +1015,26 @@ func (c *ShrinkCmd) addDatabaseEntry(path string, size int64, duration float64) 
 	for _, dbPath := range c.Databases {
 		sqlDB, _, err := db.ConnectWithInit(dbPath)
 		if err == nil {
-			_, _ = sqlDB.Exec("DELETE FROM media WHERE path = ?", path)
+			_, err := sqlDB.Exec("DELETE FROM media WHERE path = ?", path)
+			if err != nil {
+				slog.Warn("Failed to delete existing media entry", "path", path, "error", err)
+			}
+			var execErr error
 			if duration > 0 {
-				_, _ = sqlDB.Exec(
+				_, execErr = sqlDB.Exec(
 					"INSERT INTO media (path, size, duration, time_deleted, is_shrinked) VALUES (?, ?, ?, 0, 0)",
 					path, size, duration)
 			} else {
-				_, _ = sqlDB.Exec(
+				_, execErr = sqlDB.Exec(
 					"INSERT INTO media (path, size, time_deleted, is_shrinked) VALUES (?, ?, 0, 0)",
 					path, size)
 			}
+			if execErr != nil {
+				slog.Warn("Failed to add database entry", "path", path, "error", execErr)
+			}
 			sqlDB.Close()
+		} else {
+			slog.Warn("Failed to connect to database for adding entry", "path", path, "error", err)
 		}
 	}
 }
@@ -1017,8 +1043,13 @@ func (c *ShrinkCmd) markShrinked(path string) {
 	for _, dbPath := range c.Databases {
 		sqlDB, _, err := db.ConnectWithInit(dbPath)
 		if err == nil {
-			_, _ = sqlDB.Exec("UPDATE media SET is_shrinked = 1 WHERE path = ?", path)
+			_, err := sqlDB.Exec("UPDATE media SET is_shrinked = 1 WHERE path = ?", path)
+			if err != nil {
+				slog.Warn("Failed to mark file as shrinked in database", "path", path, "error", err)
+			}
 			sqlDB.Close()
+		} else {
+			slog.Warn("Failed to connect to database for marking shrinked", "path", path, "error", err)
 		}
 	}
 }
@@ -1026,7 +1057,9 @@ func (c *ShrinkCmd) markShrinked(path string) {
 func (c *ShrinkCmd) moveTo(path string) {
 	if c.Move != "" && path != "" {
 		dest := filepath.Join(c.Move, filepath.Base(path))
-		os.Rename(path, dest)
+		if err := os.Rename(path, dest); err != nil {
+			slog.Warn("Failed to move file", "from", path, "to", dest, "error", err)
+		}
 	}
 }
 
