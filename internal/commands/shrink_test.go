@@ -130,7 +130,7 @@ func TestShrinkText(t *testing.T) {
 		InputFiles: []testutils.TestFile{
 			{
 				Name:      "test.epub",
-				SrcPath:   "../testutils/testdata/test.epub",
+				SrcPath:   "../testutils/testdata/test_large.epub",
 				MediaType: "application/epub+zip",
 			},
 		},
