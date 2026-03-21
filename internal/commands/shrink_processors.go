@@ -669,9 +669,7 @@ func NewArchiveProcessor(ffmpeg *FFmpegProcessor) *ArchiveProcessor {
 }
 
 func (p *ArchiveProcessor) CanProcess(m *ShrinkMedia) bool {
-	filetype := strings.ToLower(m.MediaType)
-	return strings.HasPrefix(filetype, "archive/") || strings.HasSuffix(filetype, "+zip") ||
-		strings.Contains(filetype, " archive") || utils.ArchiveExtensionMap[m.Ext]
+	return m.MediaType == "archive" || utils.ArchiveExtensionMap[m.Ext]
 }
 
 // ExtractAndProcess extracts archive contents and processes media recursively
@@ -702,8 +700,9 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *ShrinkMedia
 		return ProcessResult{SourcePath: m.Path, PartFiles: partFiles, Error: err}
 	}
 
-	// Use -no-directory to extract files directly into outputDir without creating subfolders
-	cmd := exec.CommandContext(ctx, "unar", "-no-directory", "-o", outputDir, m.Path)
+	// Use -no-directory and -force-rename to extract files directly into outputDir without creating subfolders
+	// -force-rename is needed for nested multi-part archives
+	cmd := exec.CommandContext(ctx, "unar", "-no-directory", "-force-rename", "-o", outputDir, m.Path)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		slog.Error("unar error", "path", m.Path, "error", err, "output", string(output))
@@ -771,19 +770,18 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *ShrinkMedia
 				}
 			}
 		} else if utils.ArchiveExtensionMap[ext] {
-			nestedMedia := &ShrinkMedia{Path: path, Size: info.Size(), Ext: ext, MediaType: "archive/" + strings.TrimPrefix(ext, ".")}
+			nestedMedia := &ShrinkMedia{Path: path, Size: info.Size(), Ext: ext, MediaType: "archive"}
 			res := p.ExtractAndProcess(ctx, nestedMedia, cfg, imageProc, ffmpeg)
 			if res.Success {
-				// ArchiveProcessor returns the extracted directory as the first output
-				if len(res.Outputs) > 0 {
-					extractedDir := res.Outputs[0].Path
-					totalSize := utils.FolderSize(extractedDir)
-					if totalSize < fileSize {
-						os.Remove(path)
-					} else {
-						os.RemoveAll(extractedDir)
-					}
+				// Delete the nested archive file and all its part files after extraction
+				os.Remove(path)
+				// Also delete any multi-part archive parts
+				partFiles := p.getPartFiles(path)
+				for _, partFile := range partFiles {
+					os.Remove(partFile)
 				}
+				// The extracted contents have already been processed recursively
+				// and the decision to keep original or processed files was made
 			}
 		}
 		return nil
@@ -815,6 +813,7 @@ func (p *ArchiveProcessor) EstimateSizeForArchive(m *ShrinkMedia, cfg *Processor
 
 	// Get archive contents and check for multi-part volumes
 	contents, lsarFailed := p.lsarWithStatus(m.Path)
+	slog.Info("lsar returned", "path", m.Path, "count", len(contents), "lsarFailed", lsarFailed)
 	
 	// Check for multi-part archives and verify all parts exist
 	totalArchiveSize := m.Size
@@ -862,51 +861,29 @@ func (p *ArchiveProcessor) EstimateSizeForArchive(m *ShrinkMedia, cfg *Processor
 
 	for _, content := range contents {
 		ext := content.Ext
-		filetype := content.MediaType
-		slog.Debug("Checking archive content", "path", content.Path, "ext", ext, "type", filetype)
+		slog.Info("Checking archive content", "path", content.Path, "ext", ext, "type", content.MediaType)
 
 		// Determine if this file is processable
 		var futureSize int64
 		var processingTime int
 		isProcessable := false
 
-		// Nested archives
-		if filetype == "archive" {
-			slog.Debug("Found nested archive", "path", content.Path)
-			// Create a temporary directory to extract the nested archive for inspection
-			tempDir, err := os.MkdirTemp("", "disco-estimate-*")
-			if err == nil {
-				defer os.RemoveAll(tempDir)
-
-				// Extract only this file
-				slog.Debug("Extracting nested archive for estimation", "archive", m.Path, "file", content.Path)
-				cmd := exec.Command("unar", "-o", tempDir, "-f", m.Path, content.Path)
-				if out, err := cmd.CombinedOutput(); err == nil {
-					nestedPath := filepath.Join(tempDir, filepath.Base(content.Path))
-					if _, err := os.Stat(nestedPath); err == nil {
-						nestedMedia := &ShrinkMedia{
-							Path:      nestedPath,
-							Ext:       ext,
-							MediaType: "archive/" + strings.TrimPrefix(ext, "."),
-						}
-						fs, pt, hp, _ := p.EstimateSizeForArchive(nestedMedia, cfg)
-						if hp {
-							isProcessable = true
-							futureSize = fs
-							processingTime = pt
-							slog.Debug("Nested archive has processable content", "path", content.Path, "futureSize", fs)
-						}
-					} else {
-						slog.Debug("Nested file not found after extraction", "path", nestedPath)
-					}
-				} else {
-					slog.Debug("Failed to extract nested archive", "error", err, "output", string(out))
-				}
-			}
+		// Nested archives - estimate using compressed size
+		if content.MediaType == "archive" {
+			slog.Info("Found nested archive", "path", content.Path, "compressedSize", content.CompressedSize)
+			// For nested archives, use compressed size for estimation
+			// The actual contents will be processed during extraction
+			isProcessable = true
+			// Estimate based on compressed size (assume video content for simplicity)
+			duration := float64(content.CompressedSize) / float64(cfg.SourceVideoBitrate) * 8
+			futureSize = int64(duration * float64(cfg.TargetVideoBitrate) / 8)
+			processingTime = int(math.Ceil(duration / cfg.TranscodingVideoRate))
+			totalArchiveSize += content.Size
+			slog.Info("Nested archive estimation", "path", content.Path, "futureSize", futureSize, "archiveFileSize", content.Size)
 		}
 
 		// Video files
-		if !isProcessable && (filetype == "video" || (ext != "" && utils.VideoExtensionMap[ext])) {
+		if !isProcessable && (content.MediaType == "video" || (ext != "" && utils.VideoExtensionMap[ext])) {
 			isProcessable = true
 			duration := content.Duration
 			if duration <= 0 {
@@ -917,7 +894,7 @@ func (p *ArchiveProcessor) EstimateSizeForArchive(m *ShrinkMedia, cfg *Processor
 			processingTime = int(math.Ceil(duration / cfg.TranscodingVideoRate))
 		}
 		// Audio files
-		if filetype == "audio" || (ext != "" && utils.AudioExtensionMap[ext]) {
+		if content.MediaType == "audio" || (ext != "" && utils.AudioExtensionMap[ext]) {
 			isProcessable = true
 			duration := content.Duration
 			if duration <= 0 {
@@ -927,7 +904,7 @@ func (p *ArchiveProcessor) EstimateSizeForArchive(m *ShrinkMedia, cfg *Processor
 			processingTime = int(math.Ceil(duration / cfg.TranscodingAudioRate))
 		}
 		// Image files
-		if filetype == "image" || (ext != "" && utils.ImageExtensionMap[ext]) {
+		if content.MediaType == "image" || (ext != "" && utils.ImageExtensionMap[ext]) {
 			if ext != ".avif" { // Skip existing AVIF
 				isProcessable = true
 				futureSize = cfg.TargetImageSize
@@ -935,7 +912,7 @@ func (p *ArchiveProcessor) EstimateSizeForArchive(m *ShrinkMedia, cfg *Processor
 			}
 		}
 		// Text/Ebook files
-		if filetype == "text" || (ext != "" && utils.TextExtensionMap[ext]) {
+		if content.MediaType == "text" || (ext != "" && utils.TextExtensionMap[ext]) {
 			isProcessable = true
 			// Rough estimate for ebooks (compressed text is small)
 			futureSize = cfg.TargetImageSize * 50

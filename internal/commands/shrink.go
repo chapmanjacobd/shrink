@@ -564,26 +564,22 @@ func (c *ShrinkCmd) filterByTools(media []ShrinkMedia, tools InstalledTools) []S
 
 	for _, m := range media {
 		canProcess := false
-		filetype := strings.ToLower(m.MediaType)
 
 		// Audio/Video
-		if ((strings.HasPrefix(filetype, "audio/") || strings.Contains(filetype, " audio")) ||
-			(utils.AudioExtensionMap[m.Ext] && m.VideoCount == 0)) ||
-			((strings.HasPrefix(filetype, "video/") || strings.Contains(filetype, " video")) ||
-				(utils.VideoExtensionMap[m.Ext] && m.VideoCount >= 1)) {
+		if (m.MediaType == "audio" || (utils.AudioExtensionMap[m.Ext] && m.VideoCount == 0)) ||
+			(m.MediaType == "video" || (utils.VideoExtensionMap[m.Ext] && m.VideoCount >= 1)) {
 			canProcess = tools.FFmpeg
 		}
 		// Image
-		if (strings.HasPrefix(filetype, "image/") || strings.Contains(filetype, " image")) ||
-			(utils.ImageExtensionMap[m.Ext] && m.Duration == 0) {
+		if m.MediaType == "image" || (utils.ImageExtensionMap[m.Ext] && m.Duration == 0) {
 			canProcess = tools.ImageMagick
 		}
 		// Text
-		if utils.TextExtensionMap[m.Ext] {
+		if m.MediaType == "text" || utils.TextExtensionMap[m.Ext] {
 			canProcess = tools.Calibre
 		}
 		// Archives
-		if strings.HasPrefix(filetype, "archive/") || utils.ArchiveExtensionMap[m.Ext] {
+		if m.MediaType == "archive" || utils.ArchiveExtensionMap[m.Ext] {
 			canProcess = tools.Unar
 		}
 

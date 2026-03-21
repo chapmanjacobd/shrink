@@ -148,9 +148,37 @@ func TestShrinkText(t *testing.T) {
 	testutils.RunScenario(t, scenario, runShrinkCmd)
 }
 
-func TestShrinkArchiveNested(t *testing.T) {
+func TestShrinkArchiveRelative(t *testing.T) {
 	scenario := testutils.Scenario{
-		Description: "Extracting a nested archive flattens wrapper folders and processes media",
+		Description: "Archive with relative wrapper folder flattens and processes media",
+		CLIArgs:     []string{"--no-confirm", "--preset=7", "--crf=40"},
+		Archives: []testutils.TestArchive{
+			{
+				Name:    "test_archive_relative.zip",
+				SrcPath: "../testutils/testdata/test_archive_relative.zip",
+			},
+		},
+		ExpectFiles: []string{
+			"test_archive_relative.zip.extracted/1/tiny.av1.mkv",
+			"test_archive_relative.zip.extracted/tiny.mka",
+		},
+		ExpectMissing: []string{
+			"test_archive_relative.zip",
+			"test_archive_relative.zip.extracted/1/tiny.avi",
+			"test_archive_relative.zip.extracted/tiny.wav",
+		},
+		ExpectDBState: []testutils.ExpectedDBRecord{
+			{Path: "test_archive_relative.zip", TimeDeleted: 1},
+		},
+	}
+
+	testutils.RunScenario(t, scenario, runShrinkCmd)
+}
+
+func TestShrinkArchiveInArchive(t *testing.T) {
+	// Test that archives inside archives are extracted and processed recursively
+	scenario := testutils.Scenario{
+		Description: "Archive containing nested archives extracts and processes all contents",
 		CLIArgs:     []string{"--no-confirm", "--preset=7", "--crf=40"},
 		Archives: []testutils.TestArchive{
 			{
@@ -158,17 +186,55 @@ func TestShrinkArchiveNested(t *testing.T) {
 				SrcPath: "../testutils/testdata/test_archive_nested.zip",
 			},
 		},
+		// Should process both nested archives recursively
+		// Note: nested archives create subdirectories for their extracted contents
+		// tiny.wav is converted to tiny.mka (Opus), tiny.avi is converted to tiny.av1.mkv
 		ExpectFiles: []string{
-			"test_archive_nested.zip.extracted/1/tiny.av1.mkv",
-			"test_archive_nested.zip.extracted/tiny.mka",
+			"test_archive_nested.zip.extracted/tiny.avi.zip.extracted/tiny.av1.mkv",
+			"test_archive_nested.zip.extracted/tiny.wav.zip.extracted/tiny.mka",
 		},
 		ExpectMissing: []string{
 			"test_archive_nested.zip",
-			"test_archive_nested.zip.extracted/1/tiny.avi",
-			"test_archive_nested.zip.extracted/tiny.wav",
+			"test_archive_nested.zip.extracted/tiny.avi.zip",
+			"test_archive_nested.zip.extracted/tiny.wav.zip",
+			"test_archive_nested.zip.extracted/tiny.avi.zip.extracted/tiny.avi",
+			"test_archive_nested.zip.extracted/tiny.wav.zip.extracted/tiny.wav",
 		},
 		ExpectDBState: []testutils.ExpectedDBRecord{
 			{Path: "test_archive_nested.zip", TimeDeleted: 1},
+		},
+	}
+
+	testutils.RunScenario(t, scenario, runShrinkCmd)
+}
+
+func TestShrinkArchiveNestedMultiPart(t *testing.T) {
+	// Test that nested multi-part archives are properly handled
+	// The outer archive contains all parts of an inner multi-part archive
+	scenario := testutils.Scenario{
+		Description: "Archive containing multi-part nested archive extracts and processes all parts",
+		CLIArgs:     []string{"--no-confirm", "--preset=7", "--crf=40"},
+		Archives: []testutils.TestArchive{
+			{
+				Name:    "test_archive_nested_multi.zip",
+				SrcPath: "../testutils/testdata/test_archive_nested_multi.zip",
+			},
+		},
+		// All 43 part files should be extracted, then the multi-part archive should be processed
+		// The inner video should be transcoded to AV1
+		ExpectFiles: []string{
+			"test_archive_nested_multi.zip.extracted/temp_multi.zip.extracted/tiny.av1.mkv",
+		},
+		ExpectMissing: []string{
+			"test_archive_nested_multi.zip",
+			// All inner multi-part files should be deleted after extraction
+			"test_archive_nested_multi.zip.extracted/temp_multi.z01",
+			"test_archive_nested_multi.zip.extracted/temp_multi.zip",
+			// Original video should be deleted after transcoding
+			"test_archive_nested_multi.zip.extracted/temp_multi.zip.extracted/tiny.avi",
+		},
+		ExpectDBState: []testutils.ExpectedDBRecord{
+			{Path: "test_archive_nested_multi.zip", TimeDeleted: 1},
 		},
 	}
 
@@ -365,6 +431,56 @@ func TestShrinkArchiveKeep(t *testing.T) {
 			t.Errorf("move-broken dir should be empty but has: %v", entries)
 		}
 	}
+}
+
+func TestShrinkArchiveNoSavings(t *testing.T) {
+	// Test that archives with already-optimized content are skipped
+	// The archive contains an AVIF image which is already optimized
+	scenario := testutils.Scenario{
+		Description: "Archive with already-optimized content is skipped",
+		CLIArgs:     []string{"--no-confirm"},
+		InputFiles: []testutils.TestFile{
+			{
+				Name:      "test_archive_already_optimized.zip",
+				SrcPath:   "../testutils/testdata/test_archive_already_optimized.zip",
+				MediaType: "archive",
+			},
+		},
+		// Archive should still exist (not processed because AVIF is already optimized)
+		ExpectFiles: []string{
+			"test_archive_already_optimized.zip",
+		},
+		ExpectDBState: []testutils.ExpectedDBRecord{
+			{Path: "test_archive_already_optimized.zip", TimeDeleted: 0, IsShrinked: 0},
+		},
+	}
+
+	testutils.RunScenario(t, scenario, runShrinkCmd)
+}
+
+func TestShrinkArchiveDoubleNestedNoSavings(t *testing.T) {
+	// Test that double-nested archives with optimized content are skipped
+	// Outer archive -> inner archive -> AVIF image
+	scenario := testutils.Scenario{
+		Description: "Double-nested archive with optimized content is skipped",
+		CLIArgs:     []string{"--no-confirm"},
+		InputFiles: []testutils.TestFile{
+			{
+				Name:      "test_archive_double_nested_optimized.zip",
+				SrcPath:   "../testutils/testdata/test_archive_double_nested_optimized.zip",
+				MediaType: "archive",
+			},
+		},
+		// Archive should still exist (not processed because nested AVIF is already optimized)
+		ExpectFiles: []string{
+			"test_archive_double_nested_optimized.zip",
+		},
+		ExpectDBState: []testutils.ExpectedDBRecord{
+			{Path: "test_archive_double_nested_optimized.zip", TimeDeleted: 0, IsShrinked: 0},
+		},
+	}
+
+	testutils.RunScenario(t, scenario, runShrinkCmd)
 }
 
 func copyFile(t *testing.T, src, dst string) {
