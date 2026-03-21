@@ -189,7 +189,7 @@ func (c *ShrinkCmd) Run(ctx *kong.Context) error {
 	// Analyze and decide what to shrink
 	toShrink := c.analyzeMedia(filteredMedia, cfg, registry, metrics)
 	if len(toShrink) == 0 {
-		slog.Info("No files to shrink")
+		fmt.Println("No files to shrink")
 		metrics.LogSummary()
 		return nil
 	}
@@ -206,7 +206,7 @@ func (c *ShrinkCmd) Run(ctx *kong.Context) error {
 	c.printSummary(toShrink)
 
 	if c.Simulate {
-		slog.Info("Simulation mode - no files will be processed")
+		fmt.Println("Simulation mode - no files will be processed")
 		return nil
 	}
 
@@ -680,17 +680,70 @@ func (c *ShrinkCmd) sortByEfficiency(media []ShrinkMedia) {
 
 func (c *ShrinkCmd) printSummary(media []ShrinkMedia) {
 	var totalSize, totalFuture, totalSavings int64
+	var totalTime int
+	typeBreakdown := make(map[string]struct {
+		count    int
+		size     int64
+		future   int64
+		savings  int64
+		procTime int
+	})
+
 	for _, m := range media {
 		totalSize += m.Size
 		totalFuture += m.FutureSize
 		totalSavings += m.Savings
+		totalTime += m.ProcessingTime
+
+		key := m.Category
+		if m.MediaType != "" {
+			key = fmt.Sprintf("%s: %s", m.Category, strings.TrimPrefix(m.MediaType, "video/"))
+		}
+		b := typeBreakdown[key]
+		b.count++
+		b.size += m.Size
+		b.future += m.FutureSize
+		b.savings += m.Savings
+		b.procTime += m.ProcessingTime
+		typeBreakdown[key] = b
 	}
 
-	slog.Info("Summary",
-		"count", len(media),
-		"current", utils.FormatSize(totalSize),
-		"future", utils.FormatSize(totalFuture),
-		"savings", utils.FormatSize(totalSavings))
+	// Print summary table
+	fmt.Println()
+	fmt.Printf("%-24s %6s %12s %12s %12s %12s %12s\n",
+		"Media Type", "Count", "Current", "Future", "Savings", "Proc Time", "Speed")
+	fmt.Println(strings.Repeat("-", 95))
+
+	// Sort keys for consistent output
+	keys := make([]string, 0, len(typeBreakdown))
+	for k := range typeBreakdown {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	for _, key := range keys {
+		b := typeBreakdown[key]
+		speed := ""
+		if b.procTime > 0 {
+			ratio := float64(b.size) / float64(b.future)
+			speed = fmt.Sprintf("%.1fx", ratio)
+		}
+		fmt.Printf("%-24s %6d %12s %12s %12s %12s %12s\n",
+			key, b.count,
+			utils.FormatSize(b.size),
+			utils.FormatSize(b.future),
+			utils.FormatSize(b.savings),
+			utils.FormatDuration(b.procTime),
+			speed)
+	}
+	fmt.Println(strings.Repeat("-", 95))
+	fmt.Printf("%-24s %6s %12s %12s %12s %12s\n",
+		"TOTAL", "",
+		utils.FormatSize(totalSize),
+		utils.FormatSize(totalFuture),
+		utils.FormatSize(totalSavings),
+		utils.FormatDuration(totalTime))
+	fmt.Println()
 }
 
 func (c *ShrinkCmd) confirm() bool {
@@ -755,6 +808,12 @@ func (c *ShrinkCmd) processMedia(media []ShrinkMedia, registry *ProcessorRegistr
 
 	wg.Wait()
 	close(done)
+
+	// Give progress printer a moment to finish final update
+	time.Sleep(50 * time.Millisecond)
+
+	// Clear progress display before returning
+	metrics.ClearProgress()
 }
 
 func (c *ShrinkCmd) processSingle(m ShrinkMedia, registry *ProcessorRegistry,

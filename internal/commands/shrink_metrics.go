@@ -347,29 +347,68 @@ func (m *ShrinkMetrics) LogSummary() {
 		totalDuration += int(stats.TotalDuration)
 	}
 
-	// Log summary
+	// Print summary table to stdout (always visible regardless of log level)
+	fmt.Println()
+	fmt.Println(strings.Repeat("=", 78))
+	fmt.Println("PROCESSING COMPLETE")
+	fmt.Println(strings.Repeat("=", 78))
+	fmt.Printf("%-12s %8s %8s %8s %10s %10s %8s\n",
+		"Media Type", "Success", "Failed", "Skipped", "Saved", "Time", "Speed")
+	fmt.Println(strings.Repeat("-", 78))
+
+	// Sort media types for consistent output
+	type mediaTypeStats struct {
+		name  string
+		stats *MediaTypeStats
+	}
+	var sortedTypes []mediaTypeStats
+	for mediaType, stats := range m.types {
+		sortedTypes = append(sortedTypes, mediaTypeStats{name: mediaType, stats: stats})
+	}
+	sort.Slice(sortedTypes, func(i, j int) bool {
+		return sortedTypes[i].name < sortedTypes[j].name
+	})
+
+	for _, mt := range sortedTypes {
+		speed := ""
+		if mt.stats.SpeedRatio() > 0 {
+			speed = fmt.Sprintf("%.1fx", mt.stats.SpeedRatio())
+		}
+		timeStr := utils.FormatDuration(mt.stats.TotalTime)
+		fmt.Printf("%-12s %8d %8d %8d %10s %10s %8s\n",
+			mt.name,
+			mt.stats.Success,
+			mt.stats.Failed,
+			mt.stats.Skipped,
+			utils.FormatSize(mt.stats.SpaceSaved()),
+			timeStr,
+			speed)
+	}
+	fmt.Println(strings.Repeat("-", 78))
+
+	overallSpeed := ""
+	if totalTime > 0 && totalDuration > 0 {
+		overallSpeed = fmt.Sprintf("%.1fx", float64(totalDuration)/float64(totalTime))
+	}
+	fmt.Printf("%-12s %8d %8d %8d %10s %10s %8s\n",
+		"TOTAL",
+		totalSuccess,
+		totalFailed,
+		totalProcessed-totalSuccess-totalFailed,
+		utils.FormatSize(totalSavings),
+		utils.FormatDuration(totalTime),
+		overallSpeed)
+	fmt.Println(strings.Repeat("=", 78))
+	fmt.Printf("Total duration: %s\n", duration.String())
+	fmt.Println()
+
+	// Also log for verbose mode
 	slog.Info("Processing complete",
 		"duration", duration.String(),
 		"processed", totalProcessed,
 		"success", totalSuccess,
 		"failed", totalFailed,
 		"savings", utils.FormatSize(totalSavings))
-
-	// Log per-type breakdown
-	for mediaType, stats := range m.types {
-		speed := ""
-		if stats.SpeedRatio() > 0 {
-			speed = fmt.Sprintf("%.1fx", stats.SpeedRatio())
-		}
-		slog.Info("Media type summary",
-			"type", mediaType,
-			"processed", stats.Processed,
-			"success", stats.Success,
-			"failed", stats.Failed,
-			"savings", utils.FormatSize(stats.SpaceSaved()),
-			"time", utils.FormatDuration(stats.TotalTime),
-			"speed", speed)
-	}
 }
 
 // GetStats returns stats for a specific media type

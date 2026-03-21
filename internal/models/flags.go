@@ -54,6 +54,6 @@ func SetupLogging(verbose bool) {
 	if verbose {
 		LogLevel.Set(slog.LevelDebug)
 	} else {
-		LogLevel.Set(slog.LevelInfo)
+		LogLevel.Set(slog.LevelWarn)
 	}
 }
