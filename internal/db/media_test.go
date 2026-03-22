@@ -81,7 +81,11 @@ func TestIsDatabaseDirectory(t *testing.T) {
 	}
 
 	tempFile := filepath.Join(tempDir, "data.db")
-	os.Create(tempFile)
+	f, err := os.Create(tempFile)
+	if err != nil {
+		t.Fatalf("Failed to create file: %v", err)
+	}
+	f.Close()
 	if IsDatabaseDirectory(tempFile) {
 		t.Errorf("Expected false for file")
 	}

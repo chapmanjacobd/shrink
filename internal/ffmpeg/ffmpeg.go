@@ -27,8 +27,8 @@ func NewFFmpegProcessor(cfg *models.ProcessorConfig) *FFmpegProcessor {
 
 // Process executes FFmpeg transcoding for audio/video files
 func (p *FFmpegProcessor) Process(ctx context.Context, m *models.ShrinkMedia, cfg *models.ProcessorConfig, registry models.ProcessorRegistry) models.ProcessResult {
-	// Check if FFmpeg is available
-	if !utils.CommandExists("ffmpeg") {
+	ffmpeg := utils.GetCommandPath("ffmpeg")
+	if ffmpeg == "" {
 		return models.ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("ffmpeg not installed")}
 	}
 
@@ -103,7 +103,7 @@ func (p *FFmpegProcessor) Process(ctx context.Context, m *models.ShrinkMedia, cf
 
 	// Build and execute FFmpeg command
 	args := p.buildFFmpegArgs(m.Path, outputPath, probe, videoStream, audioStream, albumArtStream, probe.SubtitleStreams)
-	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
+	cmd := exec.CommandContext(ctx, ffmpeg, args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		// Clean up any incomplete output file
@@ -385,6 +385,10 @@ func (p *FFmpegProcessor) buildScaleFilter(stereoMode string, width, height int)
 // Helper functions
 
 func (p *FFmpegProcessor) detectSilence(path string) []string {
+	ffmpeg := utils.GetCommandPath("ffmpeg")
+	if ffmpeg == "" {
+		return nil
+	}
 	args := []string{
 		"-nostdin",
 		"-hide_banner", "-v", "warning",
@@ -393,7 +397,7 @@ func (p *FFmpegProcessor) detectSilence(path string) []string {
 		"-vn", "-sn", "-f", "s16le", "-y", "/dev/null",
 	}
 
-	output, err := exec.Command("ffmpeg", args...).CombinedOutput()
+	output, err := exec.Command(ffmpeg, args...).CombinedOutput()
 	if err != nil {
 		slog.Warn("Silence detection failed", "path", path, "error", err)
 		return nil

@@ -101,7 +101,7 @@ func RunScenario(t *testing.T, s Scenario, runCmd func(dbPath, tempDir string, a
 
 	// Files that MUST exist
 	for _, expectedFile := range s.ExpectFiles {
-		path := filepath.Join(tempDir, expectedFile)
+		path := filepath.Join(tempDir, filepath.FromSlash(expectedFile))
 		if _, err := os.Stat(path); os.IsNotExist(err) {
 			t.Errorf("expected file missing: %s", expectedFile)
 		}
@@ -109,7 +109,7 @@ func RunScenario(t *testing.T, s Scenario, runCmd func(dbPath, tempDir string, a
 
 	// Files that MUST be deleted
 	for _, missingFile := range s.ExpectMissing {
-		path := filepath.Join(tempDir, missingFile)
+		path := filepath.Join(tempDir, filepath.FromSlash(missingFile))
 		if _, err := os.Stat(path); err == nil {
 			t.Errorf("expected file to be missing, but it exists: %s", missingFile)
 		}
@@ -117,7 +117,7 @@ func RunScenario(t *testing.T, s Scenario, runCmd func(dbPath, tempDir string, a
 
 	// Database state
 	for _, expectedDB := range s.ExpectDBState {
-		path := filepath.Join(tempDir, expectedDB.Path)
+		path := filepath.Join(tempDir, filepath.FromSlash(expectedDB.Path))
 		var td int64
 		var isShrinked int
 		err := db.QueryRow("SELECT time_deleted, is_shrinked FROM media WHERE path = ?", path).Scan(&td, &isShrinked)

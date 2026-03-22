@@ -39,7 +39,8 @@ func (p *TextProcessor) Process(ctx context.Context, m *models.ShrinkMedia, cfg 
 
 // processText handles the actual text/ebook processing
 func (p *TextProcessor) processText(ctx context.Context, m *models.ShrinkMedia, cfg *models.ProcessorConfig) models.ProcessResult {
-	if !utils.CommandExists("ebook-convert") {
+	ebookConvert := utils.GetCommandPath("ebook-convert")
+	if ebookConvert == "" {
 		return models.ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("calibre not installed")}
 	}
 
@@ -72,7 +73,7 @@ func (p *TextProcessor) processText(ctx context.Context, m *models.ShrinkMedia, 
 		args = append(args, "--pdf-engine", "pdftohtml")
 	}
 
-	cmd := exec.CommandContext(ctx, "ebook-convert", args...)
+	cmd := exec.CommandContext(ctx, ebookConvert, args...)
 	_, err := cmd.CombinedOutput()
 	if err != nil {
 		// Clean up on failure
@@ -107,7 +108,8 @@ func (p *TextProcessor) processText(ctx context.Context, m *models.ShrinkMedia, 
 
 // runOCR runs OCR on a PDF file using ocrmypdf
 func (p *TextProcessor) runOCR(path string, cfg *models.ProcessorConfig) string {
-	if !utils.CommandExists("ocrmypdf") {
+	ocrmypdf := utils.GetCommandPath("ocrmypdf")
+	if ocrmypdf == "" {
 		return ""
 	}
 
@@ -159,7 +161,7 @@ func (p *TextProcessor) runOCR(path string, cfg *models.ProcessorConfig) string 
 
 	args = append(args, path, outputPath)
 
-	cmd := exec.Command("ocrmypdf", args...)
+	cmd := exec.Command(ocrmypdf, args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		outputStr := string(output)
@@ -185,7 +187,11 @@ func (p *TextProcessor) runOCR(path string, cfg *models.ProcessorConfig) string 
 
 // getCalibreVersion returns the Calibre version as a tuple
 func (p *TextProcessor) getCalibreVersion() (int, int, int) {
-	cmd := exec.Command("ebook-convert", "--version")
+	ebookConvert := utils.GetCommandPath("ebook-convert")
+	if ebookConvert == "" {
+		return 0, 0, 0
+	}
+	cmd := exec.Command(ebookConvert, "--version")
 	output, err := cmd.Output()
 	if err != nil {
 		return 0, 0, 0

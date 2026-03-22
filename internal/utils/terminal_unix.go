@@ -4,12 +4,28 @@ package utils
 
 import (
 	"os"
+	"os/exec"
 	"os/signal"
 	"sync"
 	"syscall"
 
 	"golang.org/x/term"
 )
+
+// CommandExists checks if a command is available in PATH
+func CommandExists(name string) bool {
+	_, err := exec.LookPath(name)
+	return err == nil
+}
+
+// GetCommandPath returns the absolute path to a command
+func GetCommandPath(name string) string {
+	path, err := exec.LookPath(name)
+	if err != nil {
+		return ""
+	}
+	return path
+}
 
 // TerminalSize tracks the current terminal dimensions
 type TerminalSize struct {

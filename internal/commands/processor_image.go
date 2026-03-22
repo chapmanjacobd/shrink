@@ -184,14 +184,14 @@ func isImageMagickEnvironmentError(errorLog []string) bool {
 	return false
 }
 
-// getImageMagickCommand returns the appropriate ImageMagick command ("magick" or "convert")
+// getImageMagickCommand returns the appropriate ImageMagick command path ("magick" or "convert")
 // Returns empty string if neither is available
 func getImageMagickCommand() string {
-	if utils.CommandExists("magick") {
-		return "magick"
+	if path := utils.GetCommandPath("magick"); path != "" {
+		return path
 	}
-	if utils.CommandExists("convert") {
-		return "convert"
+	if path := utils.GetCommandPath("convert"); path != "" {
+		return path
 	}
 	return ""
 }

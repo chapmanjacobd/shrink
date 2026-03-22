@@ -28,7 +28,7 @@ func NewArchiveProcessor(ffmpeg *ffmpeg.FFmpegProcessor) *ArchiveProcessor {
 	return &ArchiveProcessor{
 		BaseProcessor: BaseProcessor{category: "Archived"},
 		ffmpeg:        ffmpeg,
-		unarInstalled: utils.CommandExists("lsar"),
+		unarInstalled: utils.CommandExists("lsar") && utils.CommandExists("unar"),
 	}
 }
 
@@ -65,13 +65,15 @@ func (p *ArchiveProcessor) CanProcess(m *models.ShrinkMedia) bool {
 func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *models.ShrinkMedia, cfg *models.ProcessorConfig,
 	imageProc *ImageProcessor, ffmpegProc *ffmpeg.FFmpegProcessor, registry models.ProcessorRegistry,
 ) models.ProcessResult {
-	if !p.unarInstalled {
-		return models.ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("unar not installed")}
+	lsar := utils.GetCommandPath("lsar")
+	unar := utils.GetCommandPath("unar")
+	if lsar == "" || unar == "" {
+		return models.ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("unar/lsar not installed")}
 	}
 
 	// Check for multi-part archives (XAD volumes)
 	var partFiles []string
-	if lsarOutput, err := exec.Command("lsar", "-json", m.Path).CombinedOutput(); err == nil {
+	if lsarOutput, err := exec.Command(lsar, "-json", m.Path).CombinedOutput(); err == nil {
 		jsonBytes := extractLSARJSON(lsarOutput)
 		var lsarJSON struct {
 			LsarProperties struct {
@@ -92,7 +94,7 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *models.Shri
 
 	// Use -no-directory and -force-rename to extract files directly into outputDir without creating subfolders
 	// -force-rename is needed for nested multi-part archives
-	cmd := exec.CommandContext(ctx, "unar", "-no-directory", "-force-rename", "-o", outputDir, m.Path)
+	cmd := exec.CommandContext(ctx, unar, "-no-directory", "-force-rename", "-o", outputDir, m.Path)
 	_, err := cmd.CombinedOutput()
 	if err != nil {
 		// Clean up on failure
@@ -218,32 +220,35 @@ func (p *ArchiveProcessor) EstimateSizeForArchive(m *models.ShrinkMedia, cfg *mo
 
 	// Check for multi-part archives and verify all parts exist
 	totalArchiveSize := m.Size
-	if lsarOutput, err := exec.Command("lsar", "-json", m.Path).CombinedOutput(); err == nil {
-		jsonBytes := extractLSARJSON(lsarOutput)
-		var lsarJSON struct {
-			LsarProperties struct {
-				XADVolumes []string `json:"XADVolumes"`
-			} `json:"lsarProperties"`
-		}
-		if json.Unmarshal(jsonBytes, &lsarJSON) == nil && len(lsarJSON.LsarProperties.XADVolumes) > 0 {
-			// Sum up sizes of all parts
-			totalArchiveSize = 0
-			allPartsExist := true
-			for _, partFile := range lsarJSON.LsarProperties.XADVolumes {
-				if !filepath.IsAbs(partFile) {
-					partFile = filepath.Join(filepath.Dir(m.Path), partFile)
-				}
-				if info, err := os.Stat(partFile); err == nil {
-					totalArchiveSize += info.Size()
-				} else {
-					// Part file missing - archive is broken
-					allPartsExist = false
-					lsarFailed = true
-				}
+	lsar := utils.GetCommandPath("lsar")
+	if lsar != "" {
+		if lsarOutput, err := exec.Command(lsar, "-json", m.Path).CombinedOutput(); err == nil {
+			jsonBytes := extractLSARJSON(lsarOutput)
+			var lsarJSON struct {
+				LsarProperties struct {
+					XADVolumes []string `json:"XADVolumes"`
+				} `json:"lsarProperties"`
 			}
-			// If any part is missing, treat as broken archive
-			if !allPartsExist {
-				return 0, 0, false, 0
+			if json.Unmarshal(jsonBytes, &lsarJSON) == nil && len(lsarJSON.LsarProperties.XADVolumes) > 0 {
+				// Sum up sizes of all parts
+				totalArchiveSize = 0
+				allPartsExist := true
+				for _, partFile := range lsarJSON.LsarProperties.XADVolumes {
+					if !filepath.IsAbs(partFile) {
+						partFile = filepath.Join(filepath.Dir(m.Path), partFile)
+					}
+					if info, err := os.Stat(partFile); err == nil {
+						totalArchiveSize += info.Size()
+					} else {
+						// Part file missing - archive is broken
+						allPartsExist = false
+						lsarFailed = true
+					}
+				}
+				// If any part is missing, treat as broken archive
+				if !allPartsExist {
+					return 0, 0, false, 0
+				}
 			}
 		}
 	}
@@ -349,21 +354,24 @@ func (p *ArchiveProcessor) getPartFiles(path string) []string {
 	baseName := filepath.Base(path)
 
 	// Get parts from lsar XADVolumes
-	if lsarOutput, err := exec.Command("lsar", "-json", path).CombinedOutput(); err == nil {
-		jsonBytes := extractLSARJSON(lsarOutput)
-		var lsarJSON struct {
-			LsarProperties struct {
-				XADVolumes []string `json:"XADVolumes"`
-			} `json:"lsarProperties"`
-		}
-		if json.Unmarshal(jsonBytes, &lsarJSON) == nil && len(lsarJSON.LsarProperties.XADVolumes) > 0 {
-			for _, partFile := range lsarJSON.LsarProperties.XADVolumes {
-				if !filepath.IsAbs(partFile) {
-					partFile = filepath.Join(dir, partFile)
-				}
-				// Only include files that exist
-				if _, err := os.Stat(partFile); err == nil {
-					partFilesMap[partFile] = true
+	lsar := utils.GetCommandPath("lsar")
+	if lsar != "" {
+		if lsarOutput, err := exec.Command(lsar, "-json", path).CombinedOutput(); err == nil {
+			jsonBytes := extractLSARJSON(lsarOutput)
+			var lsarJSON struct {
+				LsarProperties struct {
+					XADVolumes []string `json:"XADVolumes"`
+				} `json:"lsarProperties"`
+			}
+			if json.Unmarshal(jsonBytes, &lsarJSON) == nil && len(lsarJSON.LsarProperties.XADVolumes) > 0 {
+				for _, partFile := range lsarJSON.LsarProperties.XADVolumes {
+					if !filepath.IsAbs(partFile) {
+						partFile = filepath.Join(dir, partFile)
+					}
+					// Only include files that exist
+					if _, err := os.Stat(partFile); err == nil {
+						partFilesMap[partFile] = true
+					}
 				}
 			}
 		}
@@ -424,7 +432,11 @@ func (p *ArchiveProcessor) getPartFiles(path string) []string {
 
 // lsarWithStatus lists archive contents and returns whether lsar encountered an error
 func (p *ArchiveProcessor) lsarWithStatus(path string) ([]models.ShrinkMedia, bool) {
-	output, err := exec.Command("lsar", "-json", path).CombinedOutput()
+	lsar := utils.GetCommandPath("lsar")
+	if lsar == "" {
+		return nil, true
+	}
+	output, err := exec.Command(lsar, "-json", path).CombinedOutput()
 	lsarFailed := err != nil
 
 	// On Windows, lsar may output text before/after JSON. Find JSON boundaries.

@@ -3,6 +3,7 @@ package ffmpeg
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -15,54 +16,95 @@ func setupMockFFmpeg(t *testing.T, ffprobeOutput string, ffmpegBehavior string, 
 	t.Helper()
 	tempDir := t.TempDir()
 
-	// Mock ffprobe
-	ffprobeScript := filepath.Join(tempDir, "ffprobe")
-	ffprobeContent := `#!/bin/bash
-if [[ "$*" == *"-count_frames"* ]]; then
-	echo "10"
-	exit 0
-fi
-echo '` + strings.ReplaceAll(ffprobeOutput, "'", "'\\''") + `'
-`
-	os.WriteFile(ffprobeScript, []byte(ffprobeContent), 0o755)
+	mockSource := `
+package main
 
-	// Mock ffmpeg
-	ffmpegScript := filepath.Join(tempDir, "ffmpeg")
-	var ffmpegContent string
-	switch ffmpegBehavior {
-	case "success":
-		ffmpegContent = `#!/bin/bash
-# Find output argument
-for arg in "$@"; do
-	if [[ $arg == *.mkv || $arg == *.mka || $arg == *.avif ]]; then
-		echo "mock output" > "$arg"
-		exit 0
-	fi
-done
-# In case of silence detection
-if [[ "$*" == *silencedetect* ]]; then
-	echo '` + silenceOutput + `' >&2
-	exit 0
-fi
-`
-	case "fail":
-		ffmpegContent = `#!/bin/bash
-echo "Unknown encoder" >&2
-exit 1
-`
-	case "timeout":
-		ffmpegContent = `#!/bin/bash
-sleep 5
-exit 0
-`
+import (
+	"fmt"
+	"os"
+	"strings"
+	"time"
+)
+
+func main() {
+	name := os.Args[0]
+	if strings.Contains(strings.ToLower(name), "ffprobe") {
+		for _, arg := range os.Args {
+			if arg == "-count_frames" {
+				fmt.Println("10")
+				return
+			}
+		}
+		fmt.Print(os.Getenv("MOCK_FFPROBE_OUTPUT"))
+		return
 	}
-	os.WriteFile(ffmpegScript, []byte(ffmpegContent), 0o755)
+
+	behavior := os.Getenv("MOCK_FFMPEG_BEHAVIOR")
+	switch behavior {
+	case "success":
+		for _, arg := range os.Args {
+			if strings.HasSuffix(arg, ".mkv") || strings.HasSuffix(arg, ".mka") || strings.HasSuffix(arg, ".avif") {
+				os.WriteFile(arg, []byte("mock output"), 0644)
+				return
+			}
+		}
+		if contains(os.Args, "silencedetect") {
+			fmt.Fprint(os.Stderr, os.Getenv("MOCK_SILENCE_OUTPUT"))
+			return
+		}
+	case "fail":
+		fmt.Fprintln(os.Stderr, "Unknown encoder")
+		os.Exit(1)
+	case "timeout":
+		time.Sleep(2 * time.Second)
+		return
+	}
+}
+
+func contains(slice []string, val string) bool {
+	for _, item := range slice {
+		if strings.Contains(item, val) {
+			return true
+		}
+	}
+	return false
+}
+`
+	sourceFile := filepath.Join(tempDir, "mock.go")
+	os.WriteFile(sourceFile, []byte(mockSource), 0o644)
+
+	ffprobeExe := filepath.Join(tempDir, "ffprobe")
+	ffmpegExe := filepath.Join(tempDir, "ffmpeg")
+	if os.PathSeparator == '\\' {
+		ffprobeExe += ".exe"
+		ffmpegExe += ".exe"
+	}
+
+	importCmd := exec.Command("go", "build", "-o", ffprobeExe, sourceFile)
+	if output, err := importCmd.CombinedOutput(); err != nil {
+		t.Fatalf("failed to build mock ffprobe: %v\n%s", err, output)
+	}
+
+	// Copy ffprobe to ffmpeg to avoid double compilation
+	data, err := os.ReadFile(ffprobeExe)
+	if err != nil {
+		t.Fatalf("failed to read mock ffprobe: %v", err)
+	}
+	if err := os.WriteFile(ffmpegExe, data, 0o755); err != nil {
+		t.Fatalf("failed to write mock ffmpeg: %v", err)
+	}
 
 	oldPath := os.Getenv("PATH")
 	os.Setenv("PATH", tempDir+string(os.PathListSeparator)+oldPath)
+	os.Setenv("MOCK_FFPROBE_OUTPUT", ffprobeOutput)
+	os.Setenv("MOCK_FFMPEG_BEHAVIOR", ffmpegBehavior)
+	os.Setenv("MOCK_SILENCE_OUTPUT", silenceOutput)
 
 	return tempDir, func() {
 		os.Setenv("PATH", oldPath)
+		os.Unsetenv("MOCK_FFPROBE_OUTPUT")
+		os.Unsetenv("MOCK_FFMPEG_BEHAVIOR")
+		os.Unsetenv("MOCK_SILENCE_OUTPUT")
 	}
 }
 

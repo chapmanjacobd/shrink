@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+
+	"github.com/chapmanjacobd/shrink/internal/utils"
 )
 
 // FFProbeResult represents ffprobe JSON output
@@ -49,7 +51,11 @@ type FFProbeFormat struct {
 
 // ProbeMedia probes a media file and returns metadata
 func ProbeMedia(path string) (*FFProbeResult, error) {
-	cmd := exec.Command("ffprobe",
+	ffprobe := utils.GetCommandPath("ffprobe")
+	if ffprobe == "" {
+		return nil, fmt.Errorf("ffprobe not installed")
+	}
+	cmd := exec.Command(ffprobe,
 		"-v", "quiet",
 		"-print_format", "json",
 		"-show_format",
@@ -125,10 +131,11 @@ func (p *FFmpegProcessor) isAnimationFromProbe(probe *FFProbeResult) *bool {
 		return &result
 	}
 
+	ffprobe := utils.GetCommandPath("ffprobe")
 	for _, s := range probe.VideoStreams {
 		frames := parseInt(s.NbFrames)
-		if frames == 0 {
-			cmd := exec.Command("ffprobe",
+		if frames == 0 && ffprobe != "" {
+			cmd := exec.Command(ffprobe,
 				"-v", "error",
 				"-count_frames",
 				"-select_streams", "v:0",
@@ -152,7 +159,11 @@ func (p *FFmpegProcessor) isAnimationFromProbe(probe *FFProbeResult) *bool {
 }
 
 func (p *FFmpegProcessor) countFrames(path string) int {
-	cmd := exec.Command("ffprobe",
+	ffprobe := utils.GetCommandPath("ffprobe")
+	if ffprobe == "" {
+		return 0
+	}
+	cmd := exec.Command(ffprobe,
 		"-v", "fatal",
 		"-select_streams", "v:0",
 		"-count_frames",

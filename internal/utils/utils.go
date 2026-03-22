@@ -3,18 +3,11 @@ package utils
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 )
-
-// CommandExists checks if a command is available in PATH
-func CommandExists(name string) bool {
-	_, err := exec.LookPath(name)
-	return err == nil
-}
 
 // FolderSize calculates the total size of a folder
 func FolderSize(path string) int64 {
