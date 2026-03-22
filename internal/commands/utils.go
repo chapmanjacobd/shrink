@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -103,34 +102,13 @@ func (c *ShrinkCmd) enrichMetadata(m *models.ShrinkMedia) {
 	m.Duration = probed.Duration
 	m.VideoCount = len(probed.VideoStreams)
 	m.AudioCount = len(probed.AudioStreams)
-	m.SubtitleCount = len(probed.SubtitleStreams)
 
-	var vCodecs, aCodecs, sCodecs []string
 	for _, s := range probed.VideoStreams {
-		vCodecs = append(vCodecs, s.CodecName)
 		if m.Width == 0 {
 			m.Width = s.Width
 			m.Height = s.Height
 		}
 	}
-	for _, s := range probed.AudioStreams {
-		codecInfo := s.CodecName
-		if s.Channels > 0 {
-			codecInfo += fmt.Sprintf(" %dch", s.Channels)
-		}
-		aCodecs = append(aCodecs, codecInfo)
-	}
-	for _, s := range probed.SubtitleStreams {
-		label := s.CodecName
-		if lang := s.Tags["language"]; lang != "" {
-			label = lang
-		}
-		sCodecs = append(sCodecs, label)
-	}
-
-	m.VideoCodecs = strings.Join(vCodecs, ", ")
-	m.AudioCodecs = strings.Join(aCodecs, ", ")
-	m.SubtitleCodecs = strings.Join(sCodecs, ", ")
 }
 
 // applyTimestamps applies timestamps to a file or folder (recursively for folders)

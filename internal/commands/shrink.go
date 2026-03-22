@@ -197,16 +197,13 @@ func (c *ShrinkCmd) loadAllMedia() ([]models.ShrinkMedia, error) {
 
 		for _, r := range records {
 			allMedia = append(allMedia, models.ShrinkMedia{
-				Path:           r.Path,
-				Size:           r.Size,
-				Duration:       r.Duration,
-				VideoCount:     r.VideoCount,
-				AudioCount:     r.AudioCount,
-				VideoCodecs:    r.VideoCodecs,
-				AudioCodecs:    r.AudioCodecs,
-				SubtitleCodecs: r.SubtitleCodecs,
-				MediaType:      r.MediaType,
-				Ext:            strings.ToLower(filepath.Ext(r.Path)),
+				Path:       r.Path,
+				Size:       r.Size,
+				Duration:   r.Duration,
+				VideoCount: r.VideoCount,
+				AudioCount: r.AudioCount,
+				MediaType:  r.MediaType,
+				Ext:        strings.ToLower(filepath.Ext(r.Path)),
 			})
 		}
 	}
@@ -275,13 +272,11 @@ func (c *ShrinkCmd) SortByEfficiency(media []models.ShrinkMedia) {
 
 func (c *ShrinkCmd) PrintSummary(media []models.ShrinkMedia) {
 	var totalSize, totalFuture, totalSavings int64
-	var totalTime int
 	type breakdown struct {
-		count    int
-		size     int64
-		future   int64
-		savings  int64
-		procTime int
+		count   int
+		size    int64
+		future  int64
+		savings int64
 	}
 	typeBreakdown := make(map[string]breakdown)
 
@@ -289,7 +284,6 @@ func (c *ShrinkCmd) PrintSummary(media []models.ShrinkMedia) {
 		totalSize += m.Size
 		totalFuture += m.FutureSize
 		totalSavings += m.Savings
-		totalTime += m.ProcessingTime
 
 		key := m.DisplayCategory()
 		b := typeBreakdown[key]
@@ -297,13 +291,12 @@ func (c *ShrinkCmd) PrintSummary(media []models.ShrinkMedia) {
 		b.size += m.Size
 		b.future += m.FutureSize
 		b.savings += m.Savings
-		b.procTime += m.ProcessingTime
 		typeBreakdown[key] = b
 	}
 
 	// Print summary table
 	fmt.Println()
-	headers := []string{"Media Type", "Count", "Current", "Future", "Savings", "ETA", "Speed"}
+	headers := []string{"Media Type", "Count", "Current", "Future", "Savings", "Speed"}
 	var rows [][]string
 
 	// Sort keys for consistent output
@@ -315,18 +308,14 @@ func (c *ShrinkCmd) PrintSummary(media []models.ShrinkMedia) {
 
 	for _, key := range keys {
 		b := typeBreakdown[key]
-		speed := ""
-		if b.procTime > 0 {
-			ratio := float64(b.size) / float64(b.future)
-			speed = fmt.Sprintf("%.1fx", ratio)
-		}
+		ratio := float64(b.size) / float64(b.future)
+		speed := fmt.Sprintf("%.1fx", ratio)
 		rows = append(rows, []string{
 			key,
 			strconv.Itoa(b.count),
 			utils.FormatSize(b.size),
 			utils.FormatSize(b.future),
 			utils.FormatSize(b.savings),
-			utils.FormatDuration(float64(b.procTime)),
 			speed,
 		})
 	}
@@ -338,7 +327,6 @@ func (c *ShrinkCmd) PrintSummary(media []models.ShrinkMedia) {
 		utils.FormatSize(totalSize),
 		utils.FormatSize(totalFuture),
 		utils.FormatSize(totalSavings),
-		utils.FormatDuration(float64(totalTime)),
 		"",
 	})
 

@@ -57,39 +57,21 @@ func (h *ProgressLogHandler) WithGroup(name string) slog.Handler {
 
 // MediaTypeStats tracks processing statistics for a specific media type
 type MediaTypeStats struct {
-	Total          int
-	Processed      int
-	Success        int
-	Failed         int
-	Skipped        int
-	Running        int
-	CompressedSize int64
-	TotalSize      int64
-	FutureSize     int64
-	TotalTime      float64 // processing time in seconds
-	TotalDuration  int64   // total media duration in seconds (for speed ratio)
-	CompletedAt    time.Time
-}
-
-// SuccessRate returns the success rate as a percentage
-func (s *MediaTypeStats) SuccessRate() float64 {
-	if s.Processed == 0 {
-		return 0
-	}
-	return float64(s.Success) / float64(s.Processed) * 100
+	Total         int
+	Processed     int
+	Success       int
+	Failed        int
+	Skipped       int
+	Running       int
+	TotalSize     int64
+	FutureSize    int64
+	TotalTime     float64 // processing time in seconds
+	TotalDuration int64   // total media duration in seconds (for speed ratio)
 }
 
 // SpaceSaved returns bytes saved
 func (s *MediaTypeStats) SpaceSaved() int64 {
 	return s.TotalSize - s.FutureSize
-}
-
-// AvgProcessingTime returns average processing time per file
-func (s *MediaTypeStats) AvgProcessingTime() int {
-	if s.Processed == 0 {
-		return 0
-	}
-	return int(s.TotalTime / float64(s.Processed))
 }
 
 // SpeedRatio returns the processing speed ratio (e.g., 2.5x realtime)
@@ -104,7 +86,6 @@ func (s *MediaTypeStats) SpeedRatio() float64 {
 type ShrinkMetrics struct {
 	mu            sync.RWMutex
 	started       time.Time
-	completed     time.Time
 	types         map[string]*MediaTypeStats
 	currentFile   string
 	lastPrintTime time.Time
@@ -148,7 +129,6 @@ func (m *ShrinkMetrics) RecordSuccess(mediaType string, size, futureSize int64, 
 	stats.FutureSize += futureSize
 	stats.TotalTime += processingTime
 	stats.TotalDuration += duration
-	stats.CompletedAt = time.Now()
 }
 
 // RecordFailure records a failed processing
@@ -160,7 +140,6 @@ func (m *ShrinkMetrics) RecordFailure(mediaType string, processingTime float64) 
 	stats.Processed++
 	stats.Failed++
 	stats.TotalTime += processingTime
-	stats.CompletedAt = time.Now()
 }
 
 // RecordRunning records that a media item is starting to be processed
@@ -388,12 +367,11 @@ func (m *ShrinkMetrics) ClearProgress() {
 // LogSummary logs the final metrics summary
 func (m *ShrinkMetrics) LogSummary() {
 	m.mu.Lock()
-	m.completed = time.Now()
-	duration := m.completed.Sub(m.started)
+	duration := time.Since(m.started)
 
 	// Calculate totals
 	var totalProcessed, totalSuccess, totalFailed int
-	var totalSize, totalFuture, totalSavings int64
+	var totalSavings int64
 	var totalDuration int64
 	var totalTime float64
 
@@ -401,8 +379,6 @@ func (m *ShrinkMetrics) LogSummary() {
 		totalProcessed += stats.Processed
 		totalSuccess += stats.Success
 		totalFailed += stats.Failed
-		totalSize += stats.TotalSize
-		totalFuture += stats.FutureSize
 		totalSavings += stats.SpaceSaved()
 		totalTime += stats.TotalTime
 		totalDuration += stats.TotalDuration

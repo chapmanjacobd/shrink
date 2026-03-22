@@ -278,7 +278,6 @@ func (e *Engine) processSingle(ctx context.Context, m models.ShrinkMedia) models
 	startTime := time.Now()
 	result := processor.Process(processCtx, &m, e.cfg, e.registry)
 	elapsedSeconds := time.Since(startTime).Seconds()
-	m.ProcessingTime = int(elapsedSeconds)
 
 	// Handle processing errors
 	if result.Error != nil {
