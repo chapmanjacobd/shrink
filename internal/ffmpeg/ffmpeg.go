@@ -76,13 +76,15 @@ func (p *FFmpegProcessor) Process(ctx context.Context, m *models.ShrinkMedia, cf
 	}
 
 	// Check if already encoded optimally
+	pathLower := strings.ToLower(m.Path)
+	if strings.HasSuffix(pathLower, ".av1.mkv") || strings.HasSuffix(pathLower, ".opus") || strings.HasSuffix(pathLower, ".mka") {
+		return models.ProcessResult{SourcePath: m.Path, Success: true, Skipped: true, Outputs: []models.ProcessOutputFile{{Path: m.Path, Size: m.Size}}}
+	}
 	if videoStream != nil && videoStream.CodecName == "av1" {
-		slog.Info("Already AV1", "path", m.Path)
-		return models.ProcessResult{SourcePath: m.Path, Success: true, Outputs: []models.ProcessOutputFile{{Path: m.Path, Size: m.Size}}}
+		return models.ProcessResult{SourcePath: m.Path, Success: true, Skipped: true, Outputs: []models.ProcessOutputFile{{Path: m.Path, Size: m.Size}}}
 	}
 	if audioStream != nil && audioStream.CodecName == "opus" && videoStream == nil {
-		slog.Info("Already Opus", "path", m.Path)
-		return models.ProcessResult{SourcePath: m.Path, Success: true, Outputs: []models.ProcessOutputFile{{Path: m.Path, Size: m.Size}}}
+		return models.ProcessResult{SourcePath: m.Path, Success: true, Skipped: true, Outputs: []models.ProcessOutputFile{{Path: m.Path, Size: m.Size}}}
 	}
 
 	// Determine output suffix
@@ -96,6 +98,12 @@ func (p *FFmpegProcessor) Process(ctx context.Context, m *models.ShrinkMedia, cf
 	}
 
 	outputPath := genOutputPath(m.Path, outputSuffix)
+
+	// FFmpeg cannot edit existing files in-place
+	if m.Path == outputPath {
+		slog.Info("Input and output paths are identical, skipping", "path", m.Path)
+		return models.ProcessResult{SourcePath: m.Path, Success: true, Outputs: []models.ProcessOutputFile{{Path: m.Path, Size: m.Size}}}
+	}
 
 	// Build and execute FFmpeg command
 	args := p.buildFFmpegArgs(m.Path, outputPath, probe, videoStream, audioStream, albumArtStream, probe.SubtitleStreams)

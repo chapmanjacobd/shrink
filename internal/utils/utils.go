@@ -355,3 +355,74 @@ func ShouldOverrideDuration(reportedDuration float64, size int64, ext string) (f
 	// Override with estimated duration
 	return estimatedDuration, true
 }
+
+// PrintTable prints a formatted table with dynamic column widths
+func PrintTable(headers []string, rows [][]string) {
+	fmt.Print(PrintTableToString(headers, rows))
+}
+
+// PrintTableToString returns a formatted table string with dynamic column widths
+func PrintTableToString(headers []string, rows [][]string) string {
+	if len(headers) == 0 {
+		return ""
+	}
+
+	numCols := len(headers)
+	colWidths := make([]int, numCols)
+
+	// Calculate max width for each column (headers)
+	for i, h := range headers {
+		if len(h) > colWidths[i] {
+			colWidths[i] = len(h)
+		}
+	}
+
+	// Calculate max width for each column (rows)
+	for _, row := range rows {
+		for i, cell := range row {
+			if i < numCols && len(cell) > colWidths[i] {
+				colWidths[i] = len(cell)
+			}
+		}
+	}
+
+	// Build format string
+	var headerParts []string
+	for _, w := range colWidths {
+		headerParts = append(headerParts, fmt.Sprintf("%%-%ds", w))
+	}
+	format := strings.Join(headerParts, " ") + "\n"
+
+	var sb strings.Builder
+
+	// Print headers
+	headerArgs := make([]interface{}, len(headers))
+	for i, h := range headers {
+		headerArgs[i] = h
+	}
+	sb.WriteString(fmt.Sprintf(format, headerArgs...))
+
+	// Print separator
+	totalWidth := 0
+	for _, w := range colWidths {
+		totalWidth += w
+	}
+	totalWidth += len(colWidths) - 1 // add spaces between columns
+	sb.WriteString(strings.Repeat("-", totalWidth))
+	sb.WriteString("\n")
+
+	// Print rows
+	for _, row := range rows {
+		rowArgs := make([]interface{}, numCols)
+		for i := 0; i < numCols; i++ {
+			if i < len(row) {
+				rowArgs[i] = row[i]
+			} else {
+				rowArgs[i] = ""
+			}
+		}
+		sb.WriteString(fmt.Sprintf(format, rowArgs...))
+	}
+
+	return sb.String()
+}

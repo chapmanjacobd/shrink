@@ -39,6 +39,8 @@ jobs:
       - name: Install system dependencies
         run: |
           if [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
+            # Enable snapd for snap packages
+            sudo snap install core
             make ubuntu-deps
           elif [ "${{ matrix.os }}" = "macos-latest" ]; then
             make macos-deps

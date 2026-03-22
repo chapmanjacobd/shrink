@@ -34,12 +34,11 @@ ubuntu-deps:
 		groff \
 		pandoc \
 		wget \
-		imagemagick \
 		unar \
 		libheif-plugin-aomdec \
 		libheif-plugin-aomenc \
-		libheif-plugin-libde265 \
-		libavif15
+		libheif-plugin-libde265
+	sudo snap install imagemagick --classic
 	sudo -v && wget -qO- https://download.calibre-ebook.com/linux-installer.sh | sudo sh /dev/stdin
 
 macos-deps:

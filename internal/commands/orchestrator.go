@@ -131,9 +131,8 @@ func (c *ShrinkCmd) printSummary(media []models.ShrinkMedia) {
 
 	// Print summary table
 	fmt.Println()
-	fmt.Printf("%-24s %6s %12s %12s %12s %12s %12s\n",
-		"Media Type", "Count", "Current", "Future", "Savings", "ETA", "Speed")
-	fmt.Println(strings.Repeat("-", 95))
+	headers := []string{"Media Type", "Count", "Current", "Future", "Savings", "ETA", "Speed"}
+	var rows [][]string
 
 	// Sort keys for consistent output
 	keys := make([]string, 0, len(typeBreakdown))
@@ -149,21 +148,29 @@ func (c *ShrinkCmd) printSummary(media []models.ShrinkMedia) {
 			ratio := float64(b.size) / float64(b.future)
 			speed = fmt.Sprintf("%.1fx", ratio)
 		}
-		fmt.Printf("%-24s %6d %12s %12s %12s %12s %12s\n",
-			key, b.count,
+		rows = append(rows, []string{
+			key,
+			strconv.Itoa(b.count),
 			utils.FormatSize(b.size),
 			utils.FormatSize(b.future),
 			utils.FormatSize(b.savings),
 			utils.FormatDuration(b.procTime),
-			speed)
+			speed,
+		})
 	}
-	fmt.Println(strings.Repeat("-", 95))
-	fmt.Printf("%-24s %6s %12s %12s %12s %12s\n",
-		"TOTAL", "",
+
+	// Add TOTAL row
+	rows = append(rows, []string{
+		"TOTAL",
+		"",
 		utils.FormatSize(totalSize),
 		utils.FormatSize(totalFuture),
 		utils.FormatSize(totalSavings),
-		utils.FormatDuration(totalTime))
+		utils.FormatDuration(totalTime),
+		"",
+	})
+
+	utils.PrintTable(headers, rows)
 	fmt.Println()
 }
 
@@ -177,8 +184,8 @@ func (c *ShrinkCmd) printUnknownExtensions() {
 	}
 
 	fmt.Println("Unknown File Extensions Scanned")
-	fmt.Printf("%-15s %12s\n", "Extension", "Total Size")
-	fmt.Println(strings.Repeat("-", 30))
+	headers := []string{"Extension", "Total Size"}
+	var rows [][]string
 
 	// Sort by size descending
 	type extSize struct {
@@ -199,8 +206,9 @@ func (c *ShrinkCmd) printUnknownExtensions() {
 	})
 
 	for _, es := range sorted {
-		fmt.Printf("%-15s %12s\n", es.ext, utils.FormatSize(es.size))
+		rows = append(rows, []string{es.ext, utils.FormatSize(es.size)})
 	}
+	utils.PrintTable(headers, rows)
 	fmt.Println()
 }
 
@@ -327,6 +335,11 @@ func (c *ShrinkCmd) processSingle(ctx context.Context, m models.ShrinkMedia, reg
 	defer cancel()
 
 	result := processor.Process(processCtx, &m, cfg, registry)
+
+	// Handle skipped files (already optimized)
+	if result.Skipped {
+		return c.handleSkippedProcessing(m, result, metrics)
+	}
 
 	// Handle processing errors
 	if result.Error != nil {
@@ -573,4 +586,12 @@ func (c *ShrinkCmd) getActualDuration(path string) float64 {
 		return 0
 	}
 	return duration
+}
+
+// handleSkippedProcessing handles files that were skipped (already optimized)
+func (c *ShrinkCmd) handleSkippedProcessing(m models.ShrinkMedia, result models.ProcessResult, metrics *ShrinkMetrics) models.ProcessResult {
+	// For already optimized files, we record success with no savings
+	metrics.RecordSuccess(m.DisplayCategory(), m.Size, m.Size, 0, int64(m.Duration))
+	db.MarkShrinked(c.sqlDBs, m.Path)
+	return result
 }

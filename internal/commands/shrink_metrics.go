@@ -7,6 +7,7 @@ import (
 	"maps"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -222,11 +223,9 @@ func (m *ShrinkMetrics) PrintProgress() {
 	sb.WriteString(displayPath)
 	sb.WriteString("\n\n")
 
-	// Print summary table header
-	sb.WriteString(fmt.Sprintf("%-12s %6s %6s %6s %6s %10s %10s %8s\n",
-		"Media Type", "Queue", "Skip", "Fail", "OK", "Saved", "Time", "Speed"))
-	sb.WriteString(strings.Repeat("-", 78))
-	sb.WriteString("\n")
+	// Print summary table
+	headers := []string{"Media Type", "Queue", "Skip", "Fail", "OK", "Saved", "Time", "Speed"}
+	var rows [][]string
 
 	// Sort media types by Queue (descending) for consistent ordering
 	type mediaTypeStats struct {
@@ -283,34 +282,35 @@ func (m *ShrinkMetrics) PrintProgress() {
 			speed = fmt.Sprintf("%.1fx", mt.stats.SpeedRatio())
 		}
 		timeStr := utils.FormatDuration(mt.stats.TotalTime)
-		sb.WriteString(fmt.Sprintf("%-12s %6d %6d %6d %6d %10s %10s %8s\n",
+		rows = append(rows, []string{
 			mt.name,
-			mt.queue,
-			mt.stats.Skipped,
-			mt.stats.Failed,
-			mt.stats.Success,
+			strconv.Itoa(mt.queue),
+			strconv.Itoa(mt.stats.Skipped),
+			strconv.Itoa(mt.stats.Failed),
+			strconv.Itoa(mt.stats.Success),
 			utils.FormatSize(mt.stats.SpaceSaved()),
 			timeStr,
-			speed))
+			speed,
+		})
 	}
-
-	sb.WriteString(strings.Repeat("-", 78))
-	sb.WriteString("\n")
 
 	// Print totals
 	overallSpeed := ""
 	if totalTime > 0 && totalDuration > 0 {
 		overallSpeed = fmt.Sprintf("%.1fx", float64(totalDuration)/float64(totalTime))
 	}
-	sb.WriteString(fmt.Sprintf("%-12s %6d %6d %6d %6d %10s %10s %8s\n",
+	rows = append(rows, []string{
 		"TOTAL",
-		totalQueued,
-		totalSkipped,
-		totalFailed,
-		totalSuccess,
+		strconv.Itoa(totalQueued),
+		strconv.Itoa(totalSkipped),
+		strconv.Itoa(totalFailed),
+		strconv.Itoa(totalSuccess),
 		utils.FormatSize(totalSavings),
 		utils.FormatDuration(totalTime),
-		overallSpeed))
+		overallSpeed,
+	})
+
+	sb.WriteString(utils.PrintTableToString(headers, rows))
 
 	output := sb.String()
 	lineCount := strings.Count(output, "\n")
@@ -401,9 +401,9 @@ func (m *ShrinkMetrics) LogSummary() {
 	fmt.Println(strings.Repeat("=", 78))
 	fmt.Println("PROCESSING COMPLETE")
 	fmt.Println(strings.Repeat("=", 78))
-	fmt.Printf("%-12s %8s %8s %8s %10s %10s %8s\n",
-		"Media Type", "Success", "Failed", "Skipped", "Saved", "Time", "Speed")
-	fmt.Println(strings.Repeat("-", 78))
+
+	headers := []string{"Media Type", "Success", "Failed", "Skipped", "Saved", "Time", "Speed"}
+	var rows [][]string
 
 	for _, mt := range sortedTypes {
 		speed := ""
@@ -411,29 +411,32 @@ func (m *ShrinkMetrics) LogSummary() {
 			speed = fmt.Sprintf("%.1fx", mt.stats.SpeedRatio())
 		}
 		timeStr := utils.FormatDuration(mt.stats.TotalTime)
-		fmt.Printf("%-12s %8d %8d %8d %10s %10s %8s\n",
+		rows = append(rows, []string{
 			mt.name,
-			mt.stats.Success,
-			mt.stats.Failed,
-			mt.stats.Skipped,
+			strconv.Itoa(mt.stats.Success),
+			strconv.Itoa(mt.stats.Failed),
+			strconv.Itoa(mt.stats.Skipped),
 			utils.FormatSize(mt.stats.SpaceSaved()),
 			timeStr,
-			speed)
+			speed,
+		})
 	}
-	fmt.Println(strings.Repeat("-", 78))
 
 	overallSpeed := ""
 	if totalTime > 0 && totalDuration > 0 {
 		overallSpeed = fmt.Sprintf("%.1fx", float64(totalDuration)/float64(totalTime))
 	}
-	fmt.Printf("%-12s %8d %8d %8d %10s %10s %8s\n",
+	rows = append(rows, []string{
 		"TOTAL",
-		totalSuccess,
-		totalFailed,
-		totalProcessed-totalSuccess-totalFailed,
+		strconv.Itoa(totalSuccess),
+		strconv.Itoa(totalFailed),
+		strconv.Itoa(totalProcessed - totalSuccess - totalFailed),
 		utils.FormatSize(totalSavings),
 		utils.FormatDuration(totalTime),
-		overallSpeed)
+		overallSpeed,
+	})
+
+	utils.PrintTable(headers, rows)
 	fmt.Println(strings.Repeat("=", 78))
 	fmt.Printf("Total duration: %s\n", duration.String())
 	fmt.Println()

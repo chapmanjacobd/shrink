@@ -40,6 +40,10 @@ func (p *ImageProcessor) Process(ctx context.Context, m *models.ShrinkMedia, cfg
 }
 
 func (p *ImageProcessor) processImage(ctx context.Context, m *models.ShrinkMedia, cfg *models.ProcessorConfig) models.ProcessResult {
+	if strings.HasSuffix(strings.ToLower(m.Path), ".avif") {
+		return models.ProcessResult{SourcePath: m.Path, Success: true, Skipped: true, Outputs: []models.ProcessOutputFile{{Path: m.Path, Size: m.Size}}}
+	}
+
 	imCmd := getImageMagickCommand()
 	if imCmd == "" {
 		return models.ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("ImageMagick not installed")}
