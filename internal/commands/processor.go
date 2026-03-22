@@ -8,6 +8,10 @@ import (
 	"github.com/chapmanjacobd/shrink/internal/utils"
 )
 
+// ============================================================================
+// Processor Types
+// ============================================================================
+
 // BaseProcessor provides common functionality for all processors
 type BaseProcessor struct {
 	category string
@@ -17,6 +21,10 @@ type BaseProcessor struct {
 func (b *BaseProcessor) Category() string {
 	return b.category
 }
+
+// ============================================================================
+// Media Registry
+// ============================================================================
 
 // MediaRegistry manages all media processors
 type MediaRegistry struct {
@@ -51,6 +59,10 @@ func (r *MediaRegistry) GetAllProcessors() []models.MediaProcessor {
 	return r.processors
 }
 
+// ============================================================================
+// Shrinking Decision Logic
+// ============================================================================
+
 // ShouldShrink determines if a file should be shrinked based on savings threshold
 func ShouldShrink(m *models.ShrinkMedia, futureSize int64, cfg *models.ProcessorConfig) bool {
 	if cfg.Common.ForceShrink {
@@ -78,6 +90,10 @@ func getMinSavings(m *models.ShrinkMedia, cfg *models.ProcessorConfig) float64 {
 		return 0.05 // Default 5%
 	}
 }
+
+// ============================================================================
+// Helper Utilities
+// ============================================================================
 
 // shouldConvertToAVIF returns true if the extension should be converted to AVIF
 func shouldConvertToAVIF(ext string) bool {

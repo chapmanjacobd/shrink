@@ -140,56 +140,80 @@ func (c *ShrinkCmd) Run(ctx *kong.Context) error {
 
 func (c *ShrinkCmd) buildProcessorConfig() *models.ProcessorConfig {
 	return &models.ProcessorConfig{
-		Common: models.CommonConfig{
-			SourceAudioBitrate: utils.ParseBitrate(c.SourceAudioBitrate),
-			SourceVideoBitrate: utils.ParseBitrate(c.SourceVideoBitrate),
-			DeleteUnplayable:   c.DeleteUnplayable,
-			DeleteLarger:       c.DeleteLarger,
-			MoveBroken:         c.MoveBroken,
-			Valid:              c.Valid,
-			Invalid:            c.Invalid,
-			ForceShrink:        c.ForceShrink,
-			VerboseFFmpeg:      c.VerboseFFmpeg,
-			IncludeTimecode:    c.IncludeTimecode,
-			MaxWidthBuffer:     c.MaxWidthBuffer,
-			MaxHeightBuffer:    c.MaxHeightBuffer,
-		},
-		Video: models.VideoConfig{
-			TargetVideoBitrate:   utils.ParseBitrate(c.TargetVideoBitrate),
-			MinSavingsVideo:      utils.ParsePercentOrBytes(c.MinSavingsVideo),
-			TranscodingVideoRate: c.TranscodingVideoRate,
-			Preset:               c.Preset,
-			CRF:                  c.CRF,
-			MaxVideoWidth:        c.MaxVideoWidth,
-			MaxVideoHeight:       c.MaxVideoHeight,
-			VideoOnly:            c.VideoOnly,
-			Keyframes:            c.Keyframes,
-			NoPreserveVideo:      c.NoPreserveVideo,
-		},
-		Audio: models.AudioConfig{
-			TargetAudioBitrate:   utils.ParseBitrate(c.TargetAudioBitrate),
-			MinSavingsAudio:      utils.ParsePercentOrBytes(c.MinSavingsAudio),
-			TranscodingAudioRate: c.TranscodingAudioRate,
-			AudioOnly:            c.AudioOnly,
-			AlwaysSplit:          c.AlwaysSplit,
-			SplitLongerThan:      c.SplitLongerThan,
-			MinSplitSegment:      c.MinSplitSegment,
-		},
-		Image: models.ImageConfig{
-			TargetImageSize:      utils.ParseSize(c.TargetImageSize),
-			MinSavingsImage:      utils.ParsePercentOrBytes(c.MinSavingsImage),
-			TranscodingImageTime: c.TranscodingImageTime,
-			MaxImageWidth:        c.MaxImageWidth,
-			MaxImageHeight:       c.MaxImageHeight,
-		},
-		Text: models.TextConfig{
-			SkipOCR:  c.SkipOCR,
-			ForceOCR: c.ForceOCR,
-			RedoOCR:  c.RedoOCR,
-			NoOCR:    c.NoOCR,
-		},
+		Common: c.buildCommonConfig(),
+		Video:  c.buildVideoConfig(),
+		Audio:  c.buildAudioConfig(),
+		Image:  c.buildImageConfig(),
+		Text:   c.buildTextConfig(),
 	}
 }
+
+func (c *ShrinkCmd) buildCommonConfig() models.CommonConfig {
+	return models.CommonConfig{
+		SourceAudioBitrate: utils.ParseBitrate(c.SourceAudioBitrate),
+		SourceVideoBitrate: utils.ParseBitrate(c.SourceVideoBitrate),
+		DeleteUnplayable:   c.DeleteUnplayable,
+		DeleteLarger:       c.DeleteLarger,
+		MoveBroken:         c.MoveBroken,
+		Valid:              c.Valid,
+		Invalid:            c.Invalid,
+		ForceShrink:        c.ForceShrink,
+		VerboseFFmpeg:      c.VerboseFFmpeg,
+		IncludeTimecode:    c.IncludeTimecode,
+		MaxWidthBuffer:     c.MaxWidthBuffer,
+		MaxHeightBuffer:    c.MaxHeightBuffer,
+	}
+}
+
+func (c *ShrinkCmd) buildVideoConfig() models.VideoConfig {
+	return models.VideoConfig{
+		TargetVideoBitrate:   utils.ParseBitrate(c.TargetVideoBitrate),
+		MinSavingsVideo:      utils.ParsePercentOrBytes(c.MinSavingsVideo),
+		TranscodingVideoRate: c.TranscodingVideoRate,
+		Preset:               c.Preset,
+		CRF:                  c.CRF,
+		MaxVideoWidth:        c.MaxVideoWidth,
+		MaxVideoHeight:       c.MaxVideoHeight,
+		VideoOnly:            c.VideoOnly,
+		Keyframes:            c.Keyframes,
+		NoPreserveVideo:      c.NoPreserveVideo,
+	}
+}
+
+func (c *ShrinkCmd) buildAudioConfig() models.AudioConfig {
+	return models.AudioConfig{
+		TargetAudioBitrate:   utils.ParseBitrate(c.TargetAudioBitrate),
+		MinSavingsAudio:      utils.ParsePercentOrBytes(c.MinSavingsAudio),
+		TranscodingAudioRate: c.TranscodingAudioRate,
+		AudioOnly:            c.AudioOnly,
+		AlwaysSplit:          c.AlwaysSplit,
+		SplitLongerThan:      c.SplitLongerThan,
+		MinSplitSegment:      c.MinSplitSegment,
+	}
+}
+
+func (c *ShrinkCmd) buildImageConfig() models.ImageConfig {
+	return models.ImageConfig{
+		TargetImageSize:      utils.ParseSize(c.TargetImageSize),
+		MinSavingsImage:      utils.ParsePercentOrBytes(c.MinSavingsImage),
+		TranscodingImageTime: c.TranscodingImageTime,
+		MaxImageWidth:        c.MaxImageWidth,
+		MaxImageHeight:       c.MaxImageHeight,
+	}
+}
+
+func (c *ShrinkCmd) buildTextConfig() models.TextConfig {
+	return models.TextConfig{
+		SkipOCR:  c.SkipOCR,
+		ForceOCR: c.ForceOCR,
+		RedoOCR:  c.RedoOCR,
+		NoOCR:    c.NoOCR,
+	}
+}
+
+// ============================================================================
+// Database Operations
+// ============================================================================
 
 func (c *ShrinkCmd) initDatabases() error {
 	for _, dbPath := range c.Databases {
@@ -252,37 +276,56 @@ func (c *ShrinkCmd) loadAllMedia() ([]models.ShrinkMedia, error) {
 	return allMedia, nil
 }
 
+// ============================================================================
+// Media Filtering and Analysis
+// ============================================================================
+
+// filterByTools filters media based on available tools
 func (c *ShrinkCmd) filterByTools(media []models.ShrinkMedia, tools InstalledTools) []models.ShrinkMedia {
 	filtered := make([]models.ShrinkMedia, 0, len(media))
 
 	for _, m := range media {
-		canProcess := false
-
-		// Audio/Video
-		if (m.MediaType == "audio" || (utils.AudioExtensionMap[m.Ext] && m.VideoCount == 0)) ||
-			(m.MediaType == "video" || (utils.VideoExtensionMap[m.Ext] && m.VideoCount >= 1)) {
-			canProcess = tools.FFmpeg
-		}
-		// Image
-		if m.MediaType == "image" || (utils.ImageExtensionMap[m.Ext] && m.Duration == 0) {
-			canProcess = tools.ImageMagick
-		}
-		// Text
-		if m.MediaType == "text" || utils.TextExtensionMap[m.Ext] {
-			canProcess = tools.Calibre
-		}
-		// Archives
-		if m.MediaType == "archive" || utils.ArchiveExtensionMap[m.Ext] {
-			canProcess = tools.Unar
-		}
-
-		if canProcess {
+		if c.canProcessMedia(&m, tools) {
 			filtered = append(filtered, m)
 		}
 	}
 
 	return filtered
 }
+
+// canProcessMedia checks if a media item can be processed with available tools
+func (c *ShrinkCmd) canProcessMedia(m *models.ShrinkMedia, tools InstalledTools) bool {
+	// Audio/Video - requires FFmpeg
+	isAudioVideo := (m.MediaType == "audio" || (utils.AudioExtensionMap[m.Ext] && m.VideoCount == 0)) ||
+		(m.MediaType == "video" || (utils.VideoExtensionMap[m.Ext] && m.VideoCount >= 1))
+	if isAudioVideo {
+		return tools.FFmpeg
+	}
+
+	// Image - requires ImageMagick
+	isImage := m.MediaType == "image" || (utils.ImageExtensionMap[m.Ext] && m.Duration == 0)
+	if isImage {
+		return tools.ImageMagick
+	}
+
+	// Text - requires Calibre
+	isText := m.MediaType == "text" || utils.TextExtensionMap[m.Ext]
+	if isText {
+		return tools.Calibre
+	}
+
+	// Archives - requires Unar
+	isArchive := m.MediaType == "archive" || utils.ArchiveExtensionMap[m.Ext]
+	if isArchive {
+		return tools.Unar
+	}
+
+	return false
+}
+
+// ============================================================================
+// File Operations
+// ============================================================================
 
 func (c *ShrinkCmd) moveToBroken(path string, partFiles []string) {
 	if c.MoveBroken == "" || path == "" {

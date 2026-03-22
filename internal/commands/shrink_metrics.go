@@ -224,7 +224,7 @@ func (m *ShrinkMetrics) PrintProgress() {
 
 	// Print summary table header
 	sb.WriteString(fmt.Sprintf("%-12s %6s %6s %6s %6s %10s %10s %8s\n",
-		"Media Type", "Queue", "Skip", "Fail", "OK", "Saved", "ETA", "Speed"))
+		"Media Type", "Queue", "Skip", "Fail", "OK", "Saved", "Time", "Speed"))
 	sb.WriteString(strings.Repeat("-", 78))
 	sb.WriteString("\n")
 

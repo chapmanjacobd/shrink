@@ -18,6 +18,10 @@ import (
 	"github.com/chapmanjacobd/shrink/internal/utils"
 )
 
+// ============================================================================
+// Media Analysis
+// ============================================================================
+
 func (c *ShrinkCmd) analyzeMedia(media []models.ShrinkMedia, cfg *models.ProcessorConfig,
 	registry *MediaRegistry, metrics *ShrinkMetrics,
 ) []models.ShrinkMedia {
@@ -79,6 +83,10 @@ func (c *ShrinkCmd) analyzeMedia(media []models.ShrinkMedia, cfg *models.Process
 	return toShrink
 }
 
+// ============================================================================
+// Sorting
+// ============================================================================
+
 func (c *ShrinkCmd) sortByEfficiency(media []models.ShrinkMedia) {
 	sort.Slice(media, func(i, j int) bool {
 		timeI := max(media[i].ProcessingTime, 1)
@@ -88,6 +96,10 @@ func (c *ShrinkCmd) sortByEfficiency(media []models.ShrinkMedia) {
 		return ratioI > ratioJ
 	})
 }
+
+// ============================================================================
+// Summary and Output
+// ============================================================================
 
 func (c *ShrinkCmd) printSummary(media []models.ShrinkMedia) {
 	var totalSize, totalFuture, totalSavings int64
@@ -191,6 +203,10 @@ func (c *ShrinkCmd) confirm() bool {
 	return strings.ToLower(response) == "y"
 }
 
+// ============================================================================
+// Processing Orchestration
+// ============================================================================
+
 func (c *ShrinkCmd) processMedia(ctx context.Context, media []models.ShrinkMedia, registry *MediaRegistry,
 	cfg *models.ProcessorConfig, metrics *ShrinkMetrics,
 ) {
@@ -266,31 +282,26 @@ func (c *ShrinkCmd) processMedia(ctx context.Context, media []models.ShrinkMedia
 	metrics.ClearProgress()
 }
 
+// ============================================================================
+// Single File Processing
+// ============================================================================
+
 func (c *ShrinkCmd) processSingle(ctx context.Context, m models.ShrinkMedia, registry *MediaRegistry,
 	cfg *models.ProcessorConfig, metrics *ShrinkMetrics,
 ) models.ProcessResult {
 	// Handle broken archives - move to --move-broken without processing
 	if m.IsBroken {
-		slog.Info("Broken archive detected, moving to broken directory", "path", m.Path)
-		if cfg.Common.MoveBroken != "" {
-			c.moveToBroken(m.Path, m.PartFiles)
-		}
-		db.MarkDeleted(c.sqlDBs, m.Path)
-		metrics.RecordFailure(m.DisplayCategory())
-		return models.ProcessResult{SourcePath: m.Path, Success: false}
+		return c.handleBrokenArchive(m, cfg, metrics)
 	}
 
 	// Capture original timestamps before processing
-	var originalAtime, originalMtime time.Time
-	if stat, err := os.Stat(m.Path); err != nil {
+	originalAtime, originalMtime, err := c.captureTimestamps(m.Path)
+	if err != nil {
 		// File doesn't exist - mark as skipped (deleted)
 		slog.Info("File not found, marking as skipped", "path", m.Path)
 		metrics.RecordSkipped(m.DisplayCategory())
 		db.MarkDeleted(c.sqlDBs, m.Path)
 		return models.ProcessResult{SourcePath: m.Path, Error: err}
-	} else {
-		originalAtime = stat.ModTime()
-		originalMtime = stat.ModTime()
 	}
 
 	slog.Info("Processing",
@@ -309,26 +320,14 @@ func (c *ShrinkCmd) processSingle(ctx context.Context, m models.ShrinkMedia, reg
 
 	result := processor.Process(processCtx, &m, cfg, registry)
 
+	// Handle processing errors
 	if result.Error != nil {
-		// Only log if it's not a timeout or cancellation (those are logged by the processor)
-		if result.Error != context.DeadlineExceeded && result.Error != context.Canceled {
-			slog.Error("Processing failed", "path", m.Path, "error", result.Error)
-		}
-		metrics.RecordFailure(m.DisplayCategory())
-		if cfg.Common.MoveBroken != "" {
-			c.moveToBroken(m.Path, result.PartFiles)
-		}
-		return result
+		return c.handleProcessingError(m, result, cfg, metrics)
 	}
 
+	// Handle unsuccessful processing (e.g., invalid output)
 	if !result.Success {
-		// Processing succeeded but produced no valid output (e.g. invalid file)
-		if cfg.Common.DeleteUnplayable {
-			db.MarkDeleted(c.sqlDBs, m.Path)
-			os.Remove(m.Path)
-		}
-		metrics.RecordFailure(m.DisplayCategory())
-		return result
+		return c.handleUnsuccessfulProcessing(m, cfg, metrics)
 	}
 
 	// Calculate new size and compare with original
@@ -345,12 +344,7 @@ func (c *ShrinkCmd) processSingle(ctx context.Context, m models.ShrinkMedia, reg
 	c.finalizeFileSwap(m, result, keepNewFiles)
 
 	if keepNewFiles {
-		c.updateMetadata(m, result)
-		c.preserveTimestamps(&m, result, originalAtime, originalMtime)
-		for _, out := range result.Outputs {
-			c.moveTo(out.Path)
-		}
-		metrics.RecordSuccess(m.DisplayCategory(), m.Size, totalNewSize, m.ProcessingTime, int64(m.Duration))
+		c.finalizeSuccessfulProcessing(&m, result, originalAtime, originalMtime, cfg, metrics)
 	} else {
 		db.MarkShrinked(c.sqlDBs, m.Path)
 		metrics.RecordSuccess(m.DisplayCategory(), m.Size, m.Size, m.ProcessingTime, int64(m.Duration))
@@ -358,6 +352,75 @@ func (c *ShrinkCmd) processSingle(ctx context.Context, m models.ShrinkMedia, reg
 
 	return result
 }
+
+// handleBrokenArchive handles broken archives by moving them to the broken directory
+func (c *ShrinkCmd) handleBrokenArchive(m models.ShrinkMedia, cfg *models.ProcessorConfig, metrics *ShrinkMetrics) models.ProcessResult {
+	slog.Info("Broken archive detected, moving to broken directory", "path", m.Path)
+	if cfg.Common.MoveBroken != "" {
+		c.moveToBroken(m.Path, m.PartFiles)
+	}
+	db.MarkDeleted(c.sqlDBs, m.Path)
+	metrics.RecordFailure(m.DisplayCategory())
+	return models.ProcessResult{SourcePath: m.Path, Success: false}
+}
+
+// captureTimestamps captures the original access and modification times of a file
+func (c *ShrinkCmd) captureTimestamps(path string) (time.Time, time.Time, error) {
+	stat, err := os.Stat(path)
+	if err != nil {
+		return time.Time{}, time.Time{}, err
+	}
+	return stat.ModTime(), stat.ModTime(), nil
+}
+
+// handleProcessingError handles errors from processing
+func (c *ShrinkCmd) handleProcessingError(m models.ShrinkMedia, result models.ProcessResult,
+	cfg *models.ProcessorConfig, metrics *ShrinkMetrics,
+) models.ProcessResult {
+	// Only log if it's not a timeout or cancellation (those are logged by the processor)
+	if result.Error != context.DeadlineExceeded && result.Error != context.Canceled {
+		slog.Error("Processing failed", "path", m.Path, "error", result.Error)
+	}
+	metrics.RecordFailure(m.DisplayCategory())
+	if cfg.Common.MoveBroken != "" {
+		c.moveToBroken(m.Path, result.PartFiles)
+	}
+	return result
+}
+
+// handleUnsuccessfulProcessing handles processing that succeeded but produced no valid output
+func (c *ShrinkCmd) handleUnsuccessfulProcessing(m models.ShrinkMedia,
+	cfg *models.ProcessorConfig, metrics *ShrinkMetrics,
+) models.ProcessResult {
+	// Processing succeeded but produced no valid output (e.g. invalid file)
+	if cfg.Common.DeleteUnplayable {
+		db.MarkDeleted(c.sqlDBs, m.Path)
+		os.Remove(m.Path)
+	}
+	metrics.RecordFailure(m.DisplayCategory())
+	return models.ProcessResult{SourcePath: m.Path, Success: false}
+}
+
+// finalizeSuccessfulProcessing handles post-processing for successful operations
+func (c *ShrinkCmd) finalizeSuccessfulProcessing(m *models.ShrinkMedia, result models.ProcessResult,
+	originalAtime, originalMtime time.Time, cfg *models.ProcessorConfig, metrics *ShrinkMetrics,
+) {
+	c.updateMetadata(*m, result)
+	c.preserveTimestamps(m, result, originalAtime, originalMtime)
+	for _, out := range result.Outputs {
+		c.moveTo(out.Path)
+	}
+
+	var totalNewSize int64
+	for _, out := range result.Outputs {
+		totalNewSize += out.Size
+	}
+	metrics.RecordSuccess(m.DisplayCategory(), m.Size, totalNewSize, m.ProcessingTime, int64(m.Duration))
+}
+
+// ============================================================================
+// File Finalization
+// ============================================================================
 
 func (c *ShrinkCmd) finalizeFileSwap(m models.ShrinkMedia, result models.ProcessResult, keepNewFiles bool) {
 	if keepNewFiles {
@@ -384,6 +447,10 @@ func (c *ShrinkCmd) finalizeFileSwap(m models.ShrinkMedia, result models.Process
 		}
 	}
 }
+
+// ============================================================================
+// Metadata and Timestamps
+// ============================================================================
 
 func (c *ShrinkCmd) updateMetadata(m models.ShrinkMedia, result models.ProcessResult) {
 	for _, out := range result.Outputs {
@@ -412,6 +479,10 @@ func (c *ShrinkCmd) preserveTimestamps(m *models.ShrinkMedia, result models.Proc
 		}
 	}
 }
+
+// ============================================================================
+// Utilities
+// ============================================================================
 
 func (c *ShrinkCmd) getTimeout(m models.ShrinkMedia) time.Duration {
 	timeoutMult := 1.0
