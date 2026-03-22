@@ -102,9 +102,15 @@ func (p *FFmpegProcessor) Process(ctx context.Context, m *models.ShrinkMedia, cf
 	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		// Check for timeout
+		// Clean up any incomplete output file
+		os.Remove(outputPath)
+
+		// Check for timeout or cancellation
 		if ctx.Err() == context.DeadlineExceeded {
 			slog.Error("FFmpeg timed out", "path", m.Path, "error", err, "output", string(output))
+		} else if ctx.Err() == context.Canceled {
+			slog.Warn("FFmpeg canceled by user", "path", m.Path)
+			return models.ProcessResult{SourcePath: m.Path, Error: context.Canceled}
 		} else {
 			slog.Error("FFmpeg failed", "path", m.Path, "error", err, "output", string(output))
 		}

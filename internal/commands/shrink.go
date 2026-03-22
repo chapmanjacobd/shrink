@@ -1,12 +1,15 @@
 package commands
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log/slog"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/alecthomas/kong"
 	"github.com/chapmanjacobd/shrink/internal/db"
@@ -118,8 +121,12 @@ func (c *ShrinkCmd) Run(ctx *kong.Context) error {
 		return nil
 	}
 
+	// Setup context for graceful shutdown
+	runCtx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+
 	// Process with parallelism
-	c.processMedia(toShrink, registry, cfg, metrics)
+	c.processMedia(runCtx, toShrink, registry, cfg, metrics)
 
 	// Final summary
 	metrics.LogSummary()

@@ -78,9 +78,15 @@ func (p *ImageProcessor) processImage(ctx context.Context, m *models.ShrinkMedia
 	cmd := exec.CommandContext(ctx, "magick", args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		// Check for timeout
+		// Clean up on failure
+		os.Remove(outputPath)
+
+		// Check for timeout or cancellation
 		if ctx.Err() == context.DeadlineExceeded {
 			slog.Error("ImageMagick timed out", "path", m.Path, "error", err, "output", string(output))
+		} else if ctx.Err() == context.Canceled {
+			slog.Warn("ImageMagick canceled by user", "path", m.Path)
+			return models.ProcessResult{SourcePath: m.Path, Error: context.Canceled}
 		} else {
 			slog.Error("ImageMagick error", "output", string(output), "path", m.Path)
 		}

@@ -161,7 +161,7 @@ func (c *ShrinkCmd) confirm() bool {
 	return strings.ToLower(response) == "y"
 }
 
-func (c *ShrinkCmd) processMedia(media []models.ShrinkMedia, registry *MediaRegistry,
+func (c *ShrinkCmd) processMedia(ctx context.Context, media []models.ShrinkMedia, registry *MediaRegistry,
 	cfg *models.ProcessorConfig, metrics *ShrinkMetrics,
 ) {
 	// Create worker pools
@@ -196,18 +196,30 @@ func (c *ShrinkCmd) processMedia(media []models.ShrinkMedia, registry *MediaRegi
 		go func(original models.ShrinkMedia) {
 			defer wg.Done()
 
+			// Check for cancellation before starting work
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
 			sem := sems[original.Category]
 			if sem == nil {
 				sem = sems["Archived"]
 			}
 
-			sem <- struct{}{}
+			// Also wait on sem with cancellation
+			select {
+			case <-ctx.Done():
+				return
+			case sem <- struct{}{}:
+			}
 			defer func() { <-sem }()
 
 			// Set current file for progress display
 			metrics.SetCurrentFile(original.Path)
 
-			c.processSingle(original, registry, cfg, metrics)
+			c.processSingle(ctx, original, registry, cfg, metrics)
 
 			// Clear current file when done
 			metrics.SetCurrentFile("")
@@ -224,7 +236,7 @@ func (c *ShrinkCmd) processMedia(media []models.ShrinkMedia, registry *MediaRegi
 	metrics.ClearProgress()
 }
 
-func (c *ShrinkCmd) processSingle(m models.ShrinkMedia, registry *MediaRegistry,
+func (c *ShrinkCmd) processSingle(ctx context.Context, m models.ShrinkMedia, registry *MediaRegistry,
 	cfg *models.ProcessorConfig, metrics *ShrinkMetrics,
 ) models.ProcessResult {
 	// Handle broken archives - move to --move-broken without processing
@@ -262,10 +274,10 @@ func (c *ShrinkCmd) processSingle(m models.ShrinkMedia, registry *MediaRegistry,
 		return models.ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("no processor found")}
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), c.getTimeout(m))
+	processCtx, cancel := context.WithTimeout(ctx, c.getTimeout(m))
 	defer cancel()
 
-	result := processor.Process(ctx, &m, cfg, registry)
+	result := processor.Process(processCtx, &m, cfg, registry)
 
 	if result.Error != nil {
 		slog.Error("Processing failed", "path", m.Path, "error", result.Error)

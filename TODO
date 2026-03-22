@@ -1,12 +1,7 @@
-
-Professional error messages and user experience
-- [ ] Improve log verbosity levels
-- [ ] Add error recovery mechanisms
-- [ ] Better handling of interrupted operations
-
 >80% test coverage with scenario-based tests
 
-- [ ] Edge Case Tests:
+And Edge Case Tests:
+
 - [ ] Animated GIF/webp detection
 - [ ] Stereo/360° video samples
 - [ ] Audio files with silence gaps

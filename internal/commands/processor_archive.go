@@ -69,13 +69,18 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *models.Shri
 	cmd := exec.CommandContext(ctx, "unar", "-no-directory", "-force-rename", "-o", outputDir, m.Path)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		// Check for timeout
+		// Clean up on failure
+		os.RemoveAll(outputDir)
+
+		// Check for timeout or cancellation
 		if ctx.Err() == context.DeadlineExceeded {
 			slog.Error("unar timed out", "path", m.Path, "error", err, "output", string(output))
+		} else if ctx.Err() == context.Canceled {
+			slog.Warn("unar canceled by user", "path", m.Path)
+			return models.ProcessResult{SourcePath: m.Path, PartFiles: partFiles, Error: context.Canceled}
 		} else {
 			slog.Error("unar error", "path", m.Path, "error", err, "output", string(output))
 		}
-		os.RemoveAll(outputDir)
 		return models.ProcessResult{SourcePath: m.Path, PartFiles: partFiles, Error: err}
 	}
 

@@ -3,7 +3,7 @@ package commands
 // Config contains all command-line flags and configuration for the shrink application
 type Config struct {
 	// CoreFlags
-	Verbose   bool `short:"v" help:"Enable verbose logging" env:"SHRINK_VERBOSE"`
+	Verbose   int  `short:"v" type:"counter" help:"Enable verbose logging (-v for info, -vv for debug)" env:"SHRINK_VERBOSE"`
 	Simulate  bool `help:"Dry run; don't actually do anything" env:"SHRINK_SIMULATE"`
 	NoConfirm bool `short:"y" help:"Don't ask for confirmation" env:"SHRINK_NO_CONFIRM"`
 

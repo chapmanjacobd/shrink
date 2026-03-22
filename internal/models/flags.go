@@ -49,11 +49,14 @@ func (h *PlainHandler) WithGroup(name string) slog.Handler {
 
 var LogLevel = &slog.LevelVar{}
 
-// SetupLogging configures logging level
-func SetupLogging(verbose bool) {
-	if verbose {
+// SetupLogging configures logging level based on verbosity counter
+func SetupLogging(verbosity int) {
+	if verbosity >= 2 {
 		LogLevel.Set(slog.LevelDebug)
+	} else if verbosity == 1 {
+		LogLevel.Set(slog.LevelInfo)
 	} else {
+		// Default to Warn (hides Info and Debug, shows Warn and Error)
 		LogLevel.Set(slog.LevelWarn)
 	}
 }
