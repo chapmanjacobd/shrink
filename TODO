@@ -1,24 +1,17 @@
-Comprehensive README and documentation
->80% test coverage with scenario-based tests
-CI/CD pipeline with multi-platform testing
-Feature parity with Python version documented
-Automated release process
 Professional error messages and user experience
-- [ ] go install github.com/chapmanjacobd/shrink/cmd/shrink @latest
- 5.3 Configuration
+- [ ] Improve log verbosity levels
+
+>80% test coverage with scenario-based tests
+
 - [ ] Support config file (~/.config/shrink/config.yaml)
+
 - [ ] Environment variable overrides
 - [ ] Profile presets (quality/speed/balance)
-5.1 Error Handling
 - [ ] Improve error messages with actionable guidance
 - [ ] Add error recovery mechanisms
 - [ ] Better handling of interrupted operations
 - [ ] Graceful degradation when tools missing
- 5.2 Logging & Progress
-- [ ] Ensure progress bar works correctly on all terminals
-- [ ] Add JSON logging option for machine parsing
-- [ ] Improve log verbosity levels
-- [ ] Image Processor Tests:
+
 - [ ] AVIF conversion with size constraints
 - [ ] Animated GIF/webp detection
 - [ ] Archive image extraction
@@ -89,20 +82,3 @@ Current Go tests cover:
 - [ ] Loudnorm audio filter
 - [ ] Keyframe extraction mode
 - [ ] Timeout handling
- Phase 1: Documentation & Project Setup
- 1.1 Core Documentation
-- [ ] README.md - Comprehensive project documentation including:
-- Project description and motivation (port of Python shrink)
-- Installation instructions (binary releases, go install, package
-managers)
-- Quick start guide with examples
-- Feature comparison table (Go vs Python version)
-- External dependencies (ffmpeg, ImageMagick, Calibre, unar)
-- CLI reference with all flags
-- Performance comparisons if available
-- [ ] LICENSE - Add appropriate open-source license (match Python
-version)
-- [ ] CONTRIBUTING.md - Contribution guidelines including:
-- Development setup
-- Code style (gofmt, gci, gofumpt)
-- Testing requirements
