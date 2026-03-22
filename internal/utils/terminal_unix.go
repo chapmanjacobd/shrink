@@ -8,18 +8,9 @@ import (
 	"os/signal"
 	"sync"
 	"syscall"
-	"time"
 
 	"golang.org/x/term"
 )
-
-// GetAccessTime returns the access time of a file
-func GetAccessTime(info os.FileInfo) time.Time {
-	if stat, ok := info.Sys().(*syscall.Stat_t); ok {
-		return time.Unix(stat.Atim.Sec, stat.Atim.Nsec)
-	}
-	return info.ModTime()
-}
 
 // CommandExists checks if a command is available in PATH
 func CommandExists(name string) bool {
