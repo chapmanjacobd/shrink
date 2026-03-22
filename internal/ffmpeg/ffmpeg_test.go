@@ -367,3 +367,278 @@ func TestCountFrames(t *testing.T) {
 		t.Errorf("expected 10, got %d", count)
 	}
 }
+
+// =============================================================================
+// Subtitle Tests - Edge Cases for buildSubtitleOptions
+// =============================================================================
+
+func TestBuildSubtitleOptions_EmptyStreams(t *testing.T) {
+	cfg := &models.ProcessorConfig{}
+	p := NewFFmpegProcessor(cfg)
+
+	opts := p.buildSubtitleOptions([]FFProbeStream{})
+	if opts != nil {
+		t.Errorf("expected nil for empty streams, got %v", opts)
+	}
+}
+
+func TestBuildSubtitleOptions_MKVTextSubtitles_Copy(t *testing.T) {
+	cfg := &models.ProcessorConfig{}
+	p := NewFFmpegProcessor(cfg)
+
+	testCases := []struct {
+		codec  string
+		expect []string
+	}{
+		{"subrip", []string{"-map", "0:0", "-c:s", "copy"}},
+		{"srt", []string{"-map", "0:0", "-c:s", "copy"}},
+		{"ass", []string{"-map", "0:0", "-c:s", "copy"}},
+		{"ssa", []string{"-map", "0:0", "-c:s", "copy"}},
+		{"webvtt", []string{"-map", "0:0", "-c:s", "copy"}},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.codec, func(t *testing.T) {
+			streams := []FFProbeStream{{CodecName: tc.codec, Index: 0}}
+			opts := p.buildSubtitleOptions(streams)
+			if len(opts) != len(tc.expect) {
+				t.Errorf("expected %d args, got %d: %v", len(tc.expect), len(opts), opts)
+			}
+			for i, exp := range tc.expect {
+				if i < len(opts) && opts[i] != exp {
+					t.Errorf("expected %q at position %d, got %q", exp, i, opts[i])
+				}
+			}
+		})
+	}
+}
+
+func TestBuildSubtitleOptions_MKVImageSubtitles_Copy(t *testing.T) {
+	cfg := &models.ProcessorConfig{}
+	p := NewFFmpegProcessor(cfg)
+
+	testCases := []struct {
+		codec  string
+		expect []string
+	}{
+		{"pgssub", []string{"-map", "0:0", "-c:s", "copy"}},
+		{"hdmv_pgs_subtitle", []string{"-map", "0:0", "-c:s", "copy"}},
+		{"dvd_subtitle", []string{"-map", "0:0", "-c:s", "copy"}},
+		{"vobsub", []string{"-map", "0:0", "-c:s", "copy"}},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.codec, func(t *testing.T) {
+			streams := []FFProbeStream{{CodecName: tc.codec, Index: 0}}
+			opts := p.buildSubtitleOptions(streams)
+			if len(opts) != len(tc.expect) {
+				t.Errorf("expected %d args, got %d", len(tc.expect), len(opts))
+			}
+			for i, exp := range tc.expect {
+				if i < len(opts) && opts[i] != exp {
+					t.Errorf("expected %q at position %d, got %q", exp, i, opts[i])
+				}
+			}
+		})
+	}
+}
+
+func TestBuildSubtitleOptions_TextSubtitles_ConvertToSRT(t *testing.T) {
+	cfg := &models.ProcessorConfig{}
+	p := NewFFmpegProcessor(cfg)
+
+	// Text subtitles that need conversion to SRT
+	testCases := []struct {
+		codec  string
+		expect []string
+	}{
+		{"mov_text", []string{"-map", "0:0", "-c:s", "srt"}},
+		{"text", []string{"-map", "0:0", "-c:s", "srt"}},
+		{"utf8", []string{"-map", "0:0", "-c:s", "srt"}},
+		{"arib_caption", []string{"-map", "0:0", "-c:s", "srt"}},
+		{"libaribcaption", []string{"-map", "0:0", "-c:s", "srt"}},
+		{"libaribb24", []string{"-map", "0:0", "-c:s", "srt"}},
+		{"libzvbi_teletextdec", []string{"-map", "0:0", "-c:s", "srt"}},
+		{"dvb_teletext", []string{"-map", "0:0", "-c:s", "srt"}},
+		{"cc_dec", []string{"-map", "0:0", "-c:s", "srt"}},
+		{"jacosub", []string{"-map", "0:0", "-c:s", "srt"}},
+		{"microdvd", []string{"-map", "0:0", "-c:s", "srt"}},
+		{"mpl2", []string{"-map", "0:0", "-c:s", "srt"}},
+		{"pjs", []string{"-map", "0:0", "-c:s", "srt"}},
+		{"realtext", []string{"-map", "0:0", "-c:s", "srt"}},
+		{"sami", []string{"-map", "0:0", "-c:s", "srt"}},
+		{"stl", []string{"-map", "0:0", "-c:s", "srt"}},
+		{"subviewer", []string{"-map", "0:0", "-c:s", "srt"}},
+		{"subviewer1", []string{"-map", "0:0", "-c:s", "srt"}},
+		{"vplayer", []string{"-map", "0:0", "-c:s", "srt"}},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.codec, func(t *testing.T) {
+			streams := []FFProbeStream{{CodecName: tc.codec, Index: 0}}
+			opts := p.buildSubtitleOptions(streams)
+			if len(opts) != len(tc.expect) {
+				t.Errorf("expected %d args, got %d", len(tc.expect), len(opts))
+			}
+			for i, exp := range tc.expect {
+				if i < len(opts) && opts[i] != exp {
+					t.Errorf("expected %q at position %d, got %q", exp, i, opts[i])
+				}
+			}
+		})
+	}
+}
+
+func TestBuildSubtitleOptions_ImageSubtitles_ConvertToPGS(t *testing.T) {
+	cfg := &models.ProcessorConfig{}
+	p := NewFFmpegProcessor(cfg)
+
+	// Image subtitles that need conversion to PGS
+	testCases := []struct {
+		codec  string
+		expect []string
+	}{
+		{"dvdsub", []string{"-map", "0:0", "-c:s", "pgssub"}},
+		{"xsub", []string{"-map", "0:0", "-c:s", "pgssub"}},
+		{"dvb_subtitle", []string{"-map", "0:0", "-c:s", "pgssub"}},
+		{"dvbsub", []string{"-map", "0:0", "-c:s", "pgssub"}},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.codec, func(t *testing.T) {
+			streams := []FFProbeStream{{CodecName: tc.codec, Index: 0}}
+			opts := p.buildSubtitleOptions(streams)
+			if len(opts) != len(tc.expect) {
+				t.Errorf("expected %d args, got %d", len(tc.expect), len(opts))
+			}
+			for i, exp := range tc.expect {
+				if i < len(opts) && opts[i] != exp {
+					t.Errorf("expected %q at position %d, got %q", exp, i, opts[i])
+				}
+			}
+		})
+	}
+}
+
+func TestBuildSubtitleOptions_UnknownCodec_Skips(t *testing.T) {
+	cfg := &models.ProcessorConfig{}
+	p := NewFFmpegProcessor(cfg)
+
+	// Unknown codecs should be skipped (return no args for that stream)
+	unknownCodecs := []string{"unknown", "xyz", "custom_sub", ""}
+
+	for _, codec := range unknownCodecs {
+		t.Run(codec, func(t *testing.T) {
+			streams := []FFProbeStream{{CodecName: codec, Index: 0}}
+			opts := p.buildSubtitleOptions(streams)
+			if len(opts) != 0 {
+				t.Errorf("expected no args for unknown codec %q, got %v", codec, opts)
+			}
+		})
+	}
+}
+
+func TestBuildSubtitleOptions_MultipleStreams(t *testing.T) {
+	cfg := &models.ProcessorConfig{}
+	p := NewFFmpegProcessor(cfg)
+
+	// Mix of different subtitle types
+	streams := []FFProbeStream{
+		{CodecName: "subrip", Index: 0},    // copy (mkvTextSubs)
+		{CodecName: "ass", Index: 1},       // copy (mkvTextSubs)
+		{CodecName: "pgssub", Index: 2},    // copy (mkvImageSubs)
+		{CodecName: "mov_text", Index: 3},  // convert to srt (textSubs only)
+		{CodecName: "dvdsub", Index: 4},    // convert to pgs (imageSubs only)
+		{CodecName: "unknown", Index: 5},   // skip
+	}
+
+	opts := p.buildSubtitleOptions(streams)
+
+	// Expected: 5 streams * 4 args each = 20 args (unknown is skipped)
+	// Each stream produces: -map, 0:X, -c:s, codec
+	expectedArgs := 20
+	if len(opts) != expectedArgs {
+		t.Errorf("expected %d args for 5 streams, got %d", expectedArgs, len(opts))
+	}
+
+	// Verify structure: each stream should have -map, index, -c:s, codec
+	expectedMaps := []string{"0:0", "0:1", "0:2", "0:3", "0:4"}
+	expectedCodecs := []string{"copy", "copy", "copy", "srt", "pgssub"}
+
+	for i := 0; i < len(expectedMaps); i++ {
+		baseIdx := i * 4
+		if baseIdx+3 < len(opts) {
+			if opts[baseIdx] != "-map" || opts[baseIdx+1] != expectedMaps[i] {
+				t.Errorf("stream %d: expected -map %s, got -map %s", i, expectedMaps[i], opts[baseIdx+1])
+			}
+			if opts[baseIdx+2] != "-c:s" || opts[baseIdx+3] != expectedCodecs[i] {
+				t.Errorf("stream %d: expected -c:s %s, got -c:s %s", i, expectedCodecs[i], opts[baseIdx+3])
+			}
+		}
+	}
+}
+
+func TestBuildSubtitleOptions_CaseInsensitive(t *testing.T) {
+	cfg := &models.ProcessorConfig{}
+	p := NewFFmpegProcessor(cfg)
+
+	// Test case insensitivity - all should produce 4 args: -map, 0:0, -c:s, codec
+	testCases := []struct {
+		codec       string
+		expectedFmt string
+	}{
+		{"SUBRIP", "copy"},
+		{"SubRip", "copy"},
+		{"ASS", "copy"},
+		{"WebVTT", "copy"},
+		{"PGSSUB", "copy"},
+		{"MOV_TEXT", "srt"},
+		{"DVDSUB", "pgssub"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.codec, func(t *testing.T) {
+			streams := []FFProbeStream{{CodecName: tc.codec, Index: 0}}
+			opts := p.buildSubtitleOptions(streams)
+			if len(opts) != 4 {
+				t.Errorf("expected 4 args, got %d: %v", len(opts), opts)
+			}
+			if len(opts) >= 4 {
+				if opts[0] != "-map" || opts[1] != "0:0" {
+					t.Errorf("expected -map 0:0, got %v", opts[:2])
+				}
+				if opts[2] != "-c:s" {
+					t.Errorf("expected -c:s, got %s", opts[2])
+				}
+			}
+		})
+	}
+}
+
+func TestBuildSubtitleOptions_DifferentIndices(t *testing.T) {
+	cfg := &models.ProcessorConfig{}
+	p := NewFFmpegProcessor(cfg)
+
+	// Test with different stream indices
+	streams := []FFProbeStream{
+		{CodecName: "subrip", Index: 5},
+		{CodecName: "ass", Index: 10},
+		{CodecName: "pgssub", Index: 15},
+	}
+
+	opts := p.buildSubtitleOptions(streams)
+
+	// Each stream produces 4 args: -map, 0:X, -c:s, codec
+	expectedMaps := []string{"0:5", "0:10", "0:15"}
+	for i, expMap := range expectedMaps {
+		baseIdx := i * 4
+		if baseIdx+1 < len(opts) {
+			if opts[baseIdx] != "-map" {
+				t.Errorf("stream %d: expected -map, got %s", i, opts[baseIdx])
+			}
+			if opts[baseIdx+1] != expMap {
+				t.Errorf("stream %d: expected map %q, got %q", i, expMap, opts[baseIdx+1])
+			}
+		}
+	}
+}
