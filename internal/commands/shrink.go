@@ -25,8 +25,9 @@ type ShrinkCmd struct {
 
 	Databases []string `arg:"" required:"" help:"SQLite database files or directories to scan"`
 
-	sqlDBs            []*sql.DB
-	unknownExtensions map[string]int64
+	sqlDBs              []*sql.DB
+	unknownExtensions   map[string]int64
+	skippedByTool       map[string]int64 // Tracks known extensions skipped due to missing tools (e.g., "ffmpeg: mkv")
 }
 
 func (c *ShrinkCmd) Run(ctx *kong.Context) error {
@@ -35,6 +36,7 @@ func (c *ShrinkCmd) Run(ctx *kong.Context) error {
 	defer c.closeDatabases()
 
 	c.unknownExtensions = make(map[string]int64)
+	c.skippedByTool = make(map[string]int64)
 
 	// Build processor configuration
 	cfg := c.buildProcessorConfig()
@@ -81,6 +83,7 @@ func (c *ShrinkCmd) Run(ctx *kong.Context) error {
 		"calibre", tools.Calibre)
 
 	if len(filteredMedia) == 0 {
+		c.printUnknownExtensions()
 		slog.Info("No processable media found")
 		return nil
 	}
@@ -88,6 +91,7 @@ func (c *ShrinkCmd) Run(ctx *kong.Context) error {
 	// Analyze and decide what to shrink
 	toShrink := c.analyzeMedia(filteredMedia, cfg, registry, metrics)
 	if len(toShrink) == 0 {
+		c.printUnknownExtensions()
 		fmt.Println("No files to shrink")
 		metrics.LogSummary()
 		return nil
@@ -285,8 +289,13 @@ func (c *ShrinkCmd) filterByTools(media []models.ShrinkMedia, tools InstalledToo
 	filtered := make([]models.ShrinkMedia, 0, len(media))
 
 	for _, m := range media {
-		if c.canProcessMedia(&m, tools) {
+		tool, canProcess := c.canProcessMedia(&m, tools)
+		if canProcess {
 			filtered = append(filtered, m)
+		} else if tool != "" {
+			// Track known extensions skipped due to missing tools
+			key := fmt.Sprintf("%s: %s", tool, m.Ext)
+			c.skippedByTool[key] += m.Size
 		}
 	}
 
@@ -294,33 +303,34 @@ func (c *ShrinkCmd) filterByTools(media []models.ShrinkMedia, tools InstalledToo
 }
 
 // canProcessMedia checks if a media item can be processed with available tools
-func (c *ShrinkCmd) canProcessMedia(m *models.ShrinkMedia, tools InstalledTools) bool {
+// Returns the tool name and whether it can process the media
+func (c *ShrinkCmd) canProcessMedia(m *models.ShrinkMedia, tools InstalledTools) (string, bool) {
 	// Audio/Video - requires FFmpeg
 	isAudioVideo := (m.MediaType == "audio" || (utils.AudioExtensionMap[m.Ext] && m.VideoCount == 0)) ||
 		(m.MediaType == "video" || (utils.VideoExtensionMap[m.Ext] && m.VideoCount >= 1))
 	if isAudioVideo {
-		return tools.FFmpeg
+		return "ffmpeg", tools.FFmpeg
 	}
 
 	// Image - requires ImageMagick
 	isImage := m.MediaType == "image" || (utils.ImageExtensionMap[m.Ext] && m.Duration == 0)
 	if isImage {
-		return tools.ImageMagick
+		return "magick", tools.ImageMagick
 	}
 
 	// Text - requires Calibre
 	isText := m.MediaType == "text" || utils.TextExtensionMap[m.Ext]
 	if isText {
-		return tools.Calibre
+		return "calibre", tools.Calibre
 	}
 
 	// Archives - requires Unar
 	isArchive := m.MediaType == "archive" || utils.ArchiveExtensionMap[m.Ext]
 	if isArchive {
-		return tools.Unar
+		return "unar", tools.Unar
 	}
 
-	return false
+	return "", false
 }
 
 // ============================================================================

@@ -169,13 +169,17 @@ func (c *ShrinkCmd) printSummary(media []models.ShrinkMedia) {
 }
 
 func (c *ShrinkCmd) printUnknownExtensions() {
-	if len(c.unknownExtensions) == 0 {
+	// Combine unknown extensions and skipped by tool
+	hasUnknown := len(c.unknownExtensions) > 0
+	hasSkipped := len(c.skippedByTool) > 0
+
+	if !hasUnknown && !hasSkipped {
 		return
 	}
 
 	fmt.Println("Unknown File Extensions Scanned")
-	fmt.Printf("%-12s %12s\n", "Extension", "Total Size")
-	fmt.Println(strings.Repeat("-", 25))
+	fmt.Printf("%-15s %12s\n", "Extension", "Total Size")
+	fmt.Println(strings.Repeat("-", 30))
 
 	// Sort by size descending
 	type extSize struct {
@@ -183,15 +187,20 @@ func (c *ShrinkCmd) printUnknownExtensions() {
 		size int64
 	}
 	var sorted []extSize
+
 	for ext, size := range c.unknownExtensions {
 		sorted = append(sorted, extSize{ext, size})
 	}
+	for ext, size := range c.skippedByTool {
+		sorted = append(sorted, extSize{ext, size})
+	}
+
 	sort.Slice(sorted, func(i, j int) bool {
 		return sorted[i].size > sorted[j].size
 	})
 
 	for _, es := range sorted {
-		fmt.Printf("%-12s %12s\n", es.ext, utils.FormatSize(es.size))
+		fmt.Printf("%-15s %12s\n", es.ext, utils.FormatSize(es.size))
 	}
 	fmt.Println()
 }
