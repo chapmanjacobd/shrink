@@ -86,92 +86,64 @@ func LoadMediaFromDB(db *sql.DB, forceShrink bool, videoOnly, audioOnly, imageOn
 }
 
 // MarkDeleted marks a file as deleted in all provided databases
-func MarkDeleted(databases []string, path string) {
-	for _, dbPath := range databases {
-		if IsDatabaseDirectory(dbPath) {
-			continue
-		}
-		sqlDB, _, err := ConnectWithInit(dbPath)
-		if err == nil {
-			_, err := sqlDB.Exec("UPDATE media SET time_deleted = ? WHERE path = ?", time.Now().Unix(), path)
-			if err != nil {
-				slog.Warn("Failed to mark file deleted in database", "path", path, "error", err)
-			}
-			sqlDB.Close()
+func MarkDeleted(databases []*sql.DB, path string) {
+	for _, sqlDB := range databases {
+		_, err := sqlDB.Exec("UPDATE media SET time_deleted = ? WHERE path = ?", time.Now().Unix(), path)
+		if err != nil {
+			slog.Warn("Failed to mark file deleted in database", "path", path, "error", err)
 		}
 	}
 }
 
 // UpdateMedia replaces an old path with a new one and updates its size/duration
-func UpdateMedia(databases []string, oldPath, newPath string, newSize int64, duration float64) {
-	for _, dbPath := range databases {
-		if IsDatabaseDirectory(dbPath) {
-			continue
+func UpdateMedia(databases []*sql.DB, oldPath, newPath string, newSize int64, duration float64) {
+	for _, sqlDB := range databases {
+		_, _ = sqlDB.Exec("DELETE FROM media WHERE path = ?", newPath)
+		var execErr error
+		if duration > 0 {
+			_, execErr = sqlDB.Exec(
+				"UPDATE media SET path = ?, size = ?, duration = ?, time_deleted = 0, is_shrinked = 1 WHERE path = ?",
+				newPath, newSize, duration, oldPath)
+		} else {
+			_, execErr = sqlDB.Exec(
+				"UPDATE media SET path = ?, size = ?, time_deleted = 0, is_shrinked = 1 WHERE path = ?",
+				newPath, newSize, oldPath)
 		}
-		sqlDB, _, err := ConnectWithInit(dbPath)
-		if err == nil {
-			_, _ = sqlDB.Exec("DELETE FROM media WHERE path = ?", newPath)
-			var execErr error
-			if duration > 0 {
-				_, execErr = sqlDB.Exec(
-					"UPDATE media SET path = ?, size = ?, duration = ?, time_deleted = 0, is_shrinked = 1 WHERE path = ?",
-					newPath, newSize, duration, oldPath)
-			} else {
-				_, execErr = sqlDB.Exec(
-					"UPDATE media SET path = ?, size = ?, time_deleted = 0, is_shrinked = 1 WHERE path = ?",
-					newPath, newSize, oldPath)
-			}
-			if execErr != nil {
-				slog.Warn("Failed to update database entry", "oldPath", oldPath, "newPath", newPath, "error", execErr)
-			}
-			sqlDB.Close()
+		if execErr != nil {
+			slog.Warn("Failed to update database entry", "oldPath", oldPath, "newPath", newPath, "error", execErr)
 		}
 	}
 }
 
 // AddMediaEntry adds a new media entry to the database
-func AddMediaEntry(databases []string, path string, size int64, duration float64) {
-	for _, dbPath := range databases {
-		if IsDatabaseDirectory(dbPath) {
-			continue
+func AddMediaEntry(databases []*sql.DB, path string, size int64, duration float64) {
+	for _, sqlDB := range databases {
+		_, err := sqlDB.Exec("DELETE FROM media WHERE path = ?", path)
+		if err != nil {
+			slog.Warn("Failed to delete existing media entry", "path", path, "error", err)
 		}
-		sqlDB, _, err := ConnectWithInit(dbPath)
-		if err == nil {
-			_, err := sqlDB.Exec("DELETE FROM media WHERE path = ?", path)
-			if err != nil {
-				slog.Warn("Failed to delete existing media entry", "path", path, "error", err)
-			}
-			var execErr error
-			if duration > 0 {
-				_, execErr = sqlDB.Exec(
-					"INSERT INTO media (path, size, duration, time_deleted, is_shrinked) VALUES (?, ?, ?, 0, 0)",
-					path, size, duration)
-			} else {
-				_, execErr = sqlDB.Exec(
-					"INSERT INTO media (path, size, time_deleted, is_shrinked) VALUES (?, ?, 0, 0)",
-					path, size)
-			}
-			if execErr != nil {
-				slog.Warn("Failed to add database entry", "path", path, "error", execErr)
-			}
-			sqlDB.Close()
+		var execErr error
+		if duration > 0 {
+			_, execErr = sqlDB.Exec(
+				"INSERT INTO media (path, size, duration, time_deleted, is_shrinked) VALUES (?, ?, ?, 0, 0)",
+				path, size, duration)
+		} else {
+			_, execErr = sqlDB.Exec(
+				"INSERT INTO media (path, size, time_deleted, is_shrinked) VALUES (?, ?, 0, 0)",
+				path, size)
+		}
+		if execErr != nil {
+			slog.Warn("Failed to add database entry", "path", path, "error", execErr)
 		}
 	}
 }
 
 // MarkShrinked marks a file as shrinked in the database
-func MarkShrinked(databases []string, path string) {
-	for _, dbPath := range databases {
-		if IsDatabaseDirectory(dbPath) {
-			continue
-		}
-		sqlDB, _, err := ConnectWithInit(dbPath)
-		if err == nil {
-			_, err := sqlDB.Exec("UPDATE media SET is_shrinked = 1 WHERE path = ?", path)
-			if err != nil {
-				slog.Warn("Failed to mark file as shrinked in database", "path", path, "error", err)
-			}
-			sqlDB.Close()
+func MarkShrinked(databases []*sql.DB, path string) {
+	for _, sqlDB := range databases {
+		_, err := sqlDB.Exec("UPDATE media SET is_shrinked = 1 WHERE path = ?", path)
+		if err != nil {
+			slog.Warn("Failed to mark file as shrinked in database", "path", path, "error", err)
 		}
 	}
 }

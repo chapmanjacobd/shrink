@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"database/sql"
 	"fmt"
 	"log/slog"
 	"os"
@@ -100,16 +101,24 @@ type ShrinkCmd struct {
 	TextTimeout      string  `default:"20m" help:"Text timeout"`
 
 	ForceShrink bool `help:"Force reprocessing of already shrinked files"`
+
+	sqlDBs []*sql.DB
 }
 
 func (c *ShrinkCmd) Run(ctx *kong.Context) error {
 	models.SetupLogging(c.Verbose)
+	defer c.closeDatabases()
 
 	// Build processor configuration
 	cfg := c.buildProcessorConfig()
 
 	// Check installed tools
 	tools := c.checkInstalledTools()
+
+	// Initialize databases
+	if err := c.initDatabases(); err != nil {
+		return err
+	}
 
 	// Initialize components
 	ffmpeg := NewFFmpegProcessor(cfg)
@@ -240,39 +249,56 @@ func (c *ShrinkCmd) buildProcessorConfig() *ProcessorConfig {
 	}
 }
 
-func (c *ShrinkCmd) loadAllMedia() ([]ShrinkMedia, error) {
-	var allMedia []ShrinkMedia
-
+func (c *ShrinkCmd) initDatabases() error {
 	for _, dbPath := range c.Databases {
-		// Check if this is a database file or a directory
 		if db.IsDatabaseFile(dbPath) {
 			sqlDB, _, err := db.ConnectWithInit(dbPath)
 			if err != nil {
-				return nil, err
+				return err
 			}
+			c.sqlDBs = append(c.sqlDBs, sqlDB)
+		}
+	}
+	return nil
+}
 
-			records, err := db.LoadMediaFromDB(sqlDB, c.ForceShrink, c.VideoOnly, c.AudioOnly, c.ImageOnly, c.TextOnly)
+func (c *ShrinkCmd) closeDatabases() {
+	for _, sqlDB := range c.sqlDBs {
+		if sqlDB != nil {
 			sqlDB.Close()
-			if err != nil {
-				return nil, err
-			}
+		}
+	}
+}
 
-			for _, r := range records {
-				allMedia = append(allMedia, ShrinkMedia{
-					Path:           r.Path,
-					Size:           r.Size,
-					Duration:       r.Duration,
-					VideoCount:     r.VideoCount,
-					AudioCount:     r.AudioCount,
-					VideoCodecs:    r.VideoCodecs,
-					AudioCodecs:    r.AudioCodecs,
-					SubtitleCodecs: r.SubtitleCodecs,
-					MediaType:      r.MediaType,
-					Ext:            strings.ToLower(filepath.Ext(r.Path)),
-				})
-			}
-		} else {
-			// Treat as directory and scan for media files
+func (c *ShrinkCmd) loadAllMedia() ([]ShrinkMedia, error) {
+	var allMedia []ShrinkMedia
+
+	// Load from opened databases
+	for _, sqlDB := range c.sqlDBs {
+		records, err := db.LoadMediaFromDB(sqlDB, c.ForceShrink, c.VideoOnly, c.AudioOnly, c.ImageOnly, c.TextOnly)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, r := range records {
+			allMedia = append(allMedia, ShrinkMedia{
+				Path:           r.Path,
+				Size:           r.Size,
+				Duration:       r.Duration,
+				VideoCount:     r.VideoCount,
+				AudioCount:     r.AudioCount,
+				VideoCodecs:    r.VideoCodecs,
+				AudioCodecs:    r.AudioCodecs,
+				SubtitleCodecs: r.SubtitleCodecs,
+				MediaType:      r.MediaType,
+				Ext:            strings.ToLower(filepath.Ext(r.Path)),
+			})
+		}
+	}
+
+	// Scan directories
+	for _, dbPath := range c.Databases {
+		if !db.IsDatabaseFile(dbPath) {
 			media, err := c.scanDirectory(dbPath)
 			if err != nil {
 				return nil, err
@@ -317,7 +343,7 @@ func (c *ShrinkCmd) filterByTools(media []ShrinkMedia, tools InstalledTools) []S
 }
 
 func (c *ShrinkCmd) markDeleted(path string) {
-	db.MarkDeleted(c.Databases, path)
+	db.MarkDeleted(c.sqlDBs, path)
 }
 
 func (c *ShrinkCmd) moveToBroken(path string, partFiles []string) {
@@ -358,16 +384,16 @@ func (c *ShrinkCmd) moveToBroken(path string, partFiles []string) {
 }
 
 func (c *ShrinkCmd) updateDatabase(oldPath, newPath string, newSize int64, duration float64) {
-	db.UpdateMedia(c.Databases, oldPath, newPath, newSize, duration)
+	db.UpdateMedia(c.sqlDBs, oldPath, newPath, newSize, duration)
 }
 
 // addDatabaseEntry adds a new file entry to the database (for split files or archive contents)
 func (c *ShrinkCmd) addDatabaseEntry(path string, size int64, duration float64) {
-	db.AddMediaEntry(c.Databases, path, size, duration)
+	db.AddMediaEntry(c.sqlDBs, path, size, duration)
 }
 
 func (c *ShrinkCmd) markShrinked(path string) {
-	db.MarkShrinked(c.Databases, path)
+	db.MarkShrinked(c.sqlDBs, path)
 }
 
 func (c *ShrinkCmd) moveTo(path string) {

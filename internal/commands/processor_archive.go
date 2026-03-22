@@ -308,7 +308,6 @@ func (p *ArchiveProcessor) Process(ctx context.Context, m *ShrinkMedia, cfg *Pro
 	return p.ExtractAndProcess(ctx, m, cfg, imageProc, p.ffmpeg)
 }
 
-
 // getPartFiles returns list of all part files for a multi-part archive
 func (p *ArchiveProcessor) getPartFiles(path string) []string {
 	partFilesMap := make(map[string]bool)

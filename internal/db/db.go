@@ -10,20 +10,32 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
-// ConnectWithInit connects to a SQLite database and initializes it if needed
-func ConnectWithInit(dbPath string) (*sql.DB, string, error) {
+// Connect connects to a SQLite database without initializing it
+func Connect(dbPath string) (*sql.DB, error) {
 	db, err := sql.Open("sqlite3", dbPath)
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 
 	// Test connection
 	if err := db.Ping(); err != nil {
+		db.Close()
+		return nil, err
+	}
+
+	return db, nil
+}
+
+// ConnectWithInit connects to a SQLite database and initializes it if needed
+func ConnectWithInit(dbPath string) (*sql.DB, string, error) {
+	db, err := Connect(dbPath)
+	if err != nil {
 		return nil, "", err
 	}
 
 	// Initialize database schema and run migrations
 	if err := InitDB(db); err != nil {
+		db.Close()
 		return nil, "", fmt.Errorf("failed to initialize database: %w", err)
 	}
 
