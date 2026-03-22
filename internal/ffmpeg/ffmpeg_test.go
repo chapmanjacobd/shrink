@@ -330,9 +330,9 @@ func TestBuildAudioOptions(t *testing.T) {
 func TestBuildSubtitleOptions(t *testing.T) {
 	cfg := &models.ProcessorConfig{}
 	p := NewFFmpegProcessor(cfg)
-	stream := &FFProbeStream{CodecName: "subrip"}
+	streams := []FFProbeStream{{CodecName: "subrip"}}
 
-	opts := p.buildSubtitleOptions(stream)
+	opts := p.buildSubtitleOptions(streams)
 	if len(opts) == 0 {
 		t.Errorf("expected subtitle options")
 	}

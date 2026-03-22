@@ -64,7 +64,6 @@ func (p *FFmpegProcessor) Process(ctx context.Context, m *models.ShrinkMedia, cf
 	// Get streams
 	videoStream := getFirstStream(probe.VideoStreams)
 	audioStream := getFirstStream(probe.AudioStreams)
-	subtitleStream := getFirstStream(probe.SubtitleStreams)
 	albumArtStream := getFirstStream(probe.AlbumArtStreams)
 
 	// Stream validation - skip files without expected streams
@@ -99,7 +98,7 @@ func (p *FFmpegProcessor) Process(ctx context.Context, m *models.ShrinkMedia, cf
 	outputPath := genOutputPath(m.Path, outputSuffix)
 
 	// Build and execute FFmpeg command
-	args := p.buildFFmpegArgs(m.Path, outputPath, probe, videoStream, audioStream, subtitleStream, albumArtStream)
+	args := p.buildFFmpegArgs(m.Path, outputPath, probe, videoStream, audioStream, albumArtStream, probe.SubtitleStreams)
 	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -148,7 +147,7 @@ func (p *FFmpegProcessor) Process(ctx context.Context, m *models.ShrinkMedia, cf
 
 // buildFFmpegArgs constructs the FFmpeg command arguments
 func (p *FFmpegProcessor) buildFFmpegArgs(inputPath, outputPath string, probe *FFProbeResult,
-	videoStream, audioStream, subtitleStream, albumArtStream *FFProbeStream,
+	videoStream, audioStream, albumArtStream *FFProbeStream, subtitleStreams []FFProbeStream,
 ) []string {
 	// Build base command
 	logLevel := []string{"-hide_banner", "-loglevel", "warning"}
@@ -206,10 +205,8 @@ func (p *FFmpegProcessor) buildFFmpegArgs(inputPath, outputPath string, probe *F
 		}
 	}
 
-	// Subtitle options
-	if subtitleStream != nil {
-		args = append(args, p.buildSubtitleOptions(subtitleStream)...)
-	}
+	// Subtitle options - map all subtitle streams
+	args = append(args, p.buildSubtitleOptions(probe.SubtitleStreams)...)
 
 	// Timecode streams
 	if p.config.Common.IncludeTimecode {
@@ -302,10 +299,13 @@ func (p *FFmpegProcessor) buildAudioOptions(stream *FFProbeStream) []string {
 	return args
 }
 
-// buildSubtitleOptions constructs subtitle encoding options
-func (p *FFmpegProcessor) buildSubtitleOptions(stream *FFProbeStream) []string {
-	codec := strings.ToLower(stream.CodecName)
-	idx := stream.Index
+// buildSubtitleOptions constructs subtitle encoding options for all subtitle streams
+func (p *FFmpegProcessor) buildSubtitleOptions(subtitleStreams []FFProbeStream) []string {
+	if len(subtitleStreams) == 0 {
+		return nil
+	}
+
+	var args []string
 
 	// Comprehensive subtitle codec lists (matching Python implementation)
 	textSubs := map[string]bool{
@@ -323,20 +323,26 @@ func (p *FFmpegProcessor) buildSubtitleOptions(stream *FFProbeStream) []string {
 	mkvTextSubs := map[string]bool{"subrip": true, "srt": true, "ass": true, "ssa": true, "webvtt": true}
 	mkvImageSubs := map[string]bool{"pgssub": true, "hdmv_pgs_subtitle": true, "dvd_subtitle": true, "vobsub": true}
 
-	if mkvTextSubs[codec] || mkvImageSubs[codec] {
-		// Already in MKV-compatible format, copy as-is
-		return []string{"-map", fmt.Sprintf("0:%d", idx), "-c:s", "copy"}
-	} else if textSubs[codec] {
-		// Convert text subtitles to SRT
-		return []string{"-map", fmt.Sprintf("0:%d", idx), "-c:s", "srt"}
-	} else if imageSubs[codec] {
-		// Convert image subtitles to PGS
-		return []string{"-map", fmt.Sprintf("0:%d", idx), "-c:s", "pgssub"}
+	for _, stream := range subtitleStreams {
+		codec := strings.ToLower(stream.CodecName)
+		idx := stream.Index
+
+		if mkvTextSubs[codec] || mkvImageSubs[codec] {
+			// Already in MKV-compatible format, copy as-is
+			args = append(args, "-map", fmt.Sprintf("0:%d", idx), "-c:s", "copy")
+		} else if textSubs[codec] {
+			// Convert text subtitles to SRT
+			args = append(args, "-map", fmt.Sprintf("0:%d", idx), "-c:s", "srt")
+		} else if imageSubs[codec] {
+			// Convert image subtitles to PGS
+			args = append(args, "-map", fmt.Sprintf("0:%d", idx), "-c:s", "pgssub")
+		} else {
+			// Unknown codec - log warning and skip
+			slog.Warn("Unknown subtitle codec, skipping", "codec", codec, "index", idx)
+		}
 	}
 
-	// Unknown codec - log warning and skip
-	slog.Warn("Unknown subtitle codec, skipping", "codec", codec, "index", idx)
-	return nil
+	return args
 }
 
 // buildScaleFilter constructs scaling filter based on stereo mode

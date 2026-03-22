@@ -32,6 +32,7 @@ func TestProgressLogHandler(t *testing.T) {
 	// Should not crash
 	handler.Handle(context.TODO(), slog.Record{Level: slog.LevelInfo, Message: "test"})
 }
+
 func TestMetricsHelpers(t *testing.T) {
 	s := &MediaTypeStats{
 		Success:       1,
