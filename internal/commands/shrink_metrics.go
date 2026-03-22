@@ -220,9 +220,10 @@ func (m *ShrinkMetrics) PrintProgress() {
 	// Current file path (middle-truncated to full terminal width)
 	displayPath := m.currentFile
 	displayPath = utils.TruncateMiddle(displayPath, utils.GetTerminalWidth())
-	sb.WriteString("\nStarting to process file:")
-	sb.WriteString(displayPath)
-	sb.WriteString("\n")
+	clearSeq := utils.GetClearLineSequence()
+	sb.WriteString(clearSeq + "\n" + clearSeq + "Starting to process file:\n")
+	sb.WriteString(clearSeq + displayPath)
+	sb.WriteString("\n" + clearSeq + "\n" + clearSeq)
 
 	// Print summary table
 	headers := []string{"Media Type", "Queue", "Skip", "Fail", "OK", "Saved", "Time", "Speed"}
