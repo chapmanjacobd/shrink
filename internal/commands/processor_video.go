@@ -24,8 +24,7 @@ func NewVideoProcessor(ffmpeg *ffmpeg.FFmpegProcessor) *VideoProcessor {
 }
 
 func (p *VideoProcessor) CanProcess(m *models.ShrinkMedia) bool {
-	filetype := strings.ToLower(m.MediaType)
-	return (strings.HasPrefix(filetype, "video/") || strings.Contains(filetype, " video")) ||
+	return (strings.HasPrefix(m.MediaType, "video/") || strings.Contains(m.MediaType, " video")) ||
 		(utils.VideoExtensionMap[m.Ext] && m.VideoCount >= 1)
 }
 

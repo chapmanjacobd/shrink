@@ -33,7 +33,7 @@ func (c *ShrinkCmd) analyzeMedia(media []models.ShrinkMedia, cfg *models.Process
 
 		// Get processor's category
 		m.Category = processor.Category()
-		metrics.RecordStarted(m.Category, m.Path)
+		metrics.RecordStarted(m.DisplayCategory(), m.Path)
 
 		// Estimate size and time
 		futureSize, processingTime := processor.EstimateSize(m, cfg)
@@ -55,7 +55,7 @@ func (c *ShrinkCmd) analyzeMedia(media []models.ShrinkMedia, cfg *models.Process
 						// Add broken archives to toShrink so they can be moved to --move-broken
 						toShrink = append(toShrink, *m)
 					}
-					metrics.RecordSkipped(m.Category)
+					metrics.RecordSkipped(m.DisplayCategory())
 					continue
 				}
 				// Use total archive size for multi-part archives
@@ -72,7 +72,7 @@ func (c *ShrinkCmd) analyzeMedia(media []models.ShrinkMedia, cfg *models.Process
 			m.Savings = m.Size - futureSize
 			toShrink = append(toShrink, *m)
 		} else {
-			metrics.RecordSkipped(m.Category)
+			metrics.RecordSkipped(m.DisplayCategory())
 		}
 	}
 
@@ -106,10 +106,7 @@ func (c *ShrinkCmd) printSummary(media []models.ShrinkMedia) {
 		totalSavings += m.Savings
 		totalTime += m.ProcessingTime
 
-		key := m.Category
-		if m.MediaType != "" {
-			key = fmt.Sprintf("%s: %s", m.Category, strings.TrimPrefix(m.MediaType, "video/"))
-		}
+		key := m.DisplayCategory()
 		b := typeBreakdown[key]
 		b.count++
 		b.size += m.Size
@@ -237,7 +234,7 @@ func (c *ShrinkCmd) processSingle(m models.ShrinkMedia, registry *MediaRegistry,
 			c.moveToBroken(m.Path, m.PartFiles)
 		}
 		db.MarkDeleted(c.sqlDBs, m.Path)
-		metrics.RecordFailure(m.Category)
+		metrics.RecordFailure(m.DisplayCategory())
 		return models.ProcessResult{SourcePath: m.Path, Success: false}
 	}
 
@@ -246,7 +243,7 @@ func (c *ShrinkCmd) processSingle(m models.ShrinkMedia, registry *MediaRegistry,
 	if stat, err := os.Stat(m.Path); err != nil {
 		// File doesn't exist - mark as skipped (deleted)
 		slog.Warn("File not found, marking as skipped", "path", m.Path)
-		metrics.RecordSkipped(m.Category)
+		metrics.RecordSkipped(m.DisplayCategory())
 		db.MarkDeleted(c.sqlDBs, m.Path)
 		return models.ProcessResult{SourcePath: m.Path, Error: err}
 	} else {
@@ -261,7 +258,7 @@ func (c *ShrinkCmd) processSingle(m models.ShrinkMedia, registry *MediaRegistry,
 
 	processor := registry.GetProcessor(&m)
 	if processor == nil {
-		metrics.RecordFailure(m.Category)
+		metrics.RecordFailure(m.DisplayCategory())
 		return models.ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("no processor found")}
 	}
 
@@ -272,7 +269,7 @@ func (c *ShrinkCmd) processSingle(m models.ShrinkMedia, registry *MediaRegistry,
 
 	if result.Error != nil {
 		slog.Error("Processing failed", "path", m.Path, "error", result.Error)
-		metrics.RecordFailure(m.Category)
+		metrics.RecordFailure(m.DisplayCategory())
 		if cfg.Common.MoveBroken != "" {
 			c.moveToBroken(m.Path, result.PartFiles)
 		}
@@ -285,7 +282,7 @@ func (c *ShrinkCmd) processSingle(m models.ShrinkMedia, registry *MediaRegistry,
 			db.MarkDeleted(c.sqlDBs, m.Path)
 			os.Remove(m.Path)
 		}
-		metrics.RecordFailure(m.Category)
+		metrics.RecordFailure(m.DisplayCategory())
 		return result
 	}
 
@@ -308,10 +305,10 @@ func (c *ShrinkCmd) processSingle(m models.ShrinkMedia, registry *MediaRegistry,
 		for _, out := range result.Outputs {
 			c.moveTo(out.Path)
 		}
-		metrics.RecordSuccess(m.Category, m.Size, totalNewSize, m.ProcessingTime, int64(m.Duration))
+		metrics.RecordSuccess(m.DisplayCategory(), m.Size, totalNewSize, m.ProcessingTime, int64(m.Duration))
 	} else {
 		db.MarkShrinked(c.sqlDBs, m.Path)
-		metrics.RecordSuccess(m.Category, m.Size, m.Size, m.ProcessingTime, int64(m.Duration))
+		metrics.RecordSuccess(m.DisplayCategory(), m.Size, m.Size, m.ProcessingTime, int64(m.Duration))
 	}
 
 	return result

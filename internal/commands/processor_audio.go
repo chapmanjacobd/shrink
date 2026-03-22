@@ -24,8 +24,7 @@ func NewAudioProcessor(ffmpeg *ffmpeg.FFmpegProcessor) *AudioProcessor {
 }
 
 func (p *AudioProcessor) CanProcess(m *models.ShrinkMedia) bool {
-	filetype := strings.ToLower(m.MediaType)
-	return (strings.HasPrefix(filetype, "audio/") || strings.Contains(filetype, " audio")) ||
+	return (strings.HasPrefix(m.MediaType, "audio/") || strings.Contains(m.MediaType, " audio")) ||
 		(utils.AudioExtensionMap[m.Ext] && m.VideoCount == 0)
 }
 

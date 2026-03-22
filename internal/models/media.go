@@ -28,3 +28,15 @@ type ShrinkMedia struct {
 	IsBroken       bool     // For archives: lsar failed to read contents
 	PartFiles      []string // For multi-part archives: list of all part files
 }
+
+// DisplayCategory returns the category with the extension suffix (e.g. "Video: mp4")
+func (m *ShrinkMedia) DisplayCategory() string {
+	ext := m.Ext
+	if len(ext) > 0 && ext[0] == '.' {
+		ext = ext[1:]
+	}
+	if ext == "" {
+		ext = "unknown"
+	}
+	return m.Category + ": " + ext
+}

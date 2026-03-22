@@ -27,8 +27,7 @@ func NewImageProcessor() *ImageProcessor {
 }
 
 func (p *ImageProcessor) CanProcess(m *models.ShrinkMedia) bool {
-	filetype := strings.ToLower(m.MediaType)
-	return (strings.HasPrefix(filetype, "image/") || strings.Contains(filetype, " image")) ||
+	return (strings.HasPrefix(m.MediaType, "image/") || strings.Contains(m.MediaType, " image")) ||
 		(shouldConvertToAVIF(m.Ext) && m.Duration == 0)
 }
 
