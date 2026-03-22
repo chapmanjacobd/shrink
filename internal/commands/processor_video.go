@@ -18,7 +18,7 @@ type VideoProcessor struct {
 
 func NewVideoProcessor(ffmpeg *ffmpeg.FFmpegProcessor) *VideoProcessor {
 	return &VideoProcessor{
-		BaseProcessor: BaseProcessor{category: "Video"},
+		BaseProcessor: BaseProcessor{category: "Video", requiredTool: "ffmpeg"},
 		ffmpeg:        ffmpeg,
 	}
 }
@@ -28,7 +28,7 @@ func (p *VideoProcessor) CanProcess(m *models.ShrinkMedia) bool {
 		(utils.VideoExtensionMap[m.Ext] && m.VideoCount >= 1)
 }
 
-func (p *VideoProcessor) EstimateSize(m *models.ShrinkMedia, cfg *models.ProcessorConfig) (int64, int) {
+func (p *VideoProcessor) EstimateSize(m *models.ShrinkMedia, cfg *models.ProcessorConfig) models.ProcessableInfo {
 	duration := m.Duration
 	if duration <= 0 {
 		duration = float64(m.Size) / float64(cfg.Common.SourceVideoBitrate) * 8
@@ -37,7 +37,11 @@ func (p *VideoProcessor) EstimateSize(m *models.ShrinkMedia, cfg *models.Process
 	futureSize := int64(duration * float64(cfg.Video.TargetVideoBitrate) / 8)
 	processingTime := int(math.Ceil(duration / cfg.Video.TranscodingVideoRate))
 
-	return futureSize, processingTime
+	return models.ProcessableInfo{
+		FutureSize:     futureSize,
+		ProcessingTime: processingTime,
+		IsProcessable:  true,
+	}
 }
 
 func (p *VideoProcessor) Process(ctx context.Context, m *models.ShrinkMedia, cfg *models.ProcessorConfig, registry models.ProcessorRegistry) models.ProcessResult {

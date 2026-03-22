@@ -73,7 +73,7 @@ func (c *ShrinkCmd) Run(ctx *kong.Context) error {
 	}
 
 	// Filter by available tools
-	filteredMedia := c.filterByTools(allMedia, tools)
+	filteredMedia := c.filterByTools(allMedia, registry, tools)
 	slog.Info("Filtered media by tools",
 		"count", len(filteredMedia),
 		"ffmpeg", tools.FFmpeg,
@@ -88,8 +88,11 @@ func (c *ShrinkCmd) Run(ctx *kong.Context) error {
 		return nil
 	}
 
+	// Initialize Engine
+	engine := NewEngine(c, cfg, registry, metrics)
+
 	// Analyze and decide what to shrink
-	toShrink := c.analyzeMedia(filteredMedia, cfg, registry, metrics)
+	toShrink := engine.analyzeMedia(filteredMedia)
 	if len(toShrink) == 0 {
 		fmt.Println("No files to shrink")
 		metrics.LogSummary()
@@ -134,7 +137,7 @@ func (c *ShrinkCmd) Run(ctx *kong.Context) error {
 	defer cancel()
 
 	// Process with parallelism
-	c.processMedia(runCtx, toShrink, registry, cfg, metrics)
+	engine.processMedia(runCtx, toShrink)
 
 	// Final summary
 	metrics.LogSummary()
@@ -291,11 +294,11 @@ func (c *ShrinkCmd) loadAllMedia() ([]models.ShrinkMedia, error) {
 // ============================================================================
 
 // filterByTools filters media based on available tools
-func (c *ShrinkCmd) filterByTools(media []models.ShrinkMedia, tools InstalledTools) []models.ShrinkMedia {
+func (c *ShrinkCmd) filterByTools(media []models.ShrinkMedia, registry *MediaRegistry, tools InstalledTools) []models.ShrinkMedia {
 	filtered := make([]models.ShrinkMedia, 0, len(media))
 
 	for _, m := range media {
-		tool, canProcess := c.canProcessMedia(&m, tools)
+		tool, canProcess := c.canProcessMedia(&m, registry, tools)
 		if canProcess {
 			filtered = append(filtered, m)
 		} else if tool != "" {
@@ -310,39 +313,13 @@ func (c *ShrinkCmd) filterByTools(media []models.ShrinkMedia, tools InstalledToo
 
 // canProcessMedia checks if a media item can be processed with available tools
 // Returns the tool name and whether it can process the media
-func (c *ShrinkCmd) canProcessMedia(m *models.ShrinkMedia, tools InstalledTools) (string, bool) {
-	// Audio/Video - requires FFmpeg
-	isAudioVideo := (m.MediaType == "audio" || (utils.AudioExtensionMap[m.Ext] && m.VideoCount == 0)) ||
-		(m.MediaType == "video" || (utils.VideoExtensionMap[m.Ext] && m.VideoCount >= 1))
-	if isAudioVideo {
-		return "ffmpeg", tools.FFmpeg
+func (c *ShrinkCmd) canProcessMedia(m *models.ShrinkMedia, registry *MediaRegistry, tools InstalledTools) (string, bool) {
+	p := registry.GetProcessor(m)
+	if p == nil {
+		return "", false
 	}
-
-	// Image - requires ImageMagick
-	isImage := m.MediaType == "image" || (utils.ImageExtensionMap[m.Ext] && m.Duration == 0)
-	if isImage {
-		if utils.CommandExists("magick") {
-			return "magick", tools.ImageMagick
-		}
-		if utils.CommandExists("convert") {
-			return "convert", tools.ImageMagick
-		}
-		return "magick", false
-	}
-
-	// Text - requires Calibre
-	isText := m.MediaType == "text" || utils.TextExtensionMap[m.Ext]
-	if isText {
-		return "calibre", tools.Calibre
-	}
-
-	// Archives - requires Unar
-	isArchive := m.MediaType == "archive" || utils.ArchiveExtensionMap[m.Ext]
-	if isArchive {
-		return "unar", tools.Unar
-	}
-
-	return "", false
+	tool := p.RequiredTool()
+	return tool, tools.IsAvailable(tool)
 }
 
 // ============================================================================

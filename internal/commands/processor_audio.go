@@ -18,7 +18,7 @@ type AudioProcessor struct {
 
 func NewAudioProcessor(ffmpeg *ffmpeg.FFmpegProcessor) *AudioProcessor {
 	return &AudioProcessor{
-		BaseProcessor: BaseProcessor{category: "Audio"},
+		BaseProcessor: BaseProcessor{category: "Audio", requiredTool: "ffmpeg"},
 		ffmpeg:        ffmpeg,
 	}
 }
@@ -28,7 +28,7 @@ func (p *AudioProcessor) CanProcess(m *models.ShrinkMedia) bool {
 		(utils.AudioExtensionMap[m.Ext] && m.VideoCount == 0)
 }
 
-func (p *AudioProcessor) EstimateSize(m *models.ShrinkMedia, cfg *models.ProcessorConfig) (int64, int) {
+func (p *AudioProcessor) EstimateSize(m *models.ShrinkMedia, cfg *models.ProcessorConfig) models.ProcessableInfo {
 	duration := m.Duration
 	if duration <= 0 {
 		duration = float64(m.Size) / float64(cfg.Common.SourceAudioBitrate) * 8
@@ -37,7 +37,11 @@ func (p *AudioProcessor) EstimateSize(m *models.ShrinkMedia, cfg *models.Process
 	futureSize := int64(duration * float64(cfg.Audio.TargetAudioBitrate) / 8)
 	processingTime := int(math.Ceil(duration / cfg.Audio.TranscodingAudioRate))
 
-	return futureSize, processingTime
+	return models.ProcessableInfo{
+		FutureSize:     futureSize,
+		ProcessingTime: processingTime,
+		IsProcessable:  true,
+	}
 }
 
 func (p *AudioProcessor) Process(ctx context.Context, m *models.ShrinkMedia, cfg *models.ProcessorConfig, registry models.ProcessorRegistry) models.ProcessResult {

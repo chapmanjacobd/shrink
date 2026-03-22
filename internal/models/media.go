@@ -40,3 +40,18 @@ func (m *ShrinkMedia) DisplayCategory() string {
 	}
 	return m.Category + ": " + ext
 }
+
+// ShouldShrink determines if a file should be shrinked based on savings threshold
+func (m *ShrinkMedia) ShouldShrink(futureSize int64, cfg *ProcessorConfig) bool {
+	if cfg.Common.ForceShrink {
+		return true
+	}
+	minSavings := cfg.GetMinSavings(m.Category)
+	if minSavings < 1.0 {
+		// Threshold is a percentage of future size
+		shouldShrinkBuffer := int64(float64(futureSize) * minSavings)
+		return m.Size > (futureSize + shouldShrinkBuffer)
+	}
+	// Threshold is absolute bytes
+	return (m.Size - futureSize) >= int64(minSavings)
+}

@@ -13,18 +13,18 @@ func TestShouldShrink(t *testing.T) {
 	m := &models.ShrinkMedia{Category: "Video", Size: 1000}
 
 	// Savings 20% (1000 -> 800)
-	if !ShouldShrink(m, 800, cfg) {
+	if !m.ShouldShrink(800, cfg) {
 		t.Errorf("expected true for 20%% savings")
 	}
 
 	// Savings 5% (1000 -> 950)
-	if ShouldShrink(m, 950, cfg) {
+	if m.ShouldShrink(950, cfg) {
 		t.Errorf("expected false for 5%% savings")
 	}
 
 	// Byte threshold: 100 bytes
 	cfg.Video.MinSavingsVideo = 100.0
-	if !ShouldShrink(m, 800, cfg) {
+	if !m.ShouldShrink(800, cfg) {
 		t.Errorf("expected true for 200 bytes savings")
 	}
 }

@@ -22,15 +22,16 @@ func TestGetTimeout(t *testing.T) {
 	cmd := &ShrinkCmd{}
 	cmd.VideoTimeoutMult = 2.0
 	cmd.VideoTimeout = "10m"
+	engine := NewEngine(cmd, nil, nil, nil)
 
 	m := models.ShrinkMedia{Category: "Video", Duration: 60}
-	timeout := cmd.getTimeout(m)
+	timeout := engine.getTimeout(m)
 	if timeout.Seconds() != 120 {
 		t.Errorf("expected 120s timeout, got %v", timeout.Seconds())
 	}
 
 	m.Duration = 0
-	timeout = cmd.getTimeout(m)
+	timeout = engine.getTimeout(m)
 	if timeout.Minutes() != 10 {
 		t.Errorf("expected 10m timeout, got %v", timeout.Minutes())
 	}

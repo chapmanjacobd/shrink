@@ -20,7 +20,7 @@ type TextProcessor struct {
 
 func NewTextProcessor() *TextProcessor {
 	return &TextProcessor{
-		BaseProcessor: BaseProcessor{category: "Text"},
+		BaseProcessor: BaseProcessor{category: "Text", requiredTool: "calibre"},
 	}
 }
 
@@ -28,9 +28,13 @@ func (p *TextProcessor) CanProcess(m *models.ShrinkMedia) bool {
 	return utils.TextExtensionMap[m.Ext]
 }
 
-func (p *TextProcessor) EstimateSize(m *models.ShrinkMedia, cfg *models.ProcessorConfig) (int64, int) {
+func (p *TextProcessor) EstimateSize(m *models.ShrinkMedia, cfg *models.ProcessorConfig) models.ProcessableInfo {
 	// Rough estimate for ebooks
-	return cfg.Image.TargetImageSize * 50, int(cfg.Image.TranscodingImageTime * 12)
+	return models.ProcessableInfo{
+		FutureSize:     cfg.Image.TargetImageSize * 50,
+		ProcessingTime: int(cfg.Image.TranscodingImageTime * 12),
+		IsProcessable:  true,
+	}
 }
 
 func (p *TextProcessor) Process(ctx context.Context, m *models.ShrinkMedia, cfg *models.ProcessorConfig, registry models.ProcessorRegistry) models.ProcessResult {

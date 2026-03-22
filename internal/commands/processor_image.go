@@ -22,7 +22,7 @@ type ImageProcessor struct {
 
 func NewImageProcessor() *ImageProcessor {
 	return &ImageProcessor{
-		BaseProcessor: BaseProcessor{category: "Image"},
+		BaseProcessor: BaseProcessor{category: "Image", requiredTool: "magick"},
 	}
 }
 
@@ -31,8 +31,12 @@ func (p *ImageProcessor) CanProcess(m *models.ShrinkMedia) bool {
 		(shouldConvertToAVIF(m.Ext) && m.Duration == 0)
 }
 
-func (p *ImageProcessor) EstimateSize(m *models.ShrinkMedia, cfg *models.ProcessorConfig) (int64, int) {
-	return cfg.Image.TargetImageSize, int(cfg.Image.TranscodingImageTime)
+func (p *ImageProcessor) EstimateSize(m *models.ShrinkMedia, cfg *models.ProcessorConfig) models.ProcessableInfo {
+	return models.ProcessableInfo{
+		FutureSize:     cfg.Image.TargetImageSize,
+		ProcessingTime: int(cfg.Image.TranscodingImageTime),
+		IsProcessable:  true,
+	}
 }
 
 func (p *ImageProcessor) Process(ctx context.Context, m *models.ShrinkMedia, cfg *models.ProcessorConfig, registry models.ProcessorRegistry) models.ProcessResult {

@@ -1,6 +1,8 @@
 // Package models defines the core data structures used throughout the application.
 package models
 
+import "strings"
+
 // ProcessOutputFile represents a new file created by a processor
 type ProcessOutputFile struct {
 	Path string
@@ -82,4 +84,18 @@ type ProcessorConfig struct {
 	Image  ImageConfig
 	Text   TextConfig
 	Common CommonConfig
+}
+
+// GetMinSavings returns the minimum savings threshold for a media category
+func (c *ProcessorConfig) GetMinSavings(category string) float64 {
+	switch strings.ToLower(category) {
+	case "video":
+		return c.Video.MinSavingsVideo
+	case "audio":
+		return c.Audio.MinSavingsAudio
+	case "image", "text":
+		return c.Image.MinSavingsImage
+	default:
+		return 0.05 // Default 5%
+	}
 }

@@ -149,6 +149,22 @@ type InstalledTools struct {
 	Unar        bool
 }
 
+// IsAvailable returns true if the named tool is installed
+func (it InstalledTools) IsAvailable(toolName string) bool {
+	switch strings.ToLower(toolName) {
+	case "ffmpeg":
+		return it.FFmpeg
+	case "magick", "imagemagick":
+		return it.ImageMagick
+	case "calibre":
+		return it.Calibre
+	case "unar":
+		return it.Unar
+	default:
+		return false
+	}
+}
+
 func (c *ShrinkCmd) checkInstalledTools() InstalledTools {
 	tools := InstalledTools{
 		FFmpeg:      utils.GetCommandPath("ffmpeg") != "",

@@ -27,7 +27,7 @@ type ArchiveProcessor struct {
 
 func NewArchiveProcessor(ffmpeg *ffmpeg.FFmpegProcessor) *ArchiveProcessor {
 	return &ArchiveProcessor{
-		BaseProcessor: BaseProcessor{category: "Archived"},
+		BaseProcessor: BaseProcessor{category: "Archived", requiredTool: "unar"},
 		ffmpeg:        ffmpeg,
 		unarInstalled: utils.CommandExists("lsar") && utils.CommandExists("unar"),
 	}
@@ -122,8 +122,8 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *models.Shri
 
 		if shouldConvertToAVIF(ext) {
 			imgMedia := &models.ShrinkMedia{Path: path, Size: fileSize, Ext: ext, Category: "Image"}
-			futureSize, _ := imageProc.EstimateSize(imgMedia, cfg)
-			if ShouldShrink(imgMedia, futureSize, cfg) {
+			info := imageProc.EstimateSize(imgMedia, cfg)
+			if imgMedia.ShouldShrink(info.FutureSize, cfg) {
 				res := imageProc.processImage(ctx, imgMedia, cfg)
 				if res.Success && len(res.Outputs) > 0 {
 					var totalSize int64
@@ -159,8 +159,8 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *models.Shri
 				}
 			}
 
-			futureSize, _ := processor.EstimateSize(media, cfg)
-			if ShouldShrink(media, futureSize, cfg) {
+			futureInfo := processor.EstimateSize(media, cfg)
+			if media.ShouldShrink(futureInfo.FutureSize, cfg) {
 				res := ffmpegProc.Process(ctx, media, cfg, registry)
 				if res.Success && len(res.Outputs) > 0 {
 					var totalSize int64
@@ -347,9 +347,24 @@ func (p *ArchiveProcessor) EstimateSizeForArchive(m *models.ShrinkMedia, cfg *mo
 	return totalFutureSize, totalProcessingTime, hasProcessableContent, totalArchiveSize
 }
 
-func (p *ArchiveProcessor) EstimateSize(m *models.ShrinkMedia, cfg *models.ProcessorConfig) (int64, int) {
-	futureSize, processingTime, _, _ := p.EstimateSizeForArchive(m, cfg)
-	return futureSize, processingTime
+func (p *ArchiveProcessor) EstimateSize(m *models.ShrinkMedia, cfg *models.ProcessorConfig) models.ProcessableInfo {
+	futureSize, processingTime, hasProcessable, totalArchiveSize := p.EstimateSizeForArchive(m, cfg)
+	isBroken := false
+	var partFiles []string
+	if !hasProcessable {
+		if totalArchiveSize == 0 {
+			isBroken = true
+			partFiles = p.getPartFiles(m.Path)
+		}
+	}
+	return models.ProcessableInfo{
+		FutureSize:     futureSize,
+		ProcessingTime: processingTime,
+		IsProcessable:  hasProcessable,
+		ActualSize:     totalArchiveSize,
+		IsBroken:       isBroken,
+		PartFiles:      partFiles,
+	}
 }
 
 func (p *ArchiveProcessor) Process(ctx context.Context, m *models.ShrinkMedia, cfg *models.ProcessorConfig, registry models.ProcessorRegistry) models.ProcessResult {
