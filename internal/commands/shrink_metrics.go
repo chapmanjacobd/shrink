@@ -302,6 +302,9 @@ func (m *ShrinkMetrics) PrintProgress() {
 	})
 
 	for _, mt := range sortedTypes {
+		if mt.queue == 0 && mt.stats.Running == 0 {
+			continue
+		}
 		speed := ""
 		if mt.stats.SpeedRatio() > 0 {
 			speed = fmt.Sprintf("%.1fx", mt.stats.SpeedRatio())
