@@ -17,96 +17,15 @@ import (
 
 // ShrinkCmd is the main command for shrinking media files
 type ShrinkCmd struct {
-	// CoreFlags
-	Verbose   bool `short:"v" help:"Enable verbose logging"`
-	Simulate  bool `help:"Dry run; don't actually do anything"`
-	NoConfirm bool `short:"y" help:"Don't ask for confirmation"`
-
-	// PathFilterFlags
-	Include []string `short:"s" help:"Include paths matching pattern" group:"PathFilter"`
-	Exclude []string `short:"E" help:"Exclude paths matching pattern" group:"PathFilter"`
-
-	// FilterFlags
-	Search []string `help:"Search terms" group:"Filter"`
-
-	// MediaFilterFlags
-	VideoOnly bool `help:"Only video files" group:"MediaFilter"`
-	AudioOnly bool `help:"Only audio files" group:"MediaFilter"`
-	ImageOnly bool `help:"Only image files" group:"MediaFilter"`
-	TextOnly  bool `help:"Only text/ebook files" group:"MediaFilter"`
-
-	// TimeFilterFlags
-	CreatedAfter   string `help:"Created after date" group:"Time"`
-	ModifiedAfter  string `help:"Modified after date" group:"Time"`
-	ModifiedBefore string `help:"Modified before date" group:"Time"`
-
-	// DeletedFlags
-	HideDeleted bool `default:"true" help:"Exclude deleted files" group:"Deleted"`
-	OnlyDeleted bool `help:"Include only deleted files" group:"Deleted"`
+	Config `embed:""`
 
 	Databases []string `arg:"" required:"" help:"SQLite database files or directories to scan"`
-
-	Valid   bool `default:"true" help:"Attempt to process files with valid metadata"`
-	Invalid bool `help:"Attempt to process files with invalid metadata"`
-
-	MinSavingsVideo      string  `default:"5%" help:"Minimum savings for video (percentage or bytes)"`
-	MinSavingsAudio      string  `default:"10%" help:"Minimum savings for audio (percentage or bytes)"`
-	MinSavingsImage      string  `default:"15%" help:"Minimum savings for images (percentage or bytes)"`
-	SourceAudioBitrate   string  `default:"256kbps" help:"Used to estimate duration when files are inside of archives or invalid"`
-	SourceVideoBitrate   string  `default:"1500kbps" help:"Used to estimate duration when files are inside of archives or invalid"`
-	TargetAudioBitrate   string  `default:"128kbps" help:"Target audio bitrate"`
-	TargetVideoBitrate   string  `default:"800kbps" help:"Target video bitrate"`
-	TargetImageSize      string  `default:"30KiB" help:"Target image size"`
-	TranscodingVideoRate float64 `default:"1.8" help:"Ratio of duration eg. 4x realtime speed"`
-	TranscodingAudioRate float64 `default:"150" help:"Ratio of duration eg. 100x realtime speed"`
-	TranscodingImageTime float64 `default:"1.5" help:"Seconds to process an image"`
-
-	MaxVideoHeight int    `default:"960" help:"Maximum video height"`
-	MaxVideoWidth  int    `default:"1440" help:"Maximum video width"`
-	MaxImageHeight int    `default:"2400" help:"Maximum image height"`
-	MaxImageWidth  int    `default:"2400" help:"Maximum image width"`
-	Preset         string `default:"7" help:"SVT-AV1 preset (0-13, lower is slower/better)"`
-	CRF            string `default:"40" help:"CRF value for SVT-AV1 (0-63, lower is better)"`
-
-	ContinueFrom     string  `help:"Skip media until specific file path is seen"`
-	Move             string  `help:"Directory to move successful files"`
-	MoveBroken       string  `help:"Directory to move unsuccessful files"`
-	DeleteUnplayable bool    `help:"Delete unplayable files"`
-	DeleteLarger     bool    `default:"true" help:"Delete larger of transcode or original files"`
-	AlwaysSplit      bool    `help:"Always split audio on silence"`
-	SplitLongerThan  float64 `help:"Split audio longer than N seconds"`
-	MinSplitSegment  float64 `default:"60" help:"Minimum split segment duration in seconds"`
-	MaxWidthBuffer   float64 `default:"0.05" help:"Buffer percentage for width upscaling"`
-	MaxHeightBuffer  float64 `default:"0.05" help:"Buffer percentage for height upscaling"`
-	Keyframes        bool    `help:"Extract keyframes only"`
-	NoPreserveVideo  bool    `help:"Don't preserve video when audio-only"`
-	IncludeTimecode  bool    `help:"Include timecode streams in output"`
-	VerboseFFmpeg    bool    `help:"Enable verbose FFmpeg logging"`
-	SkipOCR          bool    `help:"Skip OCR for PDFs that already contain text"`
-	ForceOCR         bool    `help:"Force OCR even on PDFs with text"`
-	RedoOCR          bool    `help:"Re-do OCR on PDFs that already have OCR"`
-	NoOCR            bool    `help:"Skip OCR entirely"`
-
-	// Parallelism
-	VideoThreads int `default:"2" help:"Maximum concurrent video transcodes"`
-	AudioThreads int `default:"4" help:"Maximum concurrent audio transcodes"`
-	ImageThreads int `default:"8" help:"Maximum concurrent image conversions"`
-	TextThreads  int `default:"2" help:"Maximum concurrent text conversions"`
-
-	// Timeouts
-	VideoTimeoutMult float64 `default:"3.0" help:"Video timeout multiplier (timeout = duration * multiplier)"`
-	AudioTimeoutMult float64 `default:"0.5" help:"Audio timeout multiplier (timeout = duration * multiplier)"`
-	VideoTimeout     string  `default:"90m" help:"Video timeout when duration is unknown"`
-	AudioTimeout     string  `default:"10m" help:"Audio timeout when duration is unknown"`
-	ImageTimeout     string  `default:"10m" help:"Image timeout"`
-	TextTimeout      string  `default:"20m" help:"Text timeout"`
-
-	ForceShrink bool `help:"Force reprocessing of already shrinked files"`
 
 	sqlDBs []*sql.DB
 }
 
 func (c *ShrinkCmd) Run(ctx *kong.Context) error {
+	c.ApplyProfile()
 	models.SetupLogging(c.Verbose)
 	defer c.closeDatabases()
 

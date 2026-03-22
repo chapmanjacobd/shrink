@@ -6,12 +6,6 @@ Professional error messages and user experience
 
 >80% test coverage with scenario-based tests
 
-  4. Configuration Management
-   * Current Issue: The ShrinkCmd struct is overloaded with flags, making it difficult to maintain and test.    * Improvement: Extract flags into a dedicated Config object and pass it where needed.
-
-- [ ] Environment variable overrides
-- [ ] Profile presets (quality/speed/balance [default to balance preset 7 crf 40])
-
 - [ ] Edge Case Tests:
 - [ ] Animated GIF/webp detection
 - [ ] Stereo/360° video samples
