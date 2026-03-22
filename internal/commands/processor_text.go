@@ -1,0 +1,396 @@
+package commands
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"log/slog"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+
+	"github.com/chapmanjacobd/shrink/internal/utils"
+)
+
+// TextProcessor handles text/ebook file processing
+type TextProcessor struct {
+	BaseProcessor
+}
+
+func NewTextProcessor() *TextProcessor {
+	return &TextProcessor{
+		BaseProcessor: BaseProcessor{category: "Text"},
+	}
+}
+
+func (p *TextProcessor) CanProcess(m *ShrinkMedia) bool {
+	return utils.TextExtensionMap[m.Ext]
+}
+
+func (p *TextProcessor) EstimateSize(m *ShrinkMedia, cfg *ProcessorConfig) (int64, int) {
+	// Rough estimate for ebooks
+	return cfg.TargetImageSize * 50, int(cfg.TranscodingImageTime * 12)
+}
+
+func (p *TextProcessor) Process(ctx context.Context, m *ShrinkMedia, cfg *ProcessorConfig) ProcessResult {
+	return p.processText(ctx, m, cfg)
+}
+
+// processText handles the actual text/ebook processing
+func (p *TextProcessor) processText(ctx context.Context, m *ShrinkMedia, cfg *ProcessorConfig) ProcessResult {
+	if !utils.CommandExists("ebook-convert") {
+		return ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("calibre not installed")}
+	}
+
+	ext := strings.ToLower(filepath.Ext(m.Path))
+
+	// Step 1: OCR for PDFs if needed
+	if ext == "pdf" && utils.CommandExists("ocrmypdf") {
+		ocrPath := p.runOCR(m.Path, cfg)
+		if ocrPath != "" && ocrPath != m.Path {
+			m.Path = ocrPath
+		}
+	}
+
+	// Step 2: Convert with Calibre to folder format
+	outputDir := filepath.Join(filepath.Dir(m.Path), filepath.Base(m.Path)+".OEB")
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		return ProcessResult{SourcePath: m.Path, Error: err}
+	}
+
+	args := []string{
+		m.Path,
+		outputDir,
+		"--minimum-line-height=105",
+		"--unsmarten-punctuation",
+	}
+
+	// Use pdftohtml engine for PDFs with Calibre >= 7.19.0
+	major, minor, _ := p.getCalibreVersion()
+	if ext == "pdf" && (major > 7 || (major == 7 && minor >= 19)) {
+		args = append(args, "--pdf-engine", "pdftohtml")
+	}
+
+	cmd := exec.CommandContext(ctx, "ebook-convert", args...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		// Check for timeout
+		if ctx.Err() == context.DeadlineExceeded {
+			slog.Error("Calibre timed out", "path", m.Path, "error", err, "output", string(output))
+		} else {
+			slog.Error("Calibre error", "output", string(output), "path", m.Path)
+		}
+		os.RemoveAll(outputDir)
+		return ProcessResult{SourcePath: m.Path, Error: err}
+	}
+
+	if !p.folderExists(outputDir) {
+		os.RemoveAll(outputDir)
+		return ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("calibre output folder missing")}
+	}
+
+	// Step 3: Replace CSS with optimized version
+	p.replaceCSS(outputDir)
+
+	// Step 4: Process images inside ebook (convert to AVIF)
+	imageFiles := p.findImages(outputDir)
+	p.processEbookImages(ctx, imageFiles, cfg)
+
+	// Step 5: Update references in HTML files
+	p.updateImageReferences(outputDir)
+
+	// Step 6: Return result
+	outputSize := utils.FolderSize(outputDir)
+
+	return ProcessResult{
+		SourcePath: m.Path,
+		Outputs:    []ProcessOutputFile{{Path: outputDir, Size: outputSize}},
+		Success:    true,
+	}
+}
+
+// runOCR runs OCR on a PDF file using ocrmypdf
+func (p *TextProcessor) runOCR(path string, cfg *ProcessorConfig) string {
+	if !utils.CommandExists("ocrmypdf") {
+		return ""
+	}
+
+	// Auto-detect OCR capabilities if no explicit flag is set
+	// Matches Python behavior: if tesseract+gs available, default to --skip-text
+	// Otherwise, skip OCR entirely
+	useSkipText := cfg.SkipOCR
+	useForceOCR := cfg.ForceOCR
+	useRedoOCR := cfg.RedoOCR
+	skipOCR := cfg.NoOCR
+
+	if !useSkipText && !useForceOCR && !useRedoOCR && !skipOCR {
+		// No explicit flag set - auto-detect
+		hasTesseract := utils.CommandExists("tesseract")
+		hasGS := utils.CommandExists("gs")
+		if hasTesseract && hasGS {
+			useSkipText = true // Default to skip-text if tools available
+		} else {
+			skipOCR = true // Skip OCR entirely if tools missing
+		}
+	}
+
+	if skipOCR {
+		slog.Debug("Skipping OCR (not requested or tools unavailable)", "path", path)
+		return ""
+	}
+
+	outputPath := strings.TrimSuffix(path, ".pdf") + ".ocr.pdf"
+
+	args := []string{
+		"--optimize", "0",
+		"--output-type", "pdf",
+		"--fast-web-view", "999999",
+	}
+
+	// Add OCR mode flags
+	if useSkipText {
+		args = append(args, "--skip-text")
+	} else if useForceOCR {
+		args = append(args, "--force-ocr")
+	} else if useRedoOCR {
+		args = append(args, "--redo-ocr")
+	}
+
+	// Add language if configured
+	if lang := os.Getenv("TESSERACT_LANGUAGE"); lang != "" {
+		args = append(args, "--language", lang)
+	}
+
+	args = append(args, path, outputPath)
+
+	cmd := exec.Command("ocrmypdf", args...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		outputStr := string(output)
+		// Check if it's a "skip-text" message (not really an error)
+		if strings.Contains(outputStr, "already contains text") ||
+			strings.Contains(outputStr, "skipping") {
+			slog.Info("Skipping OCR (PDF already has text)", "path", path)
+			os.Remove(outputPath)
+			return ""
+		}
+		slog.Warn("OCR failed", "path", path, "error", err, "output", outputStr)
+		os.Remove(outputPath)
+		return ""
+	}
+
+	if _, err := os.Stat(outputPath); err == nil {
+		os.Remove(path)
+		return outputPath
+	}
+
+	return ""
+}
+
+// getCalibreVersion returns the Calibre version as a tuple
+func (p *TextProcessor) getCalibreVersion() (int, int, int) {
+	cmd := exec.Command("ebook-convert", "--version")
+	output, err := cmd.Output()
+	if err != nil {
+		return 0, 0, 0
+	}
+
+	// Parse version from output like "ebook-convert (calibre 7.19.0)"
+	parts := strings.Fields(string(output))
+	for i, part := range parts {
+		if strings.HasPrefix(part, "(") && i+2 < len(parts) {
+			version := strings.TrimSuffix(parts[i+2], ")")
+			var major, minor, patch int
+			fmt.Sscanf(version, "%d.%d.%d", &major, &minor, &patch)
+			return major, minor, patch
+		}
+	}
+	return 0, 0, 0
+}
+
+// replaceCSS replaces the stylesheet with an optimized version
+func (p *TextProcessor) replaceCSS(outputDir string) {
+	cssPath := filepath.Join(outputDir, "stylesheet.css")
+	// Optimized CSS for ebooks (matching Python implementation)
+	css := `.calibre, body {
+  font-family: Times New Roman,serif;
+  display: block;
+  font-size: 1em;
+  padding-left: 0;
+  padding-right: 0;
+  margin: 0 5pt;
+}
+@media (min-width: 40em) {
+  .calibre, body {
+    width: 38em;
+    margin: 0 auto;
+  }
+}
+.calibre1 {
+  font-size: 1.25em;
+  border-bottom: 0;
+  border-top: 0;
+  display: block;
+  padding-bottom: 0;
+  padding-top: 0;
+  margin: 0.5em 0;
+}
+.calibre2, img {
+  max-height:100%;
+  max-width:100%;
+}
+.calibre3 {
+  font-weight: bold;
+}
+.calibre4 {
+  font-style: italic;
+}
+p > .calibre3:not(:only-of-type) {
+  font-size: 1.5em;
+}
+.calibre5 {
+  display: block;
+  font-size: 2em;
+  font-weight: bold;
+  line-height: 1.05;
+  page-break-before: always;
+  margin: 0.67em 0;
+}
+.calibre6 {
+  display: block;
+  list-style-type: disc;
+  margin: 1em 0;
+}
+.calibre7 {
+  display: list-item;
+}
+`
+	os.WriteFile(cssPath, []byte(css), 0o644)
+}
+
+// findImages finds all image files in the ebook folder
+func (p *TextProcessor) findImages(dir string) []string {
+	var images []string
+	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			slog.Warn("Error accessing path while finding images", "path", path, "error", err)
+			return nil
+		}
+		ext := strings.ToLower(filepath.Ext(path))
+		if utils.ImageExtensionMap[ext] {
+			images = append(images, path)
+		}
+		return nil
+	})
+	return images
+}
+
+// processEbookImages converts images to AVIF
+func (p *TextProcessor) processEbookImages(ctx context.Context, images []string, cfg *ProcessorConfig) {
+	for _, img := range images {
+		ext := strings.ToLower(filepath.Ext(img))
+		// Skip formats that shouldn't be converted to AVIF
+		if !shouldConvertToAVIF(ext) {
+			continue
+		}
+
+		outputPath := strings.TrimSuffix(img, ext) + ".avif"
+		args := []string{
+			img,
+			"-resize", fmt.Sprintf("%dx%d>", cfg.MaxImageWidth, cfg.MaxImageHeight),
+			outputPath,
+		}
+
+		cmd := exec.CommandContext(ctx, "magick", args...)
+		if err := cmd.Run(); err != nil {
+			slog.Warn("Failed to convert ebook image", "path", img, "error", err)
+			continue
+		}
+
+		// Replace if smaller
+		if info, err := os.Stat(outputPath); err == nil {
+			if info.Size() > 0 {
+				os.Remove(img)
+			} else {
+				os.Remove(outputPath)
+			}
+		}
+	}
+}
+
+// getImageDimensions uses ffprobe to get the actual width and height of an image
+func getImageDimensions(path string) (int, int, error) {
+	if !utils.CommandExists("ffprobe") {
+		return 0, 0, fmt.Errorf("ffprobe not available")
+	}
+
+	cmd := exec.Command("ffprobe",
+		"-v", "quiet",
+		"-print_format", "json",
+		"-show_streams",
+		path)
+
+	output, err := cmd.Output()
+	if err != nil {
+		return 0, 0, err
+	}
+
+	var data struct {
+		Streams []struct {
+			CodecType string `json:"codec_type"`
+			Width     int    `json:"width"`
+			Height    int    `json:"height"`
+		} `json:"streams"`
+	}
+
+	if err := json.Unmarshal(output, &data); err != nil {
+		return 0, 0, err
+	}
+
+	for _, stream := range data.Streams {
+		if stream.CodecType == "video" && stream.Width > 0 && stream.Height > 0 {
+			return stream.Width, stream.Height, nil
+		}
+	}
+
+	return 0, 0, fmt.Errorf("no video stream found")
+}
+
+// updateImageReferences updates HTML files to reference new AVIF files
+func (p *TextProcessor) updateImageReferences(dir string) {
+	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		ext := strings.ToLower(filepath.Ext(path))
+		if ext == ".html" || ext == ".xhtml" || ext == ".htm" {
+			p.updateReferencesInFile(path)
+		}
+		return nil
+	})
+}
+
+// updateReferencesInFile updates image references in a single HTML file
+func (p *TextProcessor) updateReferencesInFile(path string) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+
+	text := string(content)
+	// Replace all image extensions that we convert to AVIF
+	for ext := range utils.ImageExtensionMap {
+		if shouldConvertToAVIF(ext) {
+			text = strings.ReplaceAll(text, ext, ".avif")
+		}
+	}
+
+	os.WriteFile(path, []byte(text), 0o644)
+}
+
+// folderExists checks if a folder exists
+func (p *TextProcessor) folderExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
+}
