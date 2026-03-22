@@ -325,10 +325,11 @@ func (m *ShrinkMetrics) PrintProgress() {
 	}
 	fmt.Print(output) // Print progress
 	// Clear remaining lines from old progress (in case new progress is shorter)
+	clearSeq := utils.GetClearLineSequence()
 	for i := lineCount; i < m.linesPrinted; i++ {
-		fmt.Print("\033[K\n") // Clear line and move down
+		fmt.Printf("%s\n", clearSeq) // Clear line and move down
 	}
-	fmt.Print("\033[K") // Clear the last line too
+	fmt.Print(clearSeq) // Clear the last line too
 	// Track lines printed for next iteration
 	m.linesPrinted = lineCount
 }
@@ -349,8 +350,9 @@ func (m *ShrinkMetrics) ClearProgress() {
 	// Move cursor up to the initial line of our progress display
 	fmt.Printf("\033[%dF", m.linesPrinted)
 	// Clear each line moving down
+	clearSeq := utils.GetClearLineSequence()
 	for i := 0; i < m.linesPrinted; i++ {
-		fmt.Print("\033[K\n")
+		fmt.Printf("%s\n", clearSeq)
 	}
 	// Move back up to where we started clearing
 	fmt.Printf("\033[%dF", m.linesPrinted)
