@@ -288,14 +288,7 @@ func (c *ShrinkCmd) processSingle(m ShrinkMedia, registry *ProcessorRegistry,
 		return result
 	}
 
-	c.handlePostProcessing(m, result, cfg, metrics, originalAtime, originalMtime)
-	return result
-}
-
-func (c *ShrinkCmd) handlePostProcessing(m ShrinkMedia, result ProcessResult,
-	cfg *ProcessorConfig, metrics *ShrinkMetrics, originalAtime, originalMtime time.Time,
-) {
-	// 1. Calculate new size and compare with original
+	// Calculate new size and compare with original
 	var totalNewSize int64
 	for _, out := range result.Outputs {
 		totalNewSize += out.Size
@@ -306,6 +299,24 @@ func (c *ShrinkCmd) handlePostProcessing(m ShrinkMedia, result ProcessResult,
 		keepNewFiles = false
 	}
 
+	c.finalizeFileSwap(m, result, keepNewFiles)
+
+	if keepNewFiles {
+		c.updateMetadata(m, result)
+		c.preserveTimestamps(&m, result, originalAtime, originalMtime)
+		for _, out := range result.Outputs {
+			c.moveTo(out.Path)
+		}
+		metrics.RecordSuccess(m.Category, m.Size, totalNewSize, m.ProcessingTime, int64(m.Duration))
+	} else {
+		db.MarkShrinked(c.sqlDBs, m.Path)
+		metrics.RecordSuccess(m.Category, m.Size, m.Size, m.ProcessingTime, int64(m.Duration))
+	}
+
+	return result
+}
+
+func (c *ShrinkCmd) finalizeFileSwap(m ShrinkMedia, result ProcessResult, keepNewFiles bool) {
 	if keepNewFiles {
 		// Keep new files, delete original
 		if m.Path != "" {
@@ -321,32 +332,6 @@ func (c *ShrinkCmd) handlePostProcessing(m ShrinkMedia, result ProcessResult,
 				os.Remove(m.Path)
 			}
 		}
-
-		// Update database and apply timestamps
-		for i, out := range result.Outputs {
-			// We use updateDatabase when the original is replaced by a single output
-			// to preserve metadata like play_count, etc.
-			// Except for archives, where we want to keep the archive record as deleted.
-			if len(result.Outputs) == 1 && out.Path != m.Path && m.Category != "Archived" {
-				db.UpdateMedia(c.sqlDBs, m.Path, out.Path, out.Size, m.Duration)
-			} else if out.Path != m.Path {
-				db.AddMediaEntry(c.sqlDBs, out.Path, out.Size, m.Duration)
-			} else {
-				db.MarkShrinked(c.sqlDBs, out.Path)
-			}
-
-			if i == 0 && !originalAtime.IsZero() {
-				applyTimestamps(out.Path, originalAtime, originalMtime)
-				// Update duration if needed
-				if m.Category == "Audio" || m.Category == "Video" {
-					if newDuration := c.getActualDuration(out.Path); newDuration > 0 {
-						m.Duration = newDuration
-					}
-				}
-			}
-			c.moveTo(out.Path)
-		}
-		metrics.RecordSuccess(m.Category, m.Size, totalNewSize, m.ProcessingTime, int64(m.Duration))
 	} else {
 		// Delete new files, keep original
 		for _, out := range result.Outputs {
@@ -354,8 +339,34 @@ func (c *ShrinkCmd) handlePostProcessing(m ShrinkMedia, result ProcessResult,
 				os.RemoveAll(out.Path) // RemoveAll because it might be a directory (TextProcessor/ArchiveProcessor)
 			}
 		}
-		db.MarkShrinked(c.sqlDBs, m.Path)
-		metrics.RecordSuccess(m.Category, m.Size, m.Size, m.ProcessingTime, int64(m.Duration))
+	}
+}
+
+func (c *ShrinkCmd) updateMetadata(m ShrinkMedia, result ProcessResult) {
+	for _, out := range result.Outputs {
+		// We use updateDatabase when the original is replaced by a single output
+		// to preserve metadata like play_count, etc.
+		// Except for archives, where we want to keep the archive record as deleted.
+		if len(result.Outputs) == 1 && out.Path != m.Path && m.Category != "Archived" {
+			db.UpdateMedia(c.sqlDBs, m.Path, out.Path, out.Size, m.Duration)
+		} else if out.Path != m.Path {
+			db.AddMediaEntry(c.sqlDBs, out.Path, out.Size, m.Duration)
+		} else {
+			db.MarkShrinked(c.sqlDBs, out.Path)
+		}
+	}
+}
+
+func (c *ShrinkCmd) preserveTimestamps(m *ShrinkMedia, result ProcessResult, originalAtime, originalMtime time.Time) {
+	if len(result.Outputs) > 0 && !originalAtime.IsZero() {
+		outPath := result.Outputs[0].Path
+		applyTimestamps(outPath, originalAtime, originalMtime)
+		// Update duration if needed
+		if m.Category == "Audio" || m.Category == "Video" {
+			if newDuration := c.getActualDuration(outPath); newDuration > 0 {
+				m.Duration = newDuration
+			}
+		}
 	}
 }
 
