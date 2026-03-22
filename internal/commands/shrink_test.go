@@ -28,6 +28,7 @@ func runShrinkCmd(dbPath, tempDir string, args []string) error {
 	slog.SetDefault(logger)
 
 	cmd := &ShrinkCmd{}
+	cmd.Verbose = 2
 	parser, err := kong.New(cmd)
 	if err != nil {
 		return err
@@ -58,6 +59,7 @@ func runShrinkCmdDir(dirPath, tempDir string, args []string) error {
 	slog.SetDefault(logger)
 
 	cmd := &ShrinkCmd{}
+	cmd.Verbose = 2
 	parser, err := kong.New(cmd)
 	if err != nil {
 		return err

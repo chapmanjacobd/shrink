@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/chapmanjacobd/shrink/internal/ffmpeg"
@@ -225,7 +226,13 @@ func (p *ArchiveProcessor) EstimateSizeForArchive(m *models.ShrinkMedia, cfg *mo
 	totalArchiveSize := m.Size
 	partFiles := p.getPartFiles(m.Path)
 
-	// If getPartFiles identifies parts that lsar might have missed, check if they exist
+	// Check for missing parts in sequence for known multi-part types
+	if isBrokenSequence(m.Path, partFiles) {
+		slog.Info("Broken sequence detected for archive", "path", m.Path)
+		return 0, 0, false, 0
+	}
+
+	// Sum up sizes
 	if len(partFiles) > 0 {
 		totalArchiveSize = 0
 		if info, err := os.Stat(m.Path); err == nil {
@@ -335,19 +342,84 @@ func (p *ArchiveProcessor) Process(ctx context.Context, m *models.ShrinkMedia, c
 	return p.ExtractAndProcess(ctx, m, cfg, imageProc, p.ffmpeg, registry)
 }
 
-// pathsEqual compares two paths for equality, handling Windows case-insensitivity
+// pathsEqual compares two paths for equality, handling Windows case-insensitivity and path styles
 func pathsEqual(p1, p2 string) bool {
+	if p1 == p2 {
+		return true
+	}
 	abs1, err1 := filepath.Abs(p1)
 	abs2, err2 := filepath.Abs(p2)
 	if err1 != nil || err2 != nil {
-		return p1 == p2
+		return strings.EqualFold(p1, p2)
 	}
+
+	// Remove \\?\ prefix on Windows if present
+	abs1 = strings.TrimPrefix(abs1, `\\?\`)
+	abs2 = strings.TrimPrefix(abs2, `\\?\`)
+
+	// Clean paths
+	abs1 = filepath.Clean(abs1)
+	abs2 = filepath.Clean(abs2)
+
 	// Case-insensitive comparison for Windows
-	if strings.EqualFold(abs1, abs2) {
-		return true
+	return strings.EqualFold(abs1, abs2)
+}
+
+// isBrokenSequence checks if a multi-part archive has gaps in its part sequence
+func isBrokenSequence(mainPath string, partFiles []string) bool {
+	ext := strings.ToLower(filepath.Ext(mainPath))
+	if ext == ".zip" {
+		// Look for .z01, .z02...
+		maxN := 0
+		found := make(map[int]bool)
+		for _, p := range partFiles {
+			pext := strings.ToLower(filepath.Ext(p))
+			// Check for .zNN pattern
+			if len(pext) >= 3 && pext[1] == 'z' {
+				if n, err := strconv.Atoi(pext[2:]); err == nil && n > 0 {
+					found[n] = true
+					if n > maxN {
+						maxN = n
+					}
+				}
+			}
+		}
+		if maxN > 0 {
+			for i := 1; i <= maxN; i++ {
+				if !found[i] {
+					return true // Gap in sequence
+				}
+			}
+		}
+	} else if ext == ".rar" || ext == "" { // "" for parts without extension if identified as rar
+		// Look for .part1.rar, .part2.rar... or .r00, .r01...
+		maxPart := 0
+		foundPart := make(map[int]bool)
+		for _, p := range partFiles {
+			base := strings.ToLower(filepath.Base(p))
+			if strings.Contains(base, ".part") {
+				idx := strings.LastIndex(base, ".part")
+				numPart := base[idx+5:]
+				if endIdx := strings.Index(numPart, "."); endIdx != -1 {
+					numPart = numPart[:endIdx]
+				}
+				if n, err := strconv.Atoi(numPart); err == nil && n > 0 {
+					foundPart[n] = true
+					if n > maxPart {
+						maxPart = n
+					}
+				}
+			}
+		}
+		if maxPart > 0 {
+			for i := 1; i <= maxPart; i++ {
+				if !foundPart[i] {
+					return true
+				}
+			}
+		}
 	}
-	// Clean paths for extra safety
-	return filepath.Clean(abs1) == filepath.Clean(abs2)
+	return false
 }
 
 // getPartFiles returns list of all part files for a multi-part archive
