@@ -36,28 +36,35 @@ func FileExists(path string) bool {
 }
 
 // FormatDuration formats seconds into human readable duration
+// Prints max two units, skipping zero values (except 0 → "0s")
 func FormatDuration(seconds int) string {
 	if seconds == 0 {
-		return "-"
+		return "0s"
 	}
-	y := seconds / (365 * 86400)
-	d := (seconds % (365 * 86400)) / 86400
+	d := seconds / 86400
 	h := (seconds % 86400) / 3600
 	m := (seconds % 3600) / 60
+	s := seconds % 60
 
-	if y > 0 {
-		return fmt.Sprintf("%dy %dd", y, d)
-	}
-	if d > 45 {
-		return fmt.Sprintf("%dd", y*365+d)
-	}
-	if h > 72 {
-		return fmt.Sprintf("%dh", (y*365+d)*24+h)
+	var parts []string
+	if d > 0 {
+		parts = append(parts, fmt.Sprintf("%dd", d))
 	}
 	if h > 0 {
-		return fmt.Sprintf("%dh %dm", h, m)
+		parts = append(parts, fmt.Sprintf("%dh", h))
 	}
-	return fmt.Sprintf("%dm", m)
+	if m > 0 {
+		parts = append(parts, fmt.Sprintf("%dm", m))
+	}
+	if s > 0 {
+		parts = append(parts, fmt.Sprintf("%ds", s))
+	}
+
+	// Return max two units
+	if len(parts) > 2 {
+		return parts[0] + " " + parts[1]
+	}
+	return strings.Join(parts, " ")
 }
 
 // FormatSize formats bytes into human readable size using base 1024

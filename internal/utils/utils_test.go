@@ -12,11 +12,11 @@ func TestFormatDuration(t *testing.T) {
 		sec  int
 		want string
 	}{
-		{0, "-"},
-		{5, "00:05"},
-		{65, "01:05"},
-		{3665, "1:01:05"},
-		{90000, "1d 01:00"},
+		{0, "0s"},
+		{5, "5s"},
+		{65, "1m 5s"},
+		{3665, "1h 1m"},
+		{90000, "1d 1h"},
 	}
 	for _, tt := range tests {
 		got := FormatDuration(tt.sec)
