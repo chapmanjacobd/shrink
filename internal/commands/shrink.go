@@ -8,6 +8,8 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"syscall"
 
@@ -38,7 +40,7 @@ func (c *ShrinkCmd) Run(ctx *kong.Context) error {
 	c.skippedByTool = make(map[string]int64)
 
 	// Build processor configuration
-	cfg := c.buildProcessorConfig()
+	cfg := c.BuildProcessorConfig()
 
 	// Check installed tools
 	tools := c.checkInstalledTools()
@@ -49,8 +51,8 @@ func (c *ShrinkCmd) Run(ctx *kong.Context) error {
 	}
 
 	// Initialize components
-	ffmpeg := ffmpeg.NewFFmpegProcessor(cfg)
-	registry := NewProcessorRegistry(ffmpeg)
+	ffmpegProc := ffmpeg.NewFFmpegProcessor(cfg)
+	registry := NewProcessorRegistry(ffmpegProc)
 	metrics := NewShrinkMetrics()
 
 	// Wrap the default logger to coordinate with the progress bar
@@ -81,7 +83,7 @@ func (c *ShrinkCmd) Run(ctx *kong.Context) error {
 		"calibre", tools.Calibre)
 
 	// Print unknown extensions and skipped files table once
-	c.printUnknownExtensions()
+	c.PrintUnknownExtensions()
 
 	if len(filteredMedia) == 0 {
 		slog.Info("No processable media found")
@@ -89,7 +91,14 @@ func (c *ShrinkCmd) Run(ctx *kong.Context) error {
 	}
 
 	// Initialize Engine
-	engine := NewEngine(c, cfg, registry, metrics)
+	engCfg := EngineConfig{
+		VideoThreads: c.VideoThreads,
+		AudioThreads: c.AudioThreads,
+		ImageThreads: c.ImageThreads,
+		TextThreads:  c.TextThreads,
+		Timeout:      c.TimeoutFlags,
+	}
+	engine := NewEngine(c, cfg, engCfg, c.sqlDBs, registry, metrics)
 
 	// Analyze and decide what to shrink
 	toShrink := engine.analyzeMedia(filteredMedia)
@@ -113,14 +122,14 @@ func (c *ShrinkCmd) Run(ctx *kong.Context) error {
 
 	// Apply continue-from filter
 	if c.ContinueFrom != "" {
-		toShrink = c.applyContinueFrom(toShrink)
+		toShrink = c.ApplyContinueFrom(toShrink)
 	}
 
 	// Sort by efficiency (most space freed per second)
-	c.sortByEfficiency(toShrink)
+	c.SortByEfficiency(toShrink)
 
 	// Print summary
-	c.printSummary(toShrink)
+	c.PrintSummary(toShrink)
 
 	if c.Simulate {
 		fmt.Println("Simulation mode - no files will be processed")
@@ -128,7 +137,7 @@ func (c *ShrinkCmd) Run(ctx *kong.Context) error {
 	}
 
 	// Confirm
-	if !c.NoConfirm && !c.confirm() {
+	if !c.NoConfirm && !c.Confirm() {
 		return nil
 	}
 
@@ -142,79 +151,6 @@ func (c *ShrinkCmd) Run(ctx *kong.Context) error {
 	// Final summary
 	metrics.LogSummary()
 	return nil
-}
-
-func (c *ShrinkCmd) buildProcessorConfig() *models.ProcessorConfig {
-	return &models.ProcessorConfig{
-		Common: c.buildCommonConfig(),
-		Video:  c.buildVideoConfig(),
-		Audio:  c.buildAudioConfig(),
-		Image:  c.buildImageConfig(),
-		Text:   c.buildTextConfig(),
-	}
-}
-
-func (c *ShrinkCmd) buildCommonConfig() models.CommonConfig {
-	return models.CommonConfig{
-		SourceAudioBitrate: utils.ParseBitrate(c.SourceAudioBitrate),
-		SourceVideoBitrate: utils.ParseBitrate(c.SourceVideoBitrate),
-		DeleteUnplayable:   c.DeleteUnplayable,
-		DeleteLarger:       c.DeleteLarger,
-		MoveBroken:         c.MoveBroken,
-		Valid:              c.Valid,
-		Invalid:            c.Invalid,
-		ForceShrink:        c.ForceShrink,
-		VerboseFFmpeg:      c.VerboseFFmpeg,
-		IncludeTimecode:    c.IncludeTimecode,
-		MaxWidthBuffer:     c.MaxWidthBuffer,
-		MaxHeightBuffer:    c.MaxHeightBuffer,
-	}
-}
-
-func (c *ShrinkCmd) buildVideoConfig() models.VideoConfig {
-	return models.VideoConfig{
-		TargetVideoBitrate:   utils.ParseBitrate(c.TargetVideoBitrate),
-		MinSavingsVideo:      utils.ParsePercentOrBytes(c.MinSavingsVideo),
-		TranscodingVideoRate: c.TranscodingVideoRate,
-		Preset:               c.Preset,
-		CRF:                  c.CRF,
-		MaxVideoWidth:        c.MaxVideoWidth,
-		MaxVideoHeight:       c.MaxVideoHeight,
-		VideoOnly:            c.VideoOnly,
-		Keyframes:            c.Keyframes,
-		NoPreserveVideo:      c.NoPreserveVideo,
-	}
-}
-
-func (c *ShrinkCmd) buildAudioConfig() models.AudioConfig {
-	return models.AudioConfig{
-		TargetAudioBitrate:   utils.ParseBitrate(c.TargetAudioBitrate),
-		MinSavingsAudio:      utils.ParsePercentOrBytes(c.MinSavingsAudio),
-		TranscodingAudioRate: c.TranscodingAudioRate,
-		AudioOnly:            c.AudioOnly,
-		AlwaysSplit:          c.AlwaysSplit,
-		SplitLongerThan:      c.SplitLongerThan,
-		MinSplitSegment:      c.MinSplitSegment,
-	}
-}
-
-func (c *ShrinkCmd) buildImageConfig() models.ImageConfig {
-	return models.ImageConfig{
-		TargetImageSize:      utils.ParseSize(c.TargetImageSize),
-		MinSavingsImage:      utils.ParsePercentOrBytes(c.MinSavingsImage),
-		TranscodingImageTime: c.TranscodingImageTime,
-		MaxImageWidth:        c.MaxImageWidth,
-		MaxImageHeight:       c.MaxImageHeight,
-	}
-}
-
-func (c *ShrinkCmd) buildTextConfig() models.TextConfig {
-	return models.TextConfig{
-		SkipOCR:  c.SkipOCR,
-		ForceOCR: c.ForceOCR,
-		RedoOCR:  c.RedoOCR,
-		NoOCR:    c.NoOCR,
-	}
 }
 
 // ============================================================================
@@ -322,11 +258,165 @@ func (c *ShrinkCmd) canProcessMedia(m *models.ShrinkMedia, registry *MediaRegist
 	return tool, tools.IsAvailable(tool)
 }
 
+func (c *ShrinkCmd) SortByEfficiency(media []models.ShrinkMedia) {
+	slices.SortFunc(media, func(a, b models.ShrinkMedia) int {
+		timeA := max(a.ProcessingTime, 1)
+		timeB := max(b.ProcessingTime, 1)
+		ratioA := float64(a.Savings) / float64(timeA)
+		ratioB := float64(b.Savings) / float64(timeB)
+		if ratioA > ratioB {
+			return -1
+		} else if ratioA < ratioB {
+			return 1
+		}
+		return 0
+	})
+}
+
+func (c *ShrinkCmd) PrintSummary(media []models.ShrinkMedia) {
+	var totalSize, totalFuture, totalSavings int64
+	var totalTime int
+	type breakdown struct {
+		count    int
+		size     int64
+		future   int64
+		savings  int64
+		procTime int
+	}
+	typeBreakdown := make(map[string]breakdown)
+
+	for _, m := range media {
+		totalSize += m.Size
+		totalFuture += m.FutureSize
+		totalSavings += m.Savings
+		totalTime += m.ProcessingTime
+
+		key := m.DisplayCategory()
+		b := typeBreakdown[key]
+		b.count++
+		b.size += m.Size
+		b.future += m.FutureSize
+		b.savings += m.Savings
+		b.procTime += m.ProcessingTime
+		typeBreakdown[key] = b
+	}
+
+	// Print summary table
+	fmt.Println()
+	headers := []string{"Media Type", "Count", "Current", "Future", "Savings", "ETA", "Speed"}
+	var rows [][]string
+
+	// Sort keys for consistent output
+	keys := make([]string, 0, len(typeBreakdown))
+	for k := range typeBreakdown {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+
+	for _, key := range keys {
+		b := typeBreakdown[key]
+		speed := ""
+		if b.procTime > 0 {
+			ratio := float64(b.size) / float64(b.future)
+			speed = fmt.Sprintf("%.1fx", ratio)
+		}
+		rows = append(rows, []string{
+			key,
+			strconv.Itoa(b.count),
+			utils.FormatSize(b.size),
+			utils.FormatSize(b.future),
+			utils.FormatSize(b.savings),
+			utils.FormatDuration(float64(b.procTime)),
+			speed,
+		})
+	}
+
+	// Add TOTAL row
+	rows = append(rows, []string{
+		"TOTAL",
+		"",
+		utils.FormatSize(totalSize),
+		utils.FormatSize(totalFuture),
+		utils.FormatSize(totalSavings),
+		utils.FormatDuration(float64(totalTime)),
+		"",
+	})
+
+	utils.PrintTable(headers, rows)
+	fmt.Println()
+}
+
+func (c *ShrinkCmd) PrintUnknownExtensions() {
+	// Combine unknown extensions and skipped by tool
+	hasUnknown := len(c.unknownExtensions) > 0
+	hasSkipped := len(c.skippedByTool) > 0
+
+	if !hasUnknown && !hasSkipped {
+		return
+	}
+
+	fmt.Println("Unknown File Extensions Scanned")
+	headers := []string{"Extension", "Total Size"}
+	var rows [][]string
+
+	// Sort by size descending
+	type extSize struct {
+		ext  string
+		size int64
+	}
+	var sorted []extSize
+
+	for ext, size := range c.unknownExtensions {
+		sorted = append(sorted, extSize{ext, size})
+	}
+	for ext, size := range c.skippedByTool {
+		sorted = append(sorted, extSize{ext, size})
+	}
+
+	slices.SortFunc(sorted, func(a, b extSize) int {
+		if a.size > b.size {
+			return -1
+		} else if a.size < b.size {
+			return 1
+		}
+		return 0
+	})
+
+	for _, es := range sorted {
+		rows = append(rows, []string{es.ext, utils.FormatSize(es.size)})
+	}
+	utils.PrintTable(headers, rows)
+	fmt.Println()
+}
+
+func (c *ShrinkCmd) Confirm() bool {
+	fmt.Print("Proceed with shrinking? [y/N] ")
+	var response string
+	fmt.Scanln(&response)
+	return strings.ToLower(response) == "y"
+}
+
+func (c *ShrinkCmd) ApplyContinueFrom(media []models.ShrinkMedia) []models.ShrinkMedia {
+	found := false
+	var filtered []models.ShrinkMedia
+
+	for _, m := range media {
+		if m.Path == c.ContinueFrom {
+			found = true
+		}
+		if found {
+			filtered = append(filtered, m)
+		}
+	}
+
+	return filtered
+}
+
 // ============================================================================
 // File Operations
 // ============================================================================
 
-func (c *ShrinkCmd) moveToBroken(path string, partFiles []string) {
+func (c *ShrinkCmd) MoveToBroken(path string, partFiles []string) {
 	if c.MoveBroken == "" || path == "" {
 		return
 	}
@@ -361,7 +451,7 @@ func (c *ShrinkCmd) moveToBroken(path string, partFiles []string) {
 	}
 }
 
-func (c *ShrinkCmd) moveTo(path string) {
+func (c *ShrinkCmd) MoveTo(path string) {
 	if c.Move != "" && path != "" {
 		dest := filepath.Join(c.Move, filepath.Base(path))
 		if err := utils.MoveFile(path, dest); err != nil {

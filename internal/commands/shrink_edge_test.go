@@ -148,7 +148,9 @@ func TestConfigProfiles(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		cfg := &Config{Profile: tt.profile}
+		cfg := &Config{
+			CoreFlags: CoreFlags{Profile: tt.profile},
+		}
 		cfg.ApplyProfile()
 		if cfg.Preset != tt.wantP || cfg.CRF != tt.wantC {
 			t.Errorf("Profile %s: got %s/%s, want %s/%s", tt.profile, cfg.Preset, cfg.CRF, tt.wantP, tt.wantC)
@@ -163,7 +165,9 @@ func TestScanDirectory(t *testing.T) {
 	os.WriteFile(filepath.Join(tempDir, "vid.mp4"), []byte("data"), 0o644)
 
 	// Should skip .git
-	cmd := &ShrinkCmd{}
+	cmd := &ShrinkCmd{
+		unknownExtensions: make(map[string]int64),
+	}
 	media, _ := cmd.scanDirectory(tempDir)
 	for _, m := range media {
 		if strings.Contains(m.Path, ".git") {

@@ -19,7 +19,7 @@ func TestConfirm(t *testing.T) {
 		w.Close()
 	}()
 
-	if !cmd.confirm() {
+	if !cmd.Confirm() {
 		t.Errorf("expected true for 'y'")
 	}
 }

@@ -12,17 +12,20 @@ func TestSortByEfficiency(t *testing.T) {
 		{Path: "slow", Savings: 1000, ProcessingTime: 100}, // 10 bytes/sec
 		{Path: "fast", Savings: 1000, ProcessingTime: 10},  // 100 bytes/sec
 	}
-	cmd.sortByEfficiency(media)
+	cmd.SortByEfficiency(media)
 	if media[0].Path != "fast" {
 		t.Errorf("expected fast first, got %s", media[0].Path)
 	}
 }
 
 func TestGetTimeout(t *testing.T) {
-	cmd := &ShrinkCmd{}
-	cmd.VideoTimeoutMult = 2.0
-	cmd.VideoTimeout = "10m"
-	engine := NewEngine(cmd, nil, nil, nil)
+	engCfg := EngineConfig{
+		Timeout: TimeoutFlags{
+			VideoTimeoutMult: 2.0,
+			VideoTimeout:     "10m",
+		},
+	}
+	engine := NewEngine(nil, nil, engCfg, nil, nil, nil)
 
 	m := models.ShrinkMedia{Category: "Video", Duration: 60}
 	timeout := engine.getTimeout(m)

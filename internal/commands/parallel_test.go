@@ -66,7 +66,12 @@ func TestParallelLimits(t *testing.T) {
 		processors: []models.MediaProcessor{videoProc, audioProc},
 	}
 
-	engine := NewEngine(cmd, &models.ProcessorConfig{}, registry, metrics)
+	engine := NewEngine(cmd, &models.ProcessorConfig{}, EngineConfig{
+		VideoThreads: 2,
+		AudioThreads: 3,
+		ImageThreads: 8,
+		TextThreads:  2,
+	}, nil, registry, metrics)
 
 	media := []models.ShrinkMedia{}
 	for i := range 5 {
