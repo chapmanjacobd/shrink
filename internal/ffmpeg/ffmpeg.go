@@ -274,9 +274,9 @@ func (p *FFmpegProcessor) buildAudioOptions(outIdx int, channels int, bitrate st
 
 	// Channel config
 	if channels == 1 {
-		args = append(args, fmt.Sprintf("-ac:%d", outIdx), "1")
+		args = append(args, fmt.Sprintf("-ac:a:%d", outIdx), "1")
 	} else {
-		args = append(args, fmt.Sprintf("-ac:%d", outIdx), "2")
+		args = append(args, fmt.Sprintf("-ac:a:%d", outIdx), "2")
 	}
 
 	// Bitrate config
@@ -285,8 +285,8 @@ func (p *FFmpegProcessor) buildAudioOptions(outIdx int, channels int, bitrate st
 	} else {
 		args = append(args,
 			fmt.Sprintf("-b:a:%d", outIdx), "64k",
-			fmt.Sprintf("-frame_duration:%d", outIdx), "40",
-			fmt.Sprintf("-apply_phase_inv:%d", outIdx), "0")
+			fmt.Sprintf("-frame_duration:a:%d", outIdx), "40",
+			fmt.Sprintf("-apply_phase_inv:a:%d", outIdx), "0")
 	}
 
 	// Sample rate config
@@ -301,8 +301,8 @@ func (p *FFmpegProcessor) buildAudioOptions(outIdx int, channels int, bitrate st
 
 	args = append(args,
 		fmt.Sprintf("-c:a:%d", outIdx), "libopus",
-		fmt.Sprintf("-ar:%d", outIdx), strconv.Itoa(opusRate),
-		fmt.Sprintf("-af:%d", outIdx), "loudnorm=i=-18:tp=-3:lra=17",
+		fmt.Sprintf("-ar:a:%d", outIdx), strconv.Itoa(opusRate),
+		fmt.Sprintf("-af:a:%d", outIdx), "loudnorm=i=-18:tp=-3:lra=17",
 	)
 
 	return args

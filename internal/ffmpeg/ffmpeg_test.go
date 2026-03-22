@@ -367,9 +367,37 @@ func TestBuildAudioOptions(t *testing.T) {
 	if len(opts) == 0 {
 		t.Errorf("expected audio options")
 	}
-	foundCodec := slices.Contains(opts, "-c:a:0")
-	if !foundCodec {
-		t.Errorf("expected -c:a:0 in audio options, got %v", opts)
+
+	expected := []string{
+		"-ac:a:0", "2",
+		"-b:a:0", "128k",
+		"-c:a:0", "libopus",
+		"-ar:a:0", "48000",
+		"-af:a:0", "loudnorm=i=-18:tp=-3:lra=17",
+	}
+
+	for _, exp := range expected {
+		if !slices.Contains(opts, exp) {
+			t.Errorf("expected %q in audio options, got %v", exp, opts)
+		}
+	}
+
+	// Test mono
+	opts = p.buildAudioOptions(1, 1, "64000", "22050")
+	expectedMono := []string{
+		"-ac:a:1", "1",
+		"-b:a:1", "64k",
+		"-frame_duration:a:1", "40",
+		"-apply_phase_inv:a:1", "0",
+		"-c:a:1", "libopus",
+		"-ar:a:1", "24000",
+		"-af:a:1", "loudnorm=i=-18:tp=-3:lra=17",
+	}
+
+	for _, exp := range expectedMono {
+		if !slices.Contains(opts, exp) {
+			t.Errorf("expected %q in mono audio options, got %v", exp, opts)
+		}
 	}
 }
 
