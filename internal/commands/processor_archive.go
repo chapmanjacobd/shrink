@@ -60,24 +60,10 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *models.Shri
 		return models.ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("unar/lsar not installed")}
 	}
 
-	// Check for multi-part archives (XAD volumes)
-	var partFiles []string
-	lsarCmd := exec.Command(lsar, "-json", m.Path)
-	lsarCmd.Dir = filepath.Dir(m.Path)
-	if lsarOutput, err := lsarCmd.CombinedOutput(); err == nil || len(lsarOutput) > 0 {
-		jsonBytes := extractLSARJSON(lsarOutput)
-		var lsarJSON struct {
-			LsarProperties struct {
-				XADVolumes []string `json:"XADVolumes"`
-			} `json:"lsarProperties"`
-		}
-		if json.Unmarshal(jsonBytes, &lsarJSON) == nil && len(lsarJSON.LsarProperties.XADVolumes) > 0 {
-			partFiles = lsarJSON.LsarProperties.XADVolumes
-			slog.Info("Multi-part archive detected", "path", m.Path, "parts", len(partFiles))
-			for i, p := range partFiles {
-				slog.Debug("Part file from lsar", "index", i, "path", p)
-			}
-		}
+	// Check for multi-part archives
+	partFiles := p.getPartFiles(m.Path)
+	if len(partFiles) > 0 {
+		slog.Info("Multi-part archive detected", "path", m.Path, "parts", len(partFiles))
 	}
 
 	// Extract archive - use -no-directory to prevent creating nested archive-name folders
@@ -90,11 +76,11 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *models.Shri
 	// -force-rename is needed for nested multi-part archives
 	cmd := exec.CommandContext(ctx, unar, "-no-directory", "-force-rename", "-o", outputDir, m.Path)
 	cmd.Dir = filepath.Dir(m.Path)
-	_, err := cmd.CombinedOutput()
+	output, err := cmd.CombinedOutput()
 	if err != nil {
 		// Clean up on failure
 		os.RemoveAll(outputDir)
-		return models.ProcessResult{SourcePath: m.Path, PartFiles: partFiles, Error: err}
+		return models.ProcessResult{SourcePath: m.Path, PartFiles: partFiles, Error: fmt.Errorf("unar error: %v, output: %s", err, string(output))}
 	}
 
 	// Verify that something was actually extracted
@@ -102,7 +88,7 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *models.Shri
 	entries, err := os.ReadDir(outputDir)
 	if err != nil || len(entries) == 0 {
 		os.RemoveAll(outputDir)
-		return models.ProcessResult{SourcePath: m.Path, PartFiles: partFiles, Error: fmt.Errorf("extraction produced no files")}
+		return models.ProcessResult{SourcePath: m.Path, PartFiles: partFiles, Error: fmt.Errorf("extraction produced no files. unar output: %s", string(output))}
 	}
 
 	// Log extracted files for debugging
@@ -237,37 +223,20 @@ func (p *ArchiveProcessor) EstimateSizeForArchive(m *models.ShrinkMedia, cfg *mo
 
 	// Check for multi-part archives and verify all parts exist
 	totalArchiveSize := m.Size
-	lsar := utils.GetCommandPath("lsar")
-	if lsar != "" {
-		lsarCmd := exec.Command(lsar, "-json", m.Path)
-		lsarCmd.Dir = filepath.Dir(m.Path)
-		if lsarOutput, err := lsarCmd.CombinedOutput(); err == nil || len(lsarOutput) > 0 {
-			jsonBytes := extractLSARJSON(lsarOutput)
-			var lsarJSON struct {
-				LsarProperties struct {
-					XADVolumes []string `json:"XADVolumes"`
-				} `json:"lsarProperties"`
-			}
-			if json.Unmarshal(jsonBytes, &lsarJSON) == nil && len(lsarJSON.LsarProperties.XADVolumes) > 0 {
-				// Sum up sizes of all parts
-				totalArchiveSize = 0
-				allPartsExist := true
-				for _, partFile := range lsarJSON.LsarProperties.XADVolumes {
-					if !filepath.IsAbs(partFile) {
-						partFile = filepath.Join(filepath.Dir(m.Path), partFile)
-					}
-					if info, err := os.Stat(partFile); err == nil {
-						totalArchiveSize += info.Size()
-					} else {
-						// Part file missing - archive is broken
-						allPartsExist = false
-						lsarFailed = true
-					}
-				}
-				// If any part is missing, treat as broken archive
-				if !allPartsExist {
-					return 0, 0, false, 0
-				}
+	partFiles := p.getPartFiles(m.Path)
+
+	// If getPartFiles identifies parts that lsar might have missed, check if they exist
+	if len(partFiles) > 0 {
+		totalArchiveSize = 0
+		if info, err := os.Stat(m.Path); err == nil {
+			totalArchiveSize += info.Size()
+		}
+		for _, partFile := range partFiles {
+			if info, err := os.Stat(partFile); err == nil {
+				totalArchiveSize += info.Size()
+			} else {
+				// Missing part file - archive is broken
+				return 0, 0, false, 0
 			}
 		}
 	}
