@@ -40,6 +40,9 @@ macos-deps:
 	-brew install --formula ffmpeg pandoc sqlite || true
 	-brew install --cask calibre
 
+windows-deps:
+	choco install calibre ffmpeg sqlite --no-progress --stop-on-first-failure
+
 go-deps:
 	go install honnef.co/go/tools/cmd/staticcheck@latest
 	go install golang.org/x/tools/cmd/goimports@latest

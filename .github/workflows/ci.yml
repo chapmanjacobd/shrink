@@ -1,0 +1,93 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: write
+
+jobs:
+  ci:
+    name: Continuous Integration
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.os == 'windows-latest' }}
+    strategy:
+      fail-fast: true
+      max-parallel: 1
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.0'
+          cache: true
+
+      - name: Install system dependencies
+        run: |
+          if [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
+            make ubuntu-deps
+          elif [ "${{ matrix.os }}" = "macos-latest" ]; then
+            make macos-deps
+          elif [ "${{ matrix.os }}" = "windows-latest" ]; then
+            make windows-deps
+          fi
+
+      - name: Install Go dependencies
+        run: |
+          make go-deps
+
+      - name: Run checks and build
+        run: |
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            # Windows often has issues with parallel tests and file locking on SQLite DBs
+            gotestsum --format github-actions -- ./... -parallel 1
+            make all
+          else
+            make all
+          fi
+
+      - name: Build release binary
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          if [ "${{ matrix.os }}" = "macos-latest" ]; then
+            GOOS=darwin GOARCH=amd64 go build -o dist/shrink-${{ matrix.os }}-amd64 ./cmd/shrink
+            GOOS=darwin GOARCH=arm64 go build -o dist/shrink-${{ matrix.os }}-arm64 ./cmd/shrink
+          elif [ "${{ matrix.os }}" = "windows-latest" ]; then
+            GOOS=windows GOARCH=amd64 go build -o dist/shrink-windows-amd64.exe ./cmd/shrink
+          else
+            GOOS=linux GOARCH=amd64 go build -o dist/shrink-linux-amd64 ./cmd/shrink
+          fi
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v') && matrix.os == 'ubuntu-latest'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create ${{ github.ref_name }} \
+            --title "shrink ${{ github.ref_name }}" \
+            --generate-notes \
+            --latest \
+            --repo ${{ github.repository }} || true
+
+      - name: Upload binaries to Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload ${{ github.ref_name }} \
+            dist/shrink-* \
+            --repo ${{ github.repository }}
