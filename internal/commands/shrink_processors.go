@@ -801,9 +801,7 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *ShrinkMedia
 			imgMedia := &ShrinkMedia{Path: path, Size: fileSize, Ext: ext, Category: "Image"}
 			futureSize, _ := imageProc.EstimateSize(imgMedia, cfg)
 			if ShouldShrink(imgMedia, futureSize, cfg) {
-				imgCtx, imgCancel := context.WithTimeout(context.Background(), 10*time.Minute)
-				res := imageProc.processImage(imgCtx, imgMedia, cfg)
-				imgCancel()
+				res := imageProc.processImage(ctx, imgMedia, cfg)
 				if res.Success && len(res.Outputs) > 0 {
 					var totalSize int64
 					for _, out := range res.Outputs {
@@ -828,10 +826,7 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *ShrinkMedia
 			media := &ShrinkMedia{Path: path, Size: fileSize, Ext: ext, Category: category}
 			futureSize, _ := processor.EstimateSize(media, cfg)
 			if ShouldShrink(media, futureSize, cfg) {
-				// Create a new context for media processing to avoid parent timeout issues
-				mediaCtx, mediaCancel := context.WithTimeout(context.Background(), 30*time.Minute)
-				res := ffmpeg.Process(mediaCtx, media, cfg)
-				mediaCancel()
+				res := ffmpeg.Process(ctx, media, cfg)
 				if res.Success && len(res.Outputs) > 0 {
 					var totalSize int64
 					for _, out := range res.Outputs {

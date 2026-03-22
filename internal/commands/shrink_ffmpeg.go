@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -462,13 +461,12 @@ func (p *FFmpegProcessor) validateTranscode(m ShrinkMedia, outputPath string, or
 						}
 					}
 				}
-				// Check duration matches original (within 5% tolerance)
-				// Skip this check for archives and text since extracted/converted contents may have different duration
-				isArchive := utils.ArchiveExtensionMap[m.Ext]
-				isText := utils.TextExtensionMap[m.Ext]
-				if !isArchive && !isText {
-					diff := math.Abs(originalProbe.Duration-transcodeProbe.Duration) / originalProbe.Duration * 100
-					if diff > 5.0 {
+				// Check duration matches original
+				// Skip this check for formats known to have unreliable duration metadata (DVD, etc)
+				if !utils.HasUnreliableDuration(m.Ext) {
+					// Ensure transcode duration is at least 90% of original
+					// (Avoids deleting transcodes that were cut short while allowing some leeway)
+					if transcodeProbe.Duration < originalProbe.Duration*0.9 {
 						deleteTranscode = true
 					}
 				}

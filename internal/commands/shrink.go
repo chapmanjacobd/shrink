@@ -1001,6 +1001,13 @@ func (c *ShrinkCmd) getTimeout(m ShrinkMedia) time.Duration {
 		return utils.ParseDurationString(c.ImageTimeout)
 	case "Text":
 		return utils.ParseDurationString(c.TextTimeout)
+	case "Archived":
+		// 100 seconds per GB, with a minimum of 10 minutes
+		timeout := float64(m.Size) / (1024 * 1024 * 1024) * 100
+		if timeout < 600 {
+			timeout = 600
+		}
+		return time.Duration(timeout) * time.Second
 	default:
 		return 30 * time.Minute
 	}

@@ -99,7 +99,7 @@ func TestShrinkVideo(t *testing.T) {
 func TestShrinkArchive(t *testing.T) {
 	scenario := testutils.Scenario{
 		Description: "Extracting an archive with a video shrinks the video and deletes the archive",
-		CLIArgs:     []string{"--no-confirm", "--preset=7", "--crf=40", "--max-image-width=2400", "--max-image-height=2400"},
+		CLIArgs:     []string{"--no-confirm"},
 		Archives: []testutils.TestArchive{
 			{
 				Name:    "test_archive_simple.zip",
@@ -273,7 +273,7 @@ func TestShrinkMultiPartArchive(t *testing.T) {
 	// Only the main .zip file needs to be in the database
 	scenario := testutils.Scenario{
 		Description: "Multi-part archive extracts, processes media, and deletes all parts",
-		CLIArgs:     []string{"--no-confirm", "--preset=7", "--crf=40", "--max-image-width=2400", "--max-image-height=2400"},
+		CLIArgs:     []string{"--no-confirm"},
 		// Only insert the main .zip file - parts are detected automatically
 		InputFiles: []testutils.TestFile{
 			{
