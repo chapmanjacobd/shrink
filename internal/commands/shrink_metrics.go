@@ -144,7 +144,6 @@ func (m *ShrinkMetrics) RecordSuccess(mediaType string, size, futureSize int64, 
 	stats := m.getOrCreateType(mediaType)
 	stats.Processed++
 	stats.Success++
-	stats.Running--
 	stats.TotalSize += size
 	stats.FutureSize += futureSize
 	stats.TotalTime += processingTime
@@ -160,7 +159,6 @@ func (m *ShrinkMetrics) RecordFailure(mediaType string) {
 	stats := m.getOrCreateType(mediaType)
 	stats.Processed++
 	stats.Failed++
-	stats.Running--
 	stats.CompletedAt = time.Now()
 }
 
@@ -173,13 +171,21 @@ func (m *ShrinkMetrics) RecordRunning(mediaType string) {
 	stats.Running++
 }
 
+// RecordStopped records that a media item has finished processing
+func (m *ShrinkMetrics) RecordStopped(mediaType string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	stats := m.getOrCreateType(mediaType)
+	stats.Running--
+}
+
 // RecordSkipped records a skipped media item
 func (m *ShrinkMetrics) RecordSkipped(mediaType string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	stats := m.getOrCreateType(mediaType)
-	stats.Total++
 	stats.Skipped++
 }
 
