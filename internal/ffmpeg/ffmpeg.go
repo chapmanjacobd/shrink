@@ -105,15 +105,6 @@ func (p *FFmpegProcessor) Process(ctx context.Context, m *models.ShrinkMedia, cf
 		// Clean up any incomplete output file
 		os.Remove(outputPath)
 
-		// Check for timeout or cancellation
-		if ctx.Err() == context.DeadlineExceeded {
-			slog.Error("FFmpeg timed out", "path", m.Path, "error", err, "output", string(output))
-		} else if ctx.Err() == context.Canceled {
-			slog.Warn("FFmpeg canceled by user", "path", m.Path)
-			return models.ProcessResult{SourcePath: m.Path, Error: context.Canceled}
-		} else {
-			slog.Error("FFmpeg failed", "path", m.Path, "error", err, "output", string(output))
-		}
 		// Categorize FFmpeg errors
 		errorLog := strings.Split(string(output), "\n")
 		isUnsupported := p.isUnsupportedError(errorLog)

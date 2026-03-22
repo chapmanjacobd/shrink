@@ -31,7 +31,8 @@ func (c *ShrinkCmd) analyzeMedia(media []models.ShrinkMedia, cfg *models.Process
 		m := &media[i]
 		processor := registry.GetProcessor(m)
 		if processor == nil {
-			metrics.RecordSkipped("Unknown")
+			// This should not happen after filterByTools, but log if it does
+			slog.Warn("No processor found for file", "path", m.Path, "ext", m.Ext)
 			continue
 		}
 
@@ -164,8 +165,6 @@ func (c *ShrinkCmd) printSummary(media []models.ShrinkMedia) {
 		utils.FormatSize(totalSavings),
 		utils.FormatDuration(totalTime))
 	fmt.Println()
-
-	c.printUnknownExtensions()
 }
 
 func (c *ShrinkCmd) printUnknownExtensions() {
@@ -386,8 +385,12 @@ func (c *ShrinkCmd) captureTimestamps(path string) (time.Time, time.Time, error)
 func (c *ShrinkCmd) handleProcessingError(m models.ShrinkMedia, result models.ProcessResult,
 	cfg *models.ProcessorConfig, metrics *ShrinkMetrics,
 ) models.ProcessResult {
-	// Only log if it's not a timeout or cancellation (those are logged by the processor)
-	if result.Error != context.DeadlineExceeded && result.Error != context.Canceled {
+	// Log the error (including timeouts and cancellations for visibility)
+	if result.Error == context.Canceled {
+		slog.Warn("Processing canceled by user", "path", m.Path)
+	} else if result.Error == context.DeadlineExceeded {
+		slog.Error("Processing timed out", "path", m.Path)
+	} else {
 		slog.Error("Processing failed", "path", m.Path, "error", result.Error)
 	}
 	metrics.RecordFailure(m.DisplayCategory())

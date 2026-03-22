@@ -73,20 +73,10 @@ func (p *TextProcessor) processText(ctx context.Context, m *models.ShrinkMedia, 
 	}
 
 	cmd := exec.CommandContext(ctx, "ebook-convert", args...)
-	output, err := cmd.CombinedOutput()
+	_, err := cmd.CombinedOutput()
 	if err != nil {
 		// Clean up on failure
 		os.RemoveAll(outputDir)
-
-		// Check for timeout or cancellation
-		if ctx.Err() == context.DeadlineExceeded {
-			slog.Error("Calibre timed out", "path", m.Path, "error", err, "output", string(output))
-		} else if ctx.Err() == context.Canceled {
-			slog.Warn("Calibre canceled by user", "path", m.Path)
-			return models.ProcessResult{SourcePath: m.Path, Error: context.Canceled}
-		} else {
-			slog.Error("Calibre error", "output", string(output), "path", m.Path)
-		}
 		return models.ProcessResult{SourcePath: m.Path, Error: err}
 	}
 

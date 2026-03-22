@@ -69,7 +69,6 @@ func (c *ShrinkCmd) Run(ctx *kong.Context) error {
 
 	slog.Info("Loaded media", "count", len(allMedia))
 	if len(allMedia) == 0 {
-		c.printUnknownExtensions()
 		slog.Info("No media found")
 		return nil
 	}
@@ -82,8 +81,10 @@ func (c *ShrinkCmd) Run(ctx *kong.Context) error {
 		"magick", tools.ImageMagick,
 		"calibre", tools.Calibre)
 
+	// Print unknown extensions and skipped files table once
+	c.printUnknownExtensions()
+
 	if len(filteredMedia) == 0 {
-		c.printUnknownExtensions()
 		slog.Info("No processable media found")
 		return nil
 	}
@@ -91,7 +92,6 @@ func (c *ShrinkCmd) Run(ctx *kong.Context) error {
 	// Analyze and decide what to shrink
 	toShrink := c.analyzeMedia(filteredMedia, cfg, registry, metrics)
 	if len(toShrink) == 0 {
-		c.printUnknownExtensions()
 		fmt.Println("No files to shrink")
 		metrics.LogSummary()
 		return nil

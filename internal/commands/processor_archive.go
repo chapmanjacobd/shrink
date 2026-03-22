@@ -67,20 +67,10 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *models.Shri
 	// Use -no-directory and -force-rename to extract files directly into outputDir without creating subfolders
 	// -force-rename is needed for nested multi-part archives
 	cmd := exec.CommandContext(ctx, "unar", "-no-directory", "-force-rename", "-o", outputDir, m.Path)
-	output, err := cmd.CombinedOutput()
+	_, err := cmd.CombinedOutput()
 	if err != nil {
 		// Clean up on failure
 		os.RemoveAll(outputDir)
-
-		// Check for timeout or cancellation
-		if ctx.Err() == context.DeadlineExceeded {
-			slog.Error("unar timed out", "path", m.Path, "error", err, "output", string(output))
-		} else if ctx.Err() == context.Canceled {
-			slog.Warn("unar canceled by user", "path", m.Path)
-			return models.ProcessResult{SourcePath: m.Path, PartFiles: partFiles, Error: context.Canceled}
-		} else {
-			slog.Error("unar error", "path", m.Path, "error", err, "output", string(output))
-		}
 		return models.ProcessResult{SourcePath: m.Path, PartFiles: partFiles, Error: err}
 	}
 
