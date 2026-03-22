@@ -36,23 +36,12 @@ func NewArchiveProcessor(ffmpeg *ffmpeg.FFmpegProcessor) *ArchiveProcessor {
 func extractLSARJSON(output []byte) []byte {
 	// On Windows, lsar may output text before/after JSON. Find JSON boundaries.
 	// Look for the first '{' and last '}' to extract valid JSON
-	startIdx := -1
-	endIdx := -1
-	for i, b := range output {
-		if b == '{' {
-			startIdx = i
-			break
-		}
-	}
-	for i := len(output) - 1; i >= 0; i-- {
-		if output[i] == '}' {
-			endIdx = i
-			break
-		}
-	}
+	s := string(output)
+	startIdx := strings.Index(s, "{")
+	endIdx := strings.LastIndex(s, "}")
 
 	if startIdx >= 0 && endIdx > startIdx {
-		return output[startIdx : endIdx+1]
+		return []byte(s[startIdx : endIdx+1])
 	}
 	return output
 }
@@ -73,7 +62,9 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *models.Shri
 
 	// Check for multi-part archives (XAD volumes)
 	var partFiles []string
-	if lsarOutput, err := exec.Command(lsar, "-json", m.Path).CombinedOutput(); err == nil || len(lsarOutput) > 0 {
+	lsarCmd := exec.Command(lsar, "-json", m.Path)
+	lsarCmd.Dir = filepath.Dir(m.Path)
+	if lsarOutput, err := lsarCmd.CombinedOutput(); err == nil || len(lsarOutput) > 0 {
 		jsonBytes := extractLSARJSON(lsarOutput)
 		var lsarJSON struct {
 			LsarProperties struct {
@@ -95,6 +86,7 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *models.Shri
 	// Use -no-directory and -force-rename to extract files directly into outputDir without creating subfolders
 	// -force-rename is needed for nested multi-part archives
 	cmd := exec.CommandContext(ctx, unar, "-no-directory", "-force-rename", "-o", outputDir, m.Path)
+	cmd.Dir = filepath.Dir(m.Path)
 	_, err := cmd.CombinedOutput()
 	if err != nil {
 		// Clean up on failure
@@ -112,7 +104,6 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *models.Shri
 
 	// Flatten any wrapper folders that might have been created
 	flattenWrapperFolders(outputDir)
-
 
 	// Find and process all media recursively
 	filepath.Walk(outputDir, func(path string, info os.FileInfo, err error) error {
@@ -217,8 +208,6 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *models.Shri
 		}
 	}
 
-
-
 	return models.ProcessResult{
 		SourcePath: m.Path,
 		Outputs:    []models.ProcessOutputFile{{Path: outputDir, Size: utils.FolderSize(outputDir)}},
@@ -242,7 +231,9 @@ func (p *ArchiveProcessor) EstimateSizeForArchive(m *models.ShrinkMedia, cfg *mo
 	totalArchiveSize := m.Size
 	lsar := utils.GetCommandPath("lsar")
 	if lsar != "" {
-		if lsarOutput, err := exec.Command(lsar, "-json", m.Path).CombinedOutput(); err == nil || len(lsarOutput) > 0 {
+		lsarCmd := exec.Command(lsar, "-json", m.Path)
+		lsarCmd.Dir = filepath.Dir(m.Path)
+		if lsarOutput, err := lsarCmd.CombinedOutput(); err == nil || len(lsarOutput) > 0 {
 			jsonBytes := extractLSARJSON(lsarOutput)
 			var lsarJSON struct {
 				LsarProperties struct {
@@ -273,9 +264,8 @@ func (p *ArchiveProcessor) EstimateSizeForArchive(m *models.ShrinkMedia, cfg *mo
 		}
 	}
 
-
 	// If lsar failed (empty contents due to error), archive is broken
-	if lsarFailed && len(contents) == 0 {
+	if lsarFailed {
 		return 0, 0, false, 0
 	}
 
@@ -392,7 +382,9 @@ func (p *ArchiveProcessor) getPartFiles(path string) []string {
 	// Get parts from lsar XADVolumes
 	lsar := utils.GetCommandPath("lsar")
 	if lsar != "" {
-		if lsarOutput, err := exec.Command(lsar, "-json", path).CombinedOutput(); err == nil || len(lsarOutput) > 0 {
+		lsarCmd := exec.Command(lsar, "-json", path)
+		lsarCmd.Dir = dir
+		if lsarOutput, err := lsarCmd.CombinedOutput(); err == nil || len(lsarOutput) > 0 {
 			jsonBytes := extractLSARJSON(lsarOutput)
 			var lsarJSON struct {
 				LsarProperties struct {
@@ -442,8 +434,6 @@ func (p *ArchiveProcessor) getPartFiles(path string) []string {
 		}
 	}
 
-
-
 	// Pattern 3: .partNN.rar or .rNN.rar (RAR split files)
 	if strings.HasSuffix(ext, ".rar") {
 		if pattern, err := filepath.Glob(filepath.Join(dir, baseWithoutExt+".part*.rar")); err == nil {
@@ -480,7 +470,9 @@ func (p *ArchiveProcessor) lsarWithStatus(path string) ([]models.ShrinkMedia, bo
 	if lsar == "" {
 		return nil, true
 	}
-	output, err := exec.Command(lsar, "-json", path).CombinedOutput()
+	lsarCmd := exec.Command(lsar, "-json", path)
+	lsarCmd.Dir = filepath.Dir(path)
+	output, err := lsarCmd.CombinedOutput()
 	lsarFailed := err != nil
 
 	jsonBytes := extractLSARJSON(output)
@@ -526,7 +518,6 @@ func (p *ArchiveProcessor) lsarWithStatus(path string) ([]models.ShrinkMedia, bo
 	}
 	return media, lsarFailed
 }
-
 
 // detectMediaTypeFromExt determines media type from file extension
 func detectMediaTypeFromExt(ext string) string {

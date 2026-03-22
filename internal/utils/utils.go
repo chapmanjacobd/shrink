@@ -2,12 +2,19 @@ package utils
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 )
+
+// FileExists checks if a file exists
+func FileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
 
 // FolderSize calculates the total size of a folder
 func FolderSize(path string) int64 {
@@ -22,10 +29,57 @@ func FolderSize(path string) int64 {
 	return size
 }
 
-// FileExists checks if a file exists
-func FileExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
+// MoveFile moves a file from source to destination, handling cross-filesystem moves
+func MoveFile(src, dst string) error {
+	// Capture source timestamps before any operations
+	info, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+	atime := GetAccessTime(info)
+	mtime := info.ModTime()
+
+	// Try Rename first (fast on same filesystem)
+	err = os.Rename(src, dst)
+	if err == nil {
+		return nil
+	}
+
+	// If rename fails (e.g. cross-filesystem), try copying
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	// Ensure destination directory exists
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	if _, err = io.Copy(out, in); err != nil {
+		return err
+	}
+
+	// Sync to ensure data is written before deleting source
+	if err := out.Sync(); err != nil {
+		return err
+	}
+
+	// Close files before deleting source
+	in.Close()
+	out.Close()
+
+	// Restore timestamps on destination
+	os.Chtimes(dst, atime, mtime)
+
+	return os.Remove(src)
 }
 
 // FormatDuration formats seconds into human readable duration

@@ -386,7 +386,7 @@ func (c *ShrinkCmd) captureTimestamps(path string) (time.Time, time.Time, error)
 	if err != nil {
 		return time.Time{}, time.Time{}, err
 	}
-	return stat.ModTime(), stat.ModTime(), nil
+	return utils.GetAccessTime(stat), stat.ModTime(), nil
 }
 
 // handleProcessingError handles errors from processing

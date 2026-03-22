@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -361,9 +360,8 @@ func (c *ShrinkCmd) moveToBroken(path string, partFiles []string) {
 
 	// Move the main file
 	if _, err := os.Stat(path); err == nil {
-		os.MkdirAll(destDir, 0o755)
 		dest := filepath.Join(destDir, filepath.Base(path))
-		if err := os.Rename(path, dest); err != nil {
+		if err := utils.MoveFile(path, dest); err != nil {
 			slog.Warn("Failed to move broken file", "from", path, "to", dest, "error", err)
 		} else {
 			slog.Info("Moved broken file", "from", path, "to", dest)
@@ -376,9 +374,8 @@ func (c *ShrinkCmd) moveToBroken(path string, partFiles []string) {
 			partFile = filepath.Join(filepath.Dir(path), partFile)
 		}
 		if _, err := os.Stat(partFile); err == nil {
-			os.MkdirAll(destDir, 0o755)
 			dest := filepath.Join(destDir, filepath.Base(partFile))
-			if err := os.Rename(partFile, dest); err != nil {
+			if err := utils.MoveFile(partFile, dest); err != nil {
 				slog.Warn("Failed to move broken archive part", "from", partFile, "to", dest, "error", err)
 			} else {
 				slog.Info("Moved broken archive part", "from", partFile, "to", dest)
@@ -389,36 +386,9 @@ func (c *ShrinkCmd) moveToBroken(path string, partFiles []string) {
 
 func (c *ShrinkCmd) moveTo(path string) {
 	if c.Move != "" && path != "" {
-		if err := os.MkdirAll(c.Move, 0o755); err != nil {
-			slog.Warn("Failed to create move destination directory", "dir", c.Move, "error", err)
-			return
-		}
 		dest := filepath.Join(c.Move, filepath.Base(path))
-		// Try Rename first (fast on same filesystem)
-		if err := os.Rename(path, dest); err != nil {
-			// If rename fails (e.g. cross-filesystem), try copying
-			in, err := os.Open(path)
-			if err != nil {
-				slog.Warn("Failed to move file (failed to open source)", "from", path, "to", dest, "error", err)
-				return
-			}
-			defer in.Close()
-
-			out, err := os.Create(dest)
-			if err != nil {
-				slog.Warn("Failed to move file (failed to create dest)", "from", path, "to", dest, "error", err)
-				return
-			}
-			defer out.Close()
-
-			if _, err = io.Copy(out, in); err != nil {
-				slog.Warn("Failed to move file (failed to copy content)", "from", path, "to", dest, "error", err)
-				return
-			}
-
-			// Delete original after successful copy
-			in.Close()
-			os.Remove(path)
+		if err := utils.MoveFile(path, dest); err != nil {
+			slog.Warn("Failed to move file", "from", path, "to", dest, "error", err)
 		}
 	}
 }

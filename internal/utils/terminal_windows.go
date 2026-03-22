@@ -7,9 +7,19 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sync"
+	"syscall"
+	"time"
 
 	"golang.org/x/term"
 )
+
+// GetAccessTime returns the access time of a file
+func GetAccessTime(info os.FileInfo) time.Time {
+	if stat, ok := info.Sys().(*syscall.Win32FileAttributeData); ok {
+		return time.Unix(0, stat.LastAccessTime.Nanoseconds())
+	}
+	return info.ModTime()
+}
 
 // CommandExists checks if a command is available in PATH or common Windows installation paths
 func CommandExists(name string) bool {
