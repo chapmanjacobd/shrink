@@ -105,6 +105,11 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *models.Shri
 		return models.ProcessResult{SourcePath: m.Path, PartFiles: partFiles, Error: fmt.Errorf("extraction produced no files")}
 	}
 
+	// Log extracted files for debugging
+	for _, entry := range entries {
+		slog.Debug("Extracted file", "archive", m.Path, "file", entry.Name())
+	}
+
 	// Flatten any wrapper folders that might have been created
 	flattenWrapperFolders(outputDir)
 
@@ -401,9 +406,11 @@ func (p *ArchiveProcessor) getPartFiles(path string) []string {
 					}
 					// Only include files that exist and are not the main archive
 					if info, err := os.Stat(partFile); err == nil && !info.IsDir() {
-						if !pathsEqual(partFile, path) {
-							partFilesMap[partFile] = true
-							slog.Debug("Found multi-part archive part (lsar)", "path", partFile)
+						absPart, _ := filepath.Abs(partFile)
+						absMain, _ := filepath.Abs(path)
+						if !pathsEqual(absPart, absMain) {
+							partFilesMap[absPart] = true
+							slog.Debug("Found multi-part archive part (lsar)", "path", absPart)
 						}
 					}
 				}
@@ -452,9 +459,11 @@ func (p *ArchiveProcessor) getPartFiles(path string) []string {
 	if pattern, err := filepath.Glob(filepath.Join(dir, baseWithoutExt+".z*")); err == nil {
 		for _, p := range pattern {
 			if info, err := os.Stat(p); err == nil && !info.IsDir() {
-				if !pathsEqual(p, path) {
-					partFilesMap[p] = true
-					slog.Debug("Found multi-part archive part (glob-z)", "path", p)
+				absP, _ := filepath.Abs(p)
+				absPath, _ := filepath.Abs(path)
+				if !pathsEqual(absP, absPath) {
+					partFilesMap[absP] = true
+					slog.Debug("Found multi-part archive part (glob-z)", "path", absP)
 				}
 			}
 		}
@@ -464,9 +473,11 @@ func (p *ArchiveProcessor) getPartFiles(path string) []string {
 	if pattern, err := filepath.Glob(filepath.Join(dir, baseWithoutExt+".???")); err == nil {
 		for _, p := range pattern {
 			if info, err := os.Stat(p); err == nil && !info.IsDir() {
-				if !pathsEqual(p, path) {
-					partFilesMap[p] = true
-					slog.Debug("Found multi-part archive part (glob-NNN)", "path", p)
+				absP, _ := filepath.Abs(p)
+				absPath, _ := filepath.Abs(path)
+				if !pathsEqual(absP, absPath) {
+					partFilesMap[absP] = true
+					slog.Debug("Found multi-part archive part (glob-NNN)", "path", absP)
 				}
 			}
 		}
@@ -477,14 +488,22 @@ func (p *ArchiveProcessor) getPartFiles(path string) []string {
 		if pattern, err := filepath.Glob(filepath.Join(dir, baseWithoutExt+".part*.rar")); err == nil {
 			for _, p := range pattern {
 				if _, err := os.Stat(p); err == nil {
-					partFilesMap[p] = true
+					absP, _ := filepath.Abs(p)
+					absPath, _ := filepath.Abs(path)
+					if !pathsEqual(absP, absPath) {
+						partFilesMap[absP] = true
+					}
 				}
 			}
 		}
 		if pattern, err := filepath.Glob(filepath.Join(dir, baseWithoutExt+".r??")); err == nil {
 			for _, p := range pattern {
 				if _, err := os.Stat(p); err == nil {
-					partFilesMap[p] = true
+					absP, _ := filepath.Abs(p)
+					absPath, _ := filepath.Abs(path)
+					if !pathsEqual(absP, absPath) {
+						partFilesMap[absP] = true
+					}
 				}
 			}
 		}

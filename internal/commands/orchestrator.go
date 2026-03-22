@@ -59,8 +59,9 @@ func (c *ShrinkCmd) analyzeMedia(media []models.ShrinkMedia, cfg *models.Process
 						m.PartFiles = archiveProc.getPartFiles(m.Path)
 						// Add broken archives to toShrink so they can be moved to --move-broken
 						toShrink = append(toShrink, *m)
+					} else {
+						metrics.RecordSkipped(m.DisplayCategory())
 					}
-					metrics.RecordSkipped(m.DisplayCategory())
 					continue
 				}
 				// Use total archive size for multi-part archives

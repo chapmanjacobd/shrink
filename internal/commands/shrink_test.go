@@ -19,8 +19,10 @@ func runShrinkCmd(dbPath, tempDir string, args []string) error {
 	fullArgs := append([]string{dbPath}, args...)
 
 	// Configure default logger for tests (debug level for visibility)
+	lv := &slog.LevelVar{}
+	lv.Set(slog.LevelDebug)
 	logger := slog.New(&models.PlainHandler{
-		Level: &slog.LevelVar{},
+		Level: lv,
 		Out:   os.Stderr,
 	})
 	slog.SetDefault(logger)
@@ -48,6 +50,7 @@ func runShrinkCmdDir(dirPath, tempDir string, args []string) error {
 	fullArgs := append([]string{dirPath}, args...)
 
 	// Configure default logger for tests
+	models.LogLevel.Set(slog.LevelDebug)
 	logger := slog.New(&models.PlainHandler{
 		Level: models.LogLevel,
 		Out:   os.Stderr,
