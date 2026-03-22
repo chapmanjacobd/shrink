@@ -33,15 +33,17 @@ ubuntu-deps:
 		ffmpeg \
 		groff \
 		pandoc \
-		wget
+		wget \
+		imagemagick \
+		unar
 	sudo -v && wget -qO- https://download.calibre-ebook.com/linux-installer.sh | sudo sh /dev/stdin
 
 macos-deps:
-	-brew install --formula ffmpeg pandoc sqlite || true
+	-brew install --formula ffmpeg pandoc sqlite imagemagick unar || true
 	-brew install --cask calibre
 
 windows-deps:
-	choco install calibre ffmpeg sqlite --no-progress --stop-on-first-failure
+	choco install calibre ffmpeg sqlite imagemagick unar --no-progress --stop-on-first-failure
 
 go-deps:
 	go install honnef.co/go/tools/cmd/staticcheck@latest
