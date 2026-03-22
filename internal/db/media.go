@@ -148,6 +148,25 @@ func MarkShrinked(databases []*sql.DB, path string) {
 	}
 }
 
+// BulkMarkOptimizedExtensions marks files with already-optimized extensions as shrinked
+// This includes: .av1.mkv, .opus, .mka, .avif
+func BulkMarkOptimizedExtensions(databases []*sql.DB) {
+	optimizedExtensions := []string{".av1.mkv", ".opus", ".mka", ".avif"}
+
+	for _, sqlDB := range databases {
+		for _, ext := range optimizedExtensions {
+			// Use LIKE with LOWER to handle case-insensitive matching
+			_, err := sqlDB.Exec(
+				"UPDATE media SET is_shrinked = 1 WHERE LOWER(path) LIKE ? AND COALESCE(time_deleted, 0) = 0",
+				"%"+ext,
+			)
+			if err != nil {
+				slog.Warn("Failed to bulk mark optimized extensions", "extension", ext, "error", err)
+			}
+		}
+	}
+}
+
 // IsDatabaseFile checks if a path is a SQLite database file
 func IsDatabaseFile(path string) bool {
 	ext := strings.ToLower(filepath.Ext(path))

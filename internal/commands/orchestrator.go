@@ -336,11 +336,6 @@ func (c *ShrinkCmd) processSingle(ctx context.Context, m models.ShrinkMedia, reg
 
 	result := processor.Process(processCtx, &m, cfg, registry)
 
-	// Handle skipped files (already optimized)
-	if result.Skipped {
-		return c.handleSkippedProcessing(m, result, metrics)
-	}
-
 	// Handle processing errors
 	if result.Error != nil {
 		return c.handleProcessingError(m, result, cfg, metrics)
@@ -586,12 +581,4 @@ func (c *ShrinkCmd) getActualDuration(path string) float64 {
 		return 0
 	}
 	return duration
-}
-
-// handleSkippedProcessing handles files that were skipped (already optimized)
-func (c *ShrinkCmd) handleSkippedProcessing(m models.ShrinkMedia, result models.ProcessResult, metrics *ShrinkMetrics) models.ProcessResult {
-	// For already optimized files, we record success with no savings
-	metrics.RecordSuccess(m.DisplayCategory(), m.Size, m.Size, 0, int64(m.Duration))
-	db.MarkShrinked(c.sqlDBs, m.Path)
-	return result
 }

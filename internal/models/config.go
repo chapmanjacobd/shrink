@@ -13,7 +13,6 @@ type ProcessResult struct {
 	Outputs    []ProcessOutputFile // New files created
 	PartFiles  []string            // Multi-part archive part files (for cleanup)
 	Success    bool                // Whether the overall operation succeeded
-	Skipped    bool                // Whether the file was skipped (already optimized)
 	Error      error               // Error if the operation failed
 }
 

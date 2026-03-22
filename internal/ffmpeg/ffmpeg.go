@@ -75,16 +75,12 @@ func (p *FFmpegProcessor) Process(ctx context.Context, m *models.ShrinkMedia, cf
 		return models.ProcessResult{SourcePath: m.Path, Success: true}
 	}
 
-	// Check if already encoded optimally
-	pathLower := strings.ToLower(m.Path)
-	if strings.HasSuffix(pathLower, ".av1.mkv") || strings.HasSuffix(pathLower, ".opus") || strings.HasSuffix(pathLower, ".mka") {
-		return models.ProcessResult{SourcePath: m.Path, Success: true, Skipped: true, Outputs: []models.ProcessOutputFile{{Path: m.Path, Size: m.Size}}}
-	}
+	// Check if already encoded optimally by codec
 	if videoStream != nil && videoStream.CodecName == "av1" {
-		return models.ProcessResult{SourcePath: m.Path, Success: true, Skipped: true, Outputs: []models.ProcessOutputFile{{Path: m.Path, Size: m.Size}}}
+		return models.ProcessResult{SourcePath: m.Path, Success: true, Outputs: []models.ProcessOutputFile{{Path: m.Path, Size: m.Size}}}
 	}
 	if audioStream != nil && audioStream.CodecName == "opus" && videoStream == nil {
-		return models.ProcessResult{SourcePath: m.Path, Success: true, Skipped: true, Outputs: []models.ProcessOutputFile{{Path: m.Path, Size: m.Size}}}
+		return models.ProcessResult{SourcePath: m.Path, Success: true, Outputs: []models.ProcessOutputFile{{Path: m.Path, Size: m.Size}}}
 	}
 
 	// Determine output suffix

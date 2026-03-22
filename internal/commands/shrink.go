@@ -229,6 +229,13 @@ func (c *ShrinkCmd) initDatabases() error {
 			c.sqlDBs = append(c.sqlDBs, sqlDB)
 		}
 	}
+
+	// Bulk mark files with already-optimized extensions as shrinked
+	// This prevents loading them for processing
+	if len(c.sqlDBs) > 0 {
+		db.BulkMarkOptimizedExtensions(c.sqlDBs)
+	}
+
 	return nil
 }
 
