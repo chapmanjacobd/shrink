@@ -5,14 +5,12 @@ Professional error messages and user experience
 - [ ] Better handling of interrupted operations
 
 >80% test coverage with scenario-based tests
-- [ ] Configure test coverage reporting (target: >80%)
 
   4. Configuration Management
    * Current Issue: The ShrinkCmd struct is overloaded with flags, making it difficult to maintain and test.    * Improvement: Extract flags into a dedicated Config object and pass it where needed.
 
-- [ ] Support config file (~/.config/shrink/config.yaml)
 - [ ] Environment variable overrides
-- [ ] Profile presets (quality/speed/balance)
+- [ ] Profile presets (quality/speed/balance [default to balance preset 7 crf 40])
 
 - [ ] Edge Case Tests:
 - [ ] Animated GIF/webp detection

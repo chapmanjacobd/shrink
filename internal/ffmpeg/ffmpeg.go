@@ -10,48 +10,53 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/chapmanjacobd/shrink/internal/models"
 	"github.com/chapmanjacobd/shrink/internal/utils"
 )
 
 // FFmpegProcessor handles all FFmpeg-related operations
 type FFmpegProcessor struct {
-	config *ProcessorConfig
+	config *models.ProcessorConfig
 }
 
 // NewFFmpegProcessor creates a new FFmpeg processor
-func NewFFmpegProcessor(cfg *ProcessorConfig) *FFmpegProcessor {
+func NewFFmpegProcessor(cfg *models.ProcessorConfig) *FFmpegProcessor {
 	return &FFmpegProcessor{config: cfg}
 }
 
 // Process executes FFmpeg transcoding for audio/video files
-func (p *FFmpegProcessor) Process(ctx context.Context, m *ShrinkMedia, cfg *ProcessorConfig) ProcessResult {
+func (p *FFmpegProcessor) Process(ctx context.Context, m *models.ShrinkMedia, cfg *models.ProcessorConfig, registry models.ProcessorRegistry) models.ProcessResult {
 	// Check if FFmpeg is available
 	if !utils.CommandExists("ffmpeg") {
-		return ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("ffmpeg not installed")}
+		return models.ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("ffmpeg not installed")}
 	}
 
 	// Probe the file
 	probe, err := ProbeMedia(m.Path)
 	if err != nil {
-		return ProcessResult{SourcePath: m.Path, Error: err}
+		return models.ProcessResult{SourcePath: m.Path, Error: err}
 	}
 
 	// Check for streams
 	if len(probe.Streams) == 0 {
 		slog.Error("No media streams", "path", m.Path)
-		return ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("no media streams")}
+		return models.ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("no media streams")}
 	}
 
 	// Handle animated images (GIF/webp with audio)
 	if m.Ext == ".gif" || m.Ext == ".webp" {
 		isAnimation := p.isAnimationFromProbe(probe)
 		if isAnimation == nil {
-			return ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("could not determine animation status")}
+			return models.ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("could not determine animation status")}
 		}
 		if !*isAnimation {
 			// Process as static image
-			imgProc := NewImageProcessor()
-			return imgProc.Process(ctx, m, cfg)
+			m.Category = "Image"
+			processor := registry.GetProcessor(m)
+			if processor != nil {
+				return processor.Process(ctx, m, cfg, registry)
+			}
+			return models.ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("no processor found for image")}
 		}
 	}
 
@@ -63,21 +68,21 @@ func (p *FFmpegProcessor) Process(ctx context.Context, m *ShrinkMedia, cfg *Proc
 
 	// Stream validation - skip files without expected streams
 	if videoStream == nil && cfg.Video.VideoOnly {
-		return ProcessResult{SourcePath: m.Path, Success: true}
+		return models.ProcessResult{SourcePath: m.Path, Success: true}
 	}
 
 	if audioStream == nil && cfg.Audio.AudioOnly {
-		return ProcessResult{SourcePath: m.Path, Success: true}
+		return models.ProcessResult{SourcePath: m.Path, Success: true}
 	}
 
 	// Check if already encoded optimally
 	if videoStream != nil && videoStream.CodecName == "av1" {
 		slog.Info("Already AV1", "path", m.Path)
-		return ProcessResult{SourcePath: m.Path, Success: true, Outputs: []ProcessOutputFile{{Path: m.Path, Size: m.Size}}}
+		return models.ProcessResult{SourcePath: m.Path, Success: true, Outputs: []models.ProcessOutputFile{{Path: m.Path, Size: m.Size}}}
 	}
 	if audioStream != nil && audioStream.CodecName == "opus" && videoStream == nil {
 		slog.Info("Already Opus", "path", m.Path)
-		return ProcessResult{SourcePath: m.Path, Success: true, Outputs: []ProcessOutputFile{{Path: m.Path, Size: m.Size}}}
+		return models.ProcessResult{SourcePath: m.Path, Success: true, Outputs: []models.ProcessOutputFile{{Path: m.Path, Size: m.Size}}}
 	}
 
 	// Determine output suffix
@@ -111,12 +116,12 @@ func (p *FFmpegProcessor) Process(ctx context.Context, m *ShrinkMedia, cfg *Proc
 
 		if isEnvError {
 			// Environment errors should be re-raised (they're not file-specific)
-			return ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("ffmpeg environment error: %w", err)}
+			return models.ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("ffmpeg environment error: %w", err)}
 		} else if isUnsupported {
 			// Unsupported codec/format - remove transcode attempt and return original
 			os.Remove(outputPath)
 			slog.Info("Unsupported format, keeping original", "path", m.Path)
-			return ProcessResult{SourcePath: m.Path, Success: true, Outputs: []ProcessOutputFile{{Path: m.Path, Size: m.Size}}}
+			return models.ProcessResult{SourcePath: m.Path, Success: true, Outputs: []models.ProcessOutputFile{{Path: m.Path, Size: m.Size}}}
 		} else if isFileError {
 			// File-specific error - continue processing (may be recoverable)
 			slog.Warn("FFmpeg file error", "output", string(output), "path", m.Path)
@@ -125,9 +130,9 @@ func (p *FFmpegProcessor) Process(ctx context.Context, m *ShrinkMedia, cfg *Proc
 		}
 
 		if p.config.Common.DeleteUnplayable {
-			return ProcessResult{SourcePath: m.Path, Success: false, Error: err}
+			return models.ProcessResult{SourcePath: m.Path, Success: false, Error: err}
 		}
-		return ProcessResult{SourcePath: m.Path, Error: err}
+		return models.ProcessResult{SourcePath: m.Path, Error: err}
 	}
 
 	// Validate transcode (may return multiple results if splitting was used)

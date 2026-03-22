@@ -10,6 +10,7 @@ import (
 
 	"github.com/alecthomas/kong"
 	"github.com/chapmanjacobd/shrink/internal/db"
+	"github.com/chapmanjacobd/shrink/internal/ffmpeg"
 	"github.com/chapmanjacobd/shrink/internal/models"
 	"github.com/chapmanjacobd/shrink/internal/utils"
 )
@@ -121,7 +122,7 @@ func (c *ShrinkCmd) Run(ctx *kong.Context) error {
 	}
 
 	// Initialize components
-	ffmpeg := NewFFmpegProcessor(cfg)
+	ffmpeg := ffmpeg.NewFFmpegProcessor(cfg)
 	registry := NewProcessorRegistry(ffmpeg)
 	metrics := NewShrinkMetrics()
 
@@ -168,7 +169,7 @@ func (c *ShrinkCmd) Run(ctx *kong.Context) error {
 	// Deduplicate by path to prevent processing the same file multiple times
 	// This can happen with archives or multiple database inputs
 	seenPaths := make(map[string]bool)
-	deduped := make([]ShrinkMedia, 0, len(toShrink))
+	deduped := make([]models.ShrinkMedia, 0, len(toShrink))
 	for _, m := range toShrink {
 		if !seenPaths[m.Path] {
 			seenPaths[m.Path] = true
@@ -206,9 +207,9 @@ func (c *ShrinkCmd) Run(ctx *kong.Context) error {
 	return nil
 }
 
-func (c *ShrinkCmd) buildProcessorConfig() *ProcessorConfig {
-	return &ProcessorConfig{
-		Common: CommonConfig{
+func (c *ShrinkCmd) buildProcessorConfig() *models.ProcessorConfig {
+	return &models.ProcessorConfig{
+		Common: models.CommonConfig{
 			SourceAudioBitrate: utils.ParseBitrate(c.SourceAudioBitrate),
 			SourceVideoBitrate: utils.ParseBitrate(c.SourceVideoBitrate),
 			DeleteUnplayable:   c.DeleteUnplayable,
@@ -222,7 +223,7 @@ func (c *ShrinkCmd) buildProcessorConfig() *ProcessorConfig {
 			MaxWidthBuffer:     c.MaxWidthBuffer,
 			MaxHeightBuffer:    c.MaxHeightBuffer,
 		},
-		Video: VideoConfig{
+		Video: models.VideoConfig{
 			TargetVideoBitrate:   utils.ParseBitrate(c.TargetVideoBitrate),
 			MinSavingsVideo:      utils.ParsePercentOrBytes(c.MinSavingsVideo),
 			TranscodingVideoRate: c.TranscodingVideoRate,
@@ -234,7 +235,7 @@ func (c *ShrinkCmd) buildProcessorConfig() *ProcessorConfig {
 			Keyframes:            c.Keyframes,
 			NoPreserveVideo:      c.NoPreserveVideo,
 		},
-		Audio: AudioConfig{
+		Audio: models.AudioConfig{
 			TargetAudioBitrate:   utils.ParseBitrate(c.TargetAudioBitrate),
 			MinSavingsAudio:      utils.ParsePercentOrBytes(c.MinSavingsAudio),
 			TranscodingAudioRate: c.TranscodingAudioRate,
@@ -243,14 +244,14 @@ func (c *ShrinkCmd) buildProcessorConfig() *ProcessorConfig {
 			SplitLongerThan:      c.SplitLongerThan,
 			MinSplitSegment:      c.MinSplitSegment,
 		},
-		Image: ImageConfig{
+		Image: models.ImageConfig{
 			TargetImageSize:      utils.ParseSize(c.TargetImageSize),
 			MinSavingsImage:      utils.ParsePercentOrBytes(c.MinSavingsImage),
 			TranscodingImageTime: c.TranscodingImageTime,
 			MaxImageWidth:        c.MaxImageWidth,
 			MaxImageHeight:       c.MaxImageHeight,
 		},
-		Text: TextConfig{
+		Text: models.TextConfig{
 			SkipOCR:  c.SkipOCR,
 			ForceOCR: c.ForceOCR,
 			RedoOCR:  c.RedoOCR,
@@ -280,8 +281,8 @@ func (c *ShrinkCmd) closeDatabases() {
 	}
 }
 
-func (c *ShrinkCmd) loadAllMedia() ([]ShrinkMedia, error) {
-	var allMedia []ShrinkMedia
+func (c *ShrinkCmd) loadAllMedia() ([]models.ShrinkMedia, error) {
+	var allMedia []models.ShrinkMedia
 
 	// Load from opened databases
 	for _, sqlDB := range c.sqlDBs {
@@ -291,7 +292,7 @@ func (c *ShrinkCmd) loadAllMedia() ([]ShrinkMedia, error) {
 		}
 
 		for _, r := range records {
-			allMedia = append(allMedia, ShrinkMedia{
+			allMedia = append(allMedia, models.ShrinkMedia{
 				Path:           r.Path,
 				Size:           r.Size,
 				Duration:       r.Duration,
@@ -320,8 +321,8 @@ func (c *ShrinkCmd) loadAllMedia() ([]ShrinkMedia, error) {
 	return allMedia, nil
 }
 
-func (c *ShrinkCmd) filterByTools(media []ShrinkMedia, tools InstalledTools) []ShrinkMedia {
-	filtered := make([]ShrinkMedia, 0, len(media))
+func (c *ShrinkCmd) filterByTools(media []models.ShrinkMedia, tools InstalledTools) []models.ShrinkMedia {
+	filtered := make([]models.ShrinkMedia, 0, len(media))
 
 	for _, m := range media {
 		canProcess := false

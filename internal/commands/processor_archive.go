@@ -12,17 +12,19 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/chapmanjacobd/shrink/internal/ffmpeg"
+	"github.com/chapmanjacobd/shrink/internal/models"
 	"github.com/chapmanjacobd/shrink/internal/utils"
 )
 
 // ArchiveProcessor handles archive file processing
 type ArchiveProcessor struct {
 	BaseProcessor
-	ffmpeg        *FFmpegProcessor
+	ffmpeg        *ffmpeg.FFmpegProcessor
 	unarInstalled bool
 }
 
-func NewArchiveProcessor(ffmpeg *FFmpegProcessor) *ArchiveProcessor {
+func NewArchiveProcessor(ffmpeg *ffmpeg.FFmpegProcessor) *ArchiveProcessor {
 	return &ArchiveProcessor{
 		BaseProcessor: BaseProcessor{category: "Archived"},
 		ffmpeg:        ffmpeg,
@@ -30,16 +32,16 @@ func NewArchiveProcessor(ffmpeg *FFmpegProcessor) *ArchiveProcessor {
 	}
 }
 
-func (p *ArchiveProcessor) CanProcess(m *ShrinkMedia) bool {
+func (p *ArchiveProcessor) CanProcess(m *models.ShrinkMedia) bool {
 	return m.MediaType == "archive" || utils.ArchiveExtensionMap[m.Ext]
 }
 
 // ExtractAndProcess extracts archive contents and processes media recursively
-func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *ShrinkMedia, cfg *ProcessorConfig,
-	imageProc *ImageProcessor, ffmpeg *FFmpegProcessor,
-) ProcessResult {
+func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *models.ShrinkMedia, cfg *models.ProcessorConfig,
+	imageProc *ImageProcessor, ffmpegProc *ffmpeg.FFmpegProcessor, registry models.ProcessorRegistry,
+) models.ProcessResult {
 	if !p.unarInstalled {
-		return ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("unar not installed")}
+		return models.ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("unar not installed")}
 	}
 
 	// Check for multi-part archives (XAD volumes)
@@ -59,7 +61,7 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *ShrinkMedia
 	// Extract archive - use -no-directory to prevent creating nested archive-name folders
 	outputDir := filepath.Join(filepath.Dir(m.Path), filepath.Base(m.Path)+".extracted")
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
-		return ProcessResult{SourcePath: m.Path, PartFiles: partFiles, Error: err}
+		return models.ProcessResult{SourcePath: m.Path, PartFiles: partFiles, Error: err}
 	}
 
 	// Use -no-directory and -force-rename to extract files directly into outputDir without creating subfolders
@@ -74,7 +76,7 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *ShrinkMedia
 			slog.Error("unar error", "path", m.Path, "error", err, "output", string(output))
 		}
 		os.RemoveAll(outputDir)
-		return ProcessResult{SourcePath: m.Path, PartFiles: partFiles, Error: err}
+		return models.ProcessResult{SourcePath: m.Path, PartFiles: partFiles, Error: err}
 	}
 
 	// Flatten any wrapper folders that might have been created
@@ -89,7 +91,7 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *ShrinkMedia
 		fileSize := info.Size()
 
 		if shouldConvertToAVIF(ext) {
-			imgMedia := &ShrinkMedia{Path: path, Size: fileSize, Ext: ext, Category: "Image"}
+			imgMedia := &models.ShrinkMedia{Path: path, Size: fileSize, Ext: ext, Category: "Image"}
 			futureSize, _ := imageProc.EstimateSize(imgMedia, cfg)
 			if ShouldShrink(imgMedia, futureSize, cfg) {
 				res := imageProc.processImage(ctx, imgMedia, cfg)
@@ -109,16 +111,16 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *ShrinkMedia
 			}
 		} else if utils.VideoExtensionMap[ext] || utils.AudioExtensionMap[ext] {
 			category := "Video"
-			processor := MediaProcessor(NewVideoProcessor(ffmpeg))
+			processor := models.MediaProcessor(NewVideoProcessor(ffmpegProc))
 			if utils.AudioExtensionMap[ext] {
 				category = "Audio"
-				processor = NewAudioProcessor(ffmpeg)
+				processor = NewAudioProcessor(ffmpegProc)
 			}
-			media := &ShrinkMedia{Path: path, Size: fileSize, Ext: ext, Category: category}
+			media := &models.ShrinkMedia{Path: path, Size: fileSize, Ext: ext, Category: category}
 
 			// Use ProbeMedia to get video count if needed
 			if category == "Video" || category == "Audio" {
-				if probed, err := ProbeMedia(path); err == nil {
+				if probed, err := ffmpeg.ProbeMedia(path); err == nil {
 					media.VideoCount = len(probed.VideoStreams)
 					media.AudioCount = len(probed.AudioStreams)
 					media.Duration = probed.Duration
@@ -127,7 +129,7 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *ShrinkMedia
 
 			futureSize, _ := processor.EstimateSize(media, cfg)
 			if ShouldShrink(media, futureSize, cfg) {
-				res := ffmpeg.Process(ctx, media, cfg)
+				res := ffmpegProc.Process(ctx, media, cfg, registry)
 				if res.Success && len(res.Outputs) > 0 {
 					var totalSize int64
 					for _, out := range res.Outputs {
@@ -145,8 +147,8 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *ShrinkMedia
 				}
 			}
 		} else if utils.ArchiveExtensionMap[ext] {
-			nestedMedia := &ShrinkMedia{Path: path, Size: info.Size(), Ext: ext, MediaType: "archive"}
-			res := p.ExtractAndProcess(ctx, nestedMedia, cfg, imageProc, ffmpeg)
+			nestedMedia := &models.ShrinkMedia{Path: path, Size: info.Size(), Ext: ext, MediaType: "archive"}
+			res := p.ExtractAndProcess(ctx, nestedMedia, cfg, imageProc, ffmpegProc, registry)
 			if res.Error != nil {
 				slog.Warn("Failed to extract nested archive", "path", path, "error", res.Error)
 			}
@@ -174,9 +176,9 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *ShrinkMedia
 		slog.Debug("Deleted multi-part archive part", "path", partFile)
 	}
 
-	return ProcessResult{
+	return models.ProcessResult{
 		SourcePath: m.Path,
-		Outputs:    []ProcessOutputFile{{Path: outputDir, Size: utils.FolderSize(outputDir)}},
+		Outputs:    []models.ProcessOutputFile{{Path: outputDir, Size: utils.FolderSize(outputDir)}},
 		PartFiles:  partFiles,
 		Success:    true,
 	}
@@ -184,7 +186,7 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *ShrinkMedia
 
 // EstimateSizeForArchive estimates size using compressed size and inspects archive contents
 // Returns: futureSize, processingTime, hasProcessableContent, totalArchiveSize
-func (p *ArchiveProcessor) EstimateSizeForArchive(m *ShrinkMedia, cfg *ProcessorConfig) (int64, int, bool, int64) {
+func (p *ArchiveProcessor) EstimateSizeForArchive(m *models.ShrinkMedia, cfg *models.ProcessorConfig) (int64, int, bool, int64) {
 	if !p.unarInstalled {
 		return 0, 0, false, 0
 	}
@@ -307,15 +309,15 @@ func (p *ArchiveProcessor) EstimateSizeForArchive(m *ShrinkMedia, cfg *Processor
 	return totalFutureSize, totalProcessingTime, hasProcessableContent, totalArchiveSize
 }
 
-func (p *ArchiveProcessor) EstimateSize(m *ShrinkMedia, cfg *ProcessorConfig) (int64, int) {
+func (p *ArchiveProcessor) EstimateSize(m *models.ShrinkMedia, cfg *models.ProcessorConfig) (int64, int) {
 	futureSize, processingTime, _, _ := p.EstimateSizeForArchive(m, cfg)
 	return futureSize, processingTime
 }
 
-func (p *ArchiveProcessor) Process(ctx context.Context, m *ShrinkMedia, cfg *ProcessorConfig) ProcessResult {
+func (p *ArchiveProcessor) Process(ctx context.Context, m *models.ShrinkMedia, cfg *models.ProcessorConfig, registry models.ProcessorRegistry) models.ProcessResult {
 	// Archives are handled by extracting and processing contents separately
 	imageProc := NewImageProcessor()
-	return p.ExtractAndProcess(ctx, m, cfg, imageProc, p.ffmpeg)
+	return p.ExtractAndProcess(ctx, m, cfg, imageProc, p.ffmpeg, registry)
 }
 
 // getPartFiles returns list of all part files for a multi-part archive
@@ -398,7 +400,7 @@ func (p *ArchiveProcessor) getPartFiles(path string) []string {
 }
 
 // lsarWithStatus lists archive contents and returns whether lsar encountered an error
-func (p *ArchiveProcessor) lsarWithStatus(path string) ([]ShrinkMedia, bool) {
+func (p *ArchiveProcessor) lsarWithStatus(path string) ([]models.ShrinkMedia, bool) {
 	output, err := exec.Command("lsar", "-json", path).CombinedOutput()
 	lsarFailed := err != nil
 
@@ -429,12 +431,12 @@ func (p *ArchiveProcessor) lsarWithStatus(path string) ([]ShrinkMedia, bool) {
 		return nil, lsarFailed
 	}
 
-	var media []ShrinkMedia
+	var media []models.ShrinkMedia
 	for _, f := range result.LsarContents {
 		ext := strings.ToLower(filepath.Ext(f.Filename))
 		mediaType := detectMediaTypeFromExt(ext)
 
-		media = append(media, ShrinkMedia{
+		media = append(media, models.ShrinkMedia{
 			Path:           f.Filename,
 			Size:           f.Size,
 			CompressedSize: f.CompressedSize,

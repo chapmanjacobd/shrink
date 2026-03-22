@@ -7,23 +7,24 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/chapmanjacobd/shrink/internal/models"
 	"github.com/chapmanjacobd/shrink/internal/utils"
 )
 
 // validateTranscode validates the transcoded output
-func (p *FFmpegProcessor) validateTranscode(m ShrinkMedia, outputPath string, originalProbe *FFProbeResult) ProcessResult {
+func (p *FFmpegProcessor) validateTranscode(m models.ShrinkMedia, outputPath string, originalProbe *FFProbeResult) models.ProcessResult {
 	// Check if output is a split file pattern (contains %03d)
 	isSplit := strings.Contains(outputPath, "%03d")
 
 	if !isSplit {
 		// Single file output - original logic
 		if _, err := os.Stat(outputPath); os.IsNotExist(err) {
-			return ProcessResult{SourcePath: m.Path, Success: false}
+			return models.ProcessResult{SourcePath: m.Path, Success: false}
 		}
 
 		outputStats, err := os.Stat(outputPath)
 		if err != nil {
-			return ProcessResult{SourcePath: m.Path, Success: false}
+			return models.ProcessResult{SourcePath: m.Path, Success: false}
 		}
 
 		deleteTranscode := false
@@ -64,12 +65,12 @@ func (p *FFmpegProcessor) validateTranscode(m ShrinkMedia, outputPath string, or
 
 		if deleteTranscode {
 			os.Remove(outputPath)
-			return ProcessResult{SourcePath: m.Path, Success: false}
+			return models.ProcessResult{SourcePath: m.Path, Success: false}
 		}
 
-		return ProcessResult{
+		return models.ProcessResult{
 			SourcePath: m.Path,
-			Outputs:    []ProcessOutputFile{{Path: outputPath, Size: outputStats.Size()}},
+			Outputs:    []models.ProcessOutputFile{{Path: outputPath, Size: outputStats.Size()}},
 			Success:    true,
 		}
 	}
@@ -78,13 +79,13 @@ func (p *FFmpegProcessor) validateTranscode(m ShrinkMedia, outputPath string, or
 	pattern := strings.Replace(outputPath, "%03d", "*", 1)
 	matches, err := filepath.Glob(pattern)
 	if err != nil || len(matches) == 0 {
-		return ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("no split files found")}
+		return models.ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("no split files found")}
 	}
 
 	// Validate each split file
 	var totalNewSize int64
 	var hasInvalidFile bool
-	var validFiles []ProcessOutputFile
+	var validFiles []models.ProcessOutputFile
 
 	for _, match := range matches {
 		stats, err := os.Stat(match)
@@ -113,7 +114,7 @@ func (p *FFmpegProcessor) validateTranscode(m ShrinkMedia, outputPath string, or
 			break
 		}
 		totalNewSize += stats.Size()
-		validFiles = append(validFiles, ProcessOutputFile{Path: match, Size: stats.Size()})
+		validFiles = append(validFiles, models.ProcessOutputFile{Path: match, Size: stats.Size()})
 	}
 
 	if hasInvalidFile {
@@ -121,10 +122,10 @@ func (p *FFmpegProcessor) validateTranscode(m ShrinkMedia, outputPath string, or
 		for _, match := range matches {
 			os.Remove(match)
 		}
-		return ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("invalid split file")}
+		return models.ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("invalid split file")}
 	}
 
-	return ProcessResult{
+	return models.ProcessResult{
 		SourcePath: m.Path,
 		Outputs:    validFiles,
 		Success:    true,

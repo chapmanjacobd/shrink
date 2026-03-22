@@ -8,12 +8,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/chapmanjacobd/shrink/internal/ffmpeg"
+	"github.com/chapmanjacobd/shrink/internal/models"
 	"github.com/chapmanjacobd/shrink/internal/utils"
 )
 
 // scanDirectory scans a directory recursively for media files
-func (c *ShrinkCmd) scanDirectory(dirPath string) ([]ShrinkMedia, error) {
-	var media []ShrinkMedia
+func (c *ShrinkCmd) scanDirectory(dirPath string) ([]models.ShrinkMedia, error) {
+	var media []models.ShrinkMedia
 
 	err := filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -54,7 +56,7 @@ func (c *ShrinkCmd) scanDirectory(dirPath string) ([]ShrinkMedia, error) {
 		}
 
 		// Create media entry with basic info
-		m := ShrinkMedia{
+		m := models.ShrinkMedia{
 			Path:      path,
 			Size:      info.Size(),
 			Ext:       ext,
@@ -71,7 +73,7 @@ func (c *ShrinkCmd) scanDirectory(dirPath string) ([]ShrinkMedia, error) {
 
 		// Try to get accurate metadata using ffprobe for video/audio files
 		if utils.VideoExtensionMap[ext] || utils.AudioExtensionMap[ext] {
-			if probed, err := ProbeMedia(path); err == nil {
+			if probed, err := ffmpeg.ProbeMedia(path); err == nil {
 				m.Duration = probed.Duration
 				m.VideoCount = len(probed.VideoStreams)
 				m.AudioCount = len(probed.AudioStreams)

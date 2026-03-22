@@ -1,4 +1,4 @@
-package commands
+package models
 
 // ShrinkMedia represents a media file to be processed
 type ShrinkMedia struct {

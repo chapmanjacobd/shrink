@@ -14,13 +14,14 @@ import (
 	"time"
 
 	"github.com/chapmanjacobd/shrink/internal/db"
+	"github.com/chapmanjacobd/shrink/internal/models"
 	"github.com/chapmanjacobd/shrink/internal/utils"
 )
 
-func (c *ShrinkCmd) analyzeMedia(media []ShrinkMedia, cfg *ProcessorConfig,
-	registry *ProcessorRegistry, metrics *ShrinkMetrics,
-) []ShrinkMedia {
-	var toShrink []ShrinkMedia
+func (c *ShrinkCmd) analyzeMedia(media []models.ShrinkMedia, cfg *models.ProcessorConfig,
+	registry *MediaRegistry, metrics *ShrinkMetrics,
+) []models.ShrinkMedia {
+	var toShrink []models.ShrinkMedia
 
 	for i := range media {
 		m := &media[i]
@@ -78,7 +79,7 @@ func (c *ShrinkCmd) analyzeMedia(media []ShrinkMedia, cfg *ProcessorConfig,
 	return toShrink
 }
 
-func (c *ShrinkCmd) sortByEfficiency(media []ShrinkMedia) {
+func (c *ShrinkCmd) sortByEfficiency(media []models.ShrinkMedia) {
 	sort.Slice(media, func(i, j int) bool {
 		timeI := max(media[i].ProcessingTime, 1)
 		timeJ := max(media[j].ProcessingTime, 1)
@@ -88,7 +89,7 @@ func (c *ShrinkCmd) sortByEfficiency(media []ShrinkMedia) {
 	})
 }
 
-func (c *ShrinkCmd) printSummary(media []ShrinkMedia) {
+func (c *ShrinkCmd) printSummary(media []models.ShrinkMedia) {
 	var totalSize, totalFuture, totalSavings int64
 	var totalTime int
 	typeBreakdown := make(map[string]struct {
@@ -163,8 +164,8 @@ func (c *ShrinkCmd) confirm() bool {
 	return strings.ToLower(response) == "y"
 }
 
-func (c *ShrinkCmd) processMedia(media []ShrinkMedia, registry *ProcessorRegistry,
-	cfg *ProcessorConfig, metrics *ShrinkMetrics,
+func (c *ShrinkCmd) processMedia(media []models.ShrinkMedia, registry *MediaRegistry,
+	cfg *models.ProcessorConfig, metrics *ShrinkMetrics,
 ) {
 	// Create worker pools
 	sems := map[string]chan struct{}{
@@ -195,7 +196,7 @@ func (c *ShrinkCmd) processMedia(media []ShrinkMedia, registry *ProcessorRegistr
 
 	for _, m := range media {
 		wg.Add(1)
-		go func(original ShrinkMedia) {
+		go func(original models.ShrinkMedia) {
 			defer wg.Done()
 
 			sem := sems[original.Category]
@@ -226,9 +227,9 @@ func (c *ShrinkCmd) processMedia(media []ShrinkMedia, registry *ProcessorRegistr
 	metrics.ClearProgress()
 }
 
-func (c *ShrinkCmd) processSingle(m ShrinkMedia, registry *ProcessorRegistry,
-	cfg *ProcessorConfig, metrics *ShrinkMetrics,
-) ProcessResult {
+func (c *ShrinkCmd) processSingle(m models.ShrinkMedia, registry *MediaRegistry,
+	cfg *models.ProcessorConfig, metrics *ShrinkMetrics,
+) models.ProcessResult {
 	// Handle broken archives - move to --move-broken without processing
 	if m.IsBroken {
 		slog.Info("Broken archive detected, moving to broken directory", "path", m.Path)
@@ -237,7 +238,7 @@ func (c *ShrinkCmd) processSingle(m ShrinkMedia, registry *ProcessorRegistry,
 		}
 		db.MarkDeleted(c.sqlDBs, m.Path)
 		metrics.RecordFailure(m.Category)
-		return ProcessResult{SourcePath: m.Path, Success: false}
+		return models.ProcessResult{SourcePath: m.Path, Success: false}
 	}
 
 	// Capture original timestamps before processing
@@ -247,7 +248,7 @@ func (c *ShrinkCmd) processSingle(m ShrinkMedia, registry *ProcessorRegistry,
 		slog.Warn("File not found, marking as skipped", "path", m.Path)
 		metrics.RecordSkipped(m.Category)
 		db.MarkDeleted(c.sqlDBs, m.Path)
-		return ProcessResult{SourcePath: m.Path, Error: err}
+		return models.ProcessResult{SourcePath: m.Path, Error: err}
 	} else {
 		originalAtime = stat.ModTime()
 		originalMtime = stat.ModTime()
@@ -261,13 +262,13 @@ func (c *ShrinkCmd) processSingle(m ShrinkMedia, registry *ProcessorRegistry,
 	processor := registry.GetProcessor(&m)
 	if processor == nil {
 		metrics.RecordFailure(m.Category)
-		return ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("no processor found")}
+		return models.ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("no processor found")}
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), c.getTimeout(m))
 	defer cancel()
 
-	result := processor.Process(ctx, &m, cfg)
+	result := processor.Process(ctx, &m, cfg, registry)
 
 	if result.Error != nil {
 		slog.Error("Processing failed", "path", m.Path, "error", result.Error)
@@ -316,7 +317,7 @@ func (c *ShrinkCmd) processSingle(m ShrinkMedia, registry *ProcessorRegistry,
 	return result
 }
 
-func (c *ShrinkCmd) finalizeFileSwap(m ShrinkMedia, result ProcessResult, keepNewFiles bool) {
+func (c *ShrinkCmd) finalizeFileSwap(m models.ShrinkMedia, result models.ProcessResult, keepNewFiles bool) {
 	if keepNewFiles {
 		// Keep new files, delete original
 		if m.Path != "" {
@@ -342,7 +343,7 @@ func (c *ShrinkCmd) finalizeFileSwap(m ShrinkMedia, result ProcessResult, keepNe
 	}
 }
 
-func (c *ShrinkCmd) updateMetadata(m ShrinkMedia, result ProcessResult) {
+func (c *ShrinkCmd) updateMetadata(m models.ShrinkMedia, result models.ProcessResult) {
 	for _, out := range result.Outputs {
 		// We use updateDatabase when the original is replaced by a single output
 		// to preserve metadata like play_count, etc.
@@ -357,7 +358,7 @@ func (c *ShrinkCmd) updateMetadata(m ShrinkMedia, result ProcessResult) {
 	}
 }
 
-func (c *ShrinkCmd) preserveTimestamps(m *ShrinkMedia, result ProcessResult, originalAtime, originalMtime time.Time) {
+func (c *ShrinkCmd) preserveTimestamps(m *models.ShrinkMedia, result models.ProcessResult, originalAtime, originalMtime time.Time) {
 	if len(result.Outputs) > 0 && !originalAtime.IsZero() {
 		outPath := result.Outputs[0].Path
 		applyTimestamps(outPath, originalAtime, originalMtime)
@@ -370,7 +371,7 @@ func (c *ShrinkCmd) preserveTimestamps(m *ShrinkMedia, result ProcessResult, ori
 	}
 }
 
-func (c *ShrinkCmd) getTimeout(m ShrinkMedia) time.Duration {
+func (c *ShrinkCmd) getTimeout(m models.ShrinkMedia) time.Duration {
 	switch m.Category {
 	case "Video":
 		duration := utils.GetDurationForTimeout(m.Duration, m.Size, m.Ext)
@@ -400,9 +401,9 @@ func (c *ShrinkCmd) getTimeout(m ShrinkMedia) time.Duration {
 	}
 }
 
-func (c *ShrinkCmd) applyContinueFrom(media []ShrinkMedia) []ShrinkMedia {
+func (c *ShrinkCmd) applyContinueFrom(media []models.ShrinkMedia) []models.ShrinkMedia {
 	found := false
-	var filtered []ShrinkMedia
+	var filtered []models.ShrinkMedia
 
 	for _, m := range media {
 		if m.Path == c.ContinueFrom {

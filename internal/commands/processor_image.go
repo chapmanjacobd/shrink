@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/chapmanjacobd/shrink/internal/ffmpeg"
+	"github.com/chapmanjacobd/shrink/internal/models"
 	"github.com/chapmanjacobd/shrink/internal/utils"
 )
 
@@ -24,28 +26,28 @@ func NewImageProcessor() *ImageProcessor {
 	}
 }
 
-func (p *ImageProcessor) CanProcess(m *ShrinkMedia) bool {
+func (p *ImageProcessor) CanProcess(m *models.ShrinkMedia) bool {
 	filetype := strings.ToLower(m.MediaType)
 	return (strings.HasPrefix(filetype, "image/") || strings.Contains(filetype, " image")) ||
 		(shouldConvertToAVIF(m.Ext) && m.Duration == 0)
 }
 
-func (p *ImageProcessor) EstimateSize(m *ShrinkMedia, cfg *ProcessorConfig) (int64, int) {
+func (p *ImageProcessor) EstimateSize(m *models.ShrinkMedia, cfg *models.ProcessorConfig) (int64, int) {
 	return cfg.Image.TargetImageSize, int(cfg.Image.TranscodingImageTime)
 }
 
-func (p *ImageProcessor) Process(ctx context.Context, m *ShrinkMedia, cfg *ProcessorConfig) ProcessResult {
+func (p *ImageProcessor) Process(ctx context.Context, m *models.ShrinkMedia, cfg *models.ProcessorConfig, registry models.ProcessorRegistry) models.ProcessResult {
 	return p.processImage(ctx, m, cfg)
 }
 
-func (p *ImageProcessor) processImage(ctx context.Context, m *ShrinkMedia, cfg *ProcessorConfig) ProcessResult {
+func (p *ImageProcessor) processImage(ctx context.Context, m *models.ShrinkMedia, cfg *models.ProcessorConfig) models.ProcessResult {
 	if !utils.CommandExists("magick") {
-		return ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("ImageMagick not installed")}
+		return models.ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("ImageMagick not installed")}
 	}
 
 	// Get dimensions if missing
 	if m.Width == 0 || m.Height == 0 {
-		width, height, err := GetImageDimensions(m.Path)
+		width, height, err := ffmpeg.GetImageDimensions(m.Path)
 		if err == nil {
 			m.Width = width
 			m.Height = height
@@ -90,22 +92,22 @@ func (p *ImageProcessor) processImage(ctx context.Context, m *ShrinkMedia, cfg *
 		isEnvError := isImageMagickEnvironmentError(errorLog)
 
 		if isEnvError {
-			return ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("ImageMagick environment error: %w", err)}
+			return models.ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("ImageMagick environment error: %w", err)}
 		} else if isUnsupported {
 			os.Remove(outputPath)
 			slog.Info("Unsupported image format, keeping original", "path", m.Path)
-			return ProcessResult{SourcePath: m.Path, Success: true, Outputs: []ProcessOutputFile{{Path: m.Path, Size: m.Size}}}
+			return models.ProcessResult{SourcePath: m.Path, Success: true, Outputs: []models.ProcessOutputFile{{Path: m.Path, Size: m.Size}}}
 		} else if isFileError {
-			return ProcessResult{SourcePath: m.Path, Error: err}
+			return models.ProcessResult{SourcePath: m.Path, Error: err}
 		}
 
-		return ProcessResult{SourcePath: m.Path, Error: err}
+		return models.ProcessResult{SourcePath: m.Path, Error: err}
 	}
 
 	outputStats, err := os.Stat(outputPath)
 	if err != nil || outputStats.Size() == 0 {
 		os.Remove(outputPath)
-		return ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("output file empty or missing")}
+		return models.ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("output file empty or missing")}
 	}
 
 	// Small delay to ensure file is fully written and flushed
@@ -113,24 +115,24 @@ func (p *ImageProcessor) processImage(ctx context.Context, m *ShrinkMedia, cfg *
 
 	// Verify AVIF file is valid using ffprobe
 	if strings.HasSuffix(outputPath, ".avif") {
-		width, height, err := GetImageDimensions(outputPath)
+		width, height, err := ffmpeg.GetImageDimensions(outputPath)
 		if err != nil {
 			os.Remove(outputPath)
-			return ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("AVIF validation failed: %w", err)}
+			return models.ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("AVIF validation failed: %w", err)}
 		}
 		if width <= 1 || height <= 1 {
 			os.Remove(outputPath)
-			return ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("AVIF file has invalid dimensions: %dx%d", width, height)}
+			return models.ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("AVIF file has invalid dimensions: %dx%d", width, height)}
 		}
 		if width > cfg.Image.MaxImageWidth || height > cfg.Image.MaxImageHeight {
 			os.Remove(outputPath)
-			return ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("AVIF file exceeds max dimensions: %dx%d > %dx%d", width, height, cfg.Image.MaxImageWidth, cfg.Image.MaxImageHeight)}
+			return models.ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("AVIF file exceeds max dimensions: %dx%d > %dx%d", width, height, cfg.Image.MaxImageWidth, cfg.Image.MaxImageHeight)}
 		}
 	}
 
-	return ProcessResult{
+	return models.ProcessResult{
 		SourcePath: m.Path,
-		Outputs:    []ProcessOutputFile{{Path: outputPath, Size: outputStats.Size()}},
+		Outputs:    []models.ProcessOutputFile{{Path: outputPath, Size: outputStats.Size()}},
 		Success:    true,
 	}
 }

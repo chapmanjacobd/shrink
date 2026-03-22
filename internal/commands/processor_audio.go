@@ -5,29 +5,31 @@ import (
 	"math"
 	"strings"
 
+	"github.com/chapmanjacobd/shrink/internal/ffmpeg"
+	"github.com/chapmanjacobd/shrink/internal/models"
 	"github.com/chapmanjacobd/shrink/internal/utils"
 )
 
 // AudioProcessor handles audio file processing
 type AudioProcessor struct {
 	BaseProcessor
-	ffmpeg *FFmpegProcessor
+	ffmpeg *ffmpeg.FFmpegProcessor
 }
 
-func NewAudioProcessor(ffmpeg *FFmpegProcessor) *AudioProcessor {
+func NewAudioProcessor(ffmpeg *ffmpeg.FFmpegProcessor) *AudioProcessor {
 	return &AudioProcessor{
 		BaseProcessor: BaseProcessor{category: "Audio"},
 		ffmpeg:        ffmpeg,
 	}
 }
 
-func (p *AudioProcessor) CanProcess(m *ShrinkMedia) bool {
+func (p *AudioProcessor) CanProcess(m *models.ShrinkMedia) bool {
 	filetype := strings.ToLower(m.MediaType)
 	return (strings.HasPrefix(filetype, "audio/") || strings.Contains(filetype, " audio")) ||
 		(utils.AudioExtensionMap[m.Ext] && m.VideoCount == 0)
 }
 
-func (p *AudioProcessor) EstimateSize(m *ShrinkMedia, cfg *ProcessorConfig) (int64, int) {
+func (p *AudioProcessor) EstimateSize(m *models.ShrinkMedia, cfg *models.ProcessorConfig) (int64, int) {
 	duration := m.Duration
 	if duration <= 0 {
 		duration = float64(m.Size) / float64(cfg.Common.SourceAudioBitrate) * 8
@@ -39,6 +41,6 @@ func (p *AudioProcessor) EstimateSize(m *ShrinkMedia, cfg *ProcessorConfig) (int
 	return futureSize, processingTime
 }
 
-func (p *AudioProcessor) Process(ctx context.Context, m *ShrinkMedia, cfg *ProcessorConfig) ProcessResult {
-	return p.ffmpeg.Process(ctx, m, cfg)
+func (p *AudioProcessor) Process(ctx context.Context, m *models.ShrinkMedia, cfg *models.ProcessorConfig, registry models.ProcessorRegistry) models.ProcessResult {
+	return p.ffmpeg.Process(ctx, m, cfg, registry)
 }

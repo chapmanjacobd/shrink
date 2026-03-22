@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/chapmanjacobd/shrink/internal/models"
 	"github.com/chapmanjacobd/shrink/internal/utils"
 )
 
@@ -23,23 +24,23 @@ func NewTextProcessor() *TextProcessor {
 	}
 }
 
-func (p *TextProcessor) CanProcess(m *ShrinkMedia) bool {
+func (p *TextProcessor) CanProcess(m *models.ShrinkMedia) bool {
 	return utils.TextExtensionMap[m.Ext]
 }
 
-func (p *TextProcessor) EstimateSize(m *ShrinkMedia, cfg *ProcessorConfig) (int64, int) {
+func (p *TextProcessor) EstimateSize(m *models.ShrinkMedia, cfg *models.ProcessorConfig) (int64, int) {
 	// Rough estimate for ebooks
 	return cfg.Image.TargetImageSize * 50, int(cfg.Image.TranscodingImageTime * 12)
 }
 
-func (p *TextProcessor) Process(ctx context.Context, m *ShrinkMedia, cfg *ProcessorConfig) ProcessResult {
+func (p *TextProcessor) Process(ctx context.Context, m *models.ShrinkMedia, cfg *models.ProcessorConfig, registry models.ProcessorRegistry) models.ProcessResult {
 	return p.processText(ctx, m, cfg)
 }
 
 // processText handles the actual text/ebook processing
-func (p *TextProcessor) processText(ctx context.Context, m *ShrinkMedia, cfg *ProcessorConfig) ProcessResult {
+func (p *TextProcessor) processText(ctx context.Context, m *models.ShrinkMedia, cfg *models.ProcessorConfig) models.ProcessResult {
 	if !utils.CommandExists("ebook-convert") {
-		return ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("calibre not installed")}
+		return models.ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("calibre not installed")}
 	}
 
 	ext := strings.ToLower(filepath.Ext(m.Path))
@@ -55,7 +56,7 @@ func (p *TextProcessor) processText(ctx context.Context, m *ShrinkMedia, cfg *Pr
 	// Step 2: Convert with Calibre to folder format
 	outputDir := filepath.Join(filepath.Dir(m.Path), filepath.Base(m.Path)+".OEB")
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
-		return ProcessResult{SourcePath: m.Path, Error: err}
+		return models.ProcessResult{SourcePath: m.Path, Error: err}
 	}
 
 	args := []string{
@@ -81,12 +82,12 @@ func (p *TextProcessor) processText(ctx context.Context, m *ShrinkMedia, cfg *Pr
 			slog.Error("Calibre error", "output", string(output), "path", m.Path)
 		}
 		os.RemoveAll(outputDir)
-		return ProcessResult{SourcePath: m.Path, Error: err}
+		return models.ProcessResult{SourcePath: m.Path, Error: err}
 	}
 
 	if !p.folderExists(outputDir) {
 		os.RemoveAll(outputDir)
-		return ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("calibre output folder missing")}
+		return models.ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("calibre output folder missing")}
 	}
 
 	// Step 3: Replace CSS with optimized version
@@ -102,15 +103,15 @@ func (p *TextProcessor) processText(ctx context.Context, m *ShrinkMedia, cfg *Pr
 	// Step 6: Return result
 	outputSize := utils.FolderSize(outputDir)
 
-	return ProcessResult{
+	return models.ProcessResult{
 		SourcePath: m.Path,
-		Outputs:    []ProcessOutputFile{{Path: outputDir, Size: outputSize}},
+		Outputs:    []models.ProcessOutputFile{{Path: outputDir, Size: outputSize}},
 		Success:    true,
 	}
 }
 
 // runOCR runs OCR on a PDF file using ocrmypdf
-func (p *TextProcessor) runOCR(path string, cfg *ProcessorConfig) string {
+func (p *TextProcessor) runOCR(path string, cfg *models.ProcessorConfig) string {
 	if !utils.CommandExists("ocrmypdf") {
 		return ""
 	}
@@ -286,7 +287,7 @@ func (p *TextProcessor) findImages(dir string) []string {
 }
 
 // processEbookImages converts images to AVIF
-func (p *TextProcessor) processEbookImages(ctx context.Context, images []string, cfg *ProcessorConfig) {
+func (p *TextProcessor) processEbookImages(ctx context.Context, images []string, cfg *models.ProcessorConfig) {
 	for _, img := range images {
 		ext := strings.ToLower(filepath.Ext(img))
 		// Skip formats that shouldn't be converted to AVIF
