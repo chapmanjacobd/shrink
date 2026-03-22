@@ -115,6 +115,16 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *ShrinkMedia
 				processor = NewAudioProcessor(ffmpeg)
 			}
 			media := &ShrinkMedia{Path: path, Size: fileSize, Ext: ext, Category: category}
+
+			// Use ProbeMedia to get video count if needed
+			if category == "Video" || category == "Audio" {
+				if probed, err := ProbeMedia(path); err == nil {
+					media.VideoCount = len(probed.VideoStreams)
+					media.AudioCount = len(probed.AudioStreams)
+					media.Duration = probed.Duration
+				}
+			}
+
 			futureSize, _ := processor.EstimateSize(media, cfg)
 			if ShouldShrink(media, futureSize, cfg) {
 				res := ffmpeg.Process(ctx, media, cfg)

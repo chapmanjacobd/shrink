@@ -45,7 +45,7 @@ func (p *ImageProcessor) processImage(ctx context.Context, m *ShrinkMedia, cfg *
 
 	// Get dimensions if missing
 	if m.Width == 0 || m.Height == 0 {
-		width, height, err := getImageDimensions(m.Path)
+		width, height, err := GetImageDimensions(m.Path)
 		if err == nil {
 			m.Width = width
 			m.Height = height
@@ -113,7 +113,7 @@ func (p *ImageProcessor) processImage(ctx context.Context, m *ShrinkMedia, cfg *
 
 	// Verify AVIF file is valid using ffprobe
 	if strings.HasSuffix(outputPath, ".avif") {
-		width, height, err := getImageDimensions(outputPath)
+		width, height, err := GetImageDimensions(outputPath)
 		if err != nil {
 			os.Remove(outputPath)
 			return ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("AVIF validation failed: %w", err)}

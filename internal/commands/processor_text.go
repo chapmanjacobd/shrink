@@ -2,7 +2,6 @@ package commands
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -317,44 +316,6 @@ func (p *TextProcessor) processEbookImages(ctx context.Context, images []string,
 			}
 		}
 	}
-}
-
-// getImageDimensions uses ffprobe to get the actual width and height of an image
-func getImageDimensions(path string) (int, int, error) {
-	if !utils.CommandExists("ffprobe") {
-		return 0, 0, fmt.Errorf("ffprobe not available")
-	}
-
-	cmd := exec.Command("ffprobe",
-		"-v", "quiet",
-		"-print_format", "json",
-		"-show_streams",
-		path)
-
-	output, err := cmd.Output()
-	if err != nil {
-		return 0, 0, err
-	}
-
-	var data struct {
-		Streams []struct {
-			CodecType string `json:"codec_type"`
-			Width     int    `json:"width"`
-			Height    int    `json:"height"`
-		} `json:"streams"`
-	}
-
-	if err := json.Unmarshal(output, &data); err != nil {
-		return 0, 0, err
-	}
-
-	for _, stream := range data.Streams {
-		if stream.CodecType == "video" && stream.Width > 0 && stream.Height > 0 {
-			return stream.Width, stream.Height, nil
-		}
-	}
-
-	return 0, 0, fmt.Errorf("no video stream found")
 }
 
 // updateImageReferences updates HTML files to reference new AVIF files

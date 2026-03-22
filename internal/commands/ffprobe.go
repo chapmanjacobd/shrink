@@ -2,6 +2,7 @@ package commands
 
 import (
 	"encoding/json"
+	"fmt"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -9,41 +10,45 @@ import (
 
 // FFProbeResult represents ffprobe JSON output
 type FFProbeResult struct {
-	Streams         []FFProbeStream `json:"streams"`
-	Format          FFProbeFormat   `json:"format"`
-	Path            string
-	Duration        float64
-	VideoStreams    []FFProbeStream
-	AudioStreams    []FFProbeStream
-	SubtitleStreams []FFProbeStream
-	AlbumArtStreams []FFProbeStream
+	Streams  []FFProbeStream `json:"streams"`
+	Format   FFProbeFormat   `json:"format"`
+	Path     string          `json:"-"`
+	Duration float64         `json:"-"`
+
+	// Categorized streams
+	VideoStreams    []FFProbeStream `json:"-"`
+	AudioStreams    []FFProbeStream `json:"-"`
+	SubtitleStreams []FFProbeStream `json:"-"`
+	AlbumArtStreams []FFProbeStream `json:"-"`
 }
 
 // FFProbeStream represents a stream in ffprobe output
 type FFProbeStream struct {
-	Index      int               `json:"index"`
-	CodecType  string            `json:"codec_type"`
-	CodecName  string            `json:"codec_name"`
-	Duration   string            `json:"duration"`
-	NbFrames   string            `json:"nb_frames"`
-	Width      int               `json:"width"`
-	Height     int               `json:"height"`
-	RFrameRate string            `json:"r_frame_rate"`
-	BitRate    string            `json:"bit_rate"`
-	SampleRate string            `json:"sample_rate"`
-	Channels   int               `json:"channels"`
-	Tags       map[string]string `json:"tags"`
+	Index       int               `json:"index"`
+	CodecType   string            `json:"codec_type"`
+	CodecName   string            `json:"codec_name"`
+	Duration    string            `json:"duration"`
+	NbFrames    string            `json:"nb_frames"`
+	Width       int               `json:"width"`
+	Height      int               `json:"height"`
+	RFrameRate  string            `json:"r_frame_rate"`
+	BitRate     string            `json:"bit_rate"`
+	SampleRate  string            `json:"sample_rate"`
+	Channels    int               `json:"channels"`
+	Tags        map[string]string `json:"tags"`
+	Disposition map[string]int    `json:"disposition"`
 }
 
 // FFProbeFormat represents the format section of ffprobe output
 type FFProbeFormat struct {
-	Duration  string `json:"duration"`
-	BitRate   string `json:"bit_rate"`
-	NbStreams int    `json:"nb_streams"`
+	Duration  string            `json:"duration"`
+	BitRate   string            `json:"bit_rate"`
+	NbStreams int               `json:"nb_streams"`
+	Tags      map[string]string `json:"tags"`
 }
 
-// ffprobe probes a media file and returns metadata
-func (p *FFmpegProcessor) ffprobe(path string) (*FFProbeResult, error) {
+// ProbeMedia probes a media file and returns metadata
+func ProbeMedia(path string) (*FFProbeResult, error) {
 	cmd := exec.Command("ffprobe",
 		"-v", "quiet",
 		"-print_format", "json",
@@ -75,9 +80,13 @@ func (p *FFmpegProcessor) ffprobe(path string) (*FFProbeResult, error) {
 	for _, s := range probe.Streams {
 		switch s.CodecType {
 		case "video":
-			if s.Width == 0 && s.Height == 0 {
+			//attached pics (album art) often have mjpeg or png codec
+			if s.Disposition["attached_pic"] == 1 || s.CodecName == "mjpeg" || s.CodecName == "png" {
 				probe.AlbumArtStreams = append(probe.AlbumArtStreams, s)
+			} else if s.Width > 0 || s.Height > 0 {
+				probe.VideoStreams = append(probe.VideoStreams, s)
 			} else {
+				// Fallback for cases where width/height might be 0 but it's not album art
 				probe.VideoStreams = append(probe.VideoStreams, s)
 			}
 		case "audio":
@@ -88,6 +97,22 @@ func (p *FFmpegProcessor) ffprobe(path string) (*FFProbeResult, error) {
 	}
 
 	return &probe, nil
+}
+
+// GetImageDimensions uses ffprobe to get the actual width and height of an image
+func GetImageDimensions(path string) (int, int, error) {
+	probe, err := ProbeMedia(path)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	for _, stream := range probe.VideoStreams {
+		if stream.Width > 0 && stream.Height > 0 {
+			return stream.Width, stream.Height, nil
+		}
+	}
+
+	return 0, 0, fmt.Errorf("no video stream found")
 }
 
 func (p *FFmpegProcessor) isAnimationFromProbe(probe *FFProbeResult) *bool {

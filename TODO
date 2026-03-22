@@ -1,63 +1,39 @@
 Professional error messages and user experience
 - [ ] Improve log verbosity levels
+- [ ] Add error recovery mechanisms
+- [ ] Better handling of interrupted operations
 
 >80% test coverage with scenario-based tests
+- [ ] Configure test coverage reporting (target: >80%)
+
+  4. Configuration Management
+   * Current Issue: The ShrinkCmd struct is overloaded with flags, making it difficult to maintain and test.    * Improvement: Extract flags into a dedicated Config object and pass it where needed.
 
 - [ ] Support config file (~/.config/shrink/config.yaml)
 - [ ] Environment variable overrides
 - [ ] Profile presets (quality/speed/balance)
 
-- [ ] Add error recovery mechanisms
-- [ ] Better handling of interrupted operations
-- [ ] Graceful degradation when tools missing
-
-- [ ] Animated GIF/webp detection
 - [ ] Edge Case Tests:
+- [ ] Animated GIF/webp detection
+- [ ] Stereo/360° video samples
+- [ ] Audio files with silence gaps
 - [ ] Zero-duration media handling
-- [ ] Corrupt file handling
 - [ ] Missing external tools (graceful degradation)
+- [ ] Corrupt file handling
 - [ ] Permission errors
 - [ ] Disk space errors
 - [ ] Timeout scenarios
 - [ ] Database mode vs directory mode
 - [ ] --continue-from functionality
-- [ ] --move and --move-broken options
+- [ ] --move and --move-broken options, preserving parent folder, and copy/move to another filesystem
 - [ ] --delete-larger behavior
 - [ ] Timestamp preservation
 - [ ] Progress reporting (metrics)
- 2.3 Test Infrastructure
-- [ ] Expand testdata with more sample files:
-- [ ] Stereo/360° video samples
-- [ ] Animated GIF/webp
-- [ ] Audio files with silence gaps
 - [ ] Subtitled video samples
+- [ ] Subtitle codec handling (text vs image subs)
 - [ ] PDF files (with/without text, with/without OCR)
 - [ ] Various archive formats
 - [ ] Add test fixtures for mock external tools
-- [ ] Configure test coverage reporting (target: >80%)
-- [ ] Add gotestsum for better test output
-- [ ] CHANGELOG.md - Version history template
-
- 2.1 Test Coverage Audit (Compare with Python)
-Current Go tests cover:
-- ✅ Video shrinking (AVI → AV1.MKV)
-- ✅ Archive extraction + processing
-- ✅ Text/ebook conversion
-- ✅ Nested archive handling
-- ✅ Directory scanning mode
- Python tests additionally cover:
-- [ ] Web URL handling (simulate mode)
-- [ ] Animation detection (GIF/webp with audio)
-- [ ] Incomplete file deletion
-- [ ] Specific FFmpeg filter tests (stereo/360° video)
-- [ ] Silence splitting for audio
-- [ ] OCR options testing (skip/force/redo)
-- [ ] Subtitle handling tests
-- [ ] Edge cases (zero-duration, corrupt files)
-- [ ] Stereo/360° video scaling (SBS/OU formats)
-- [ ] FPS normalization (>240fps handling)
-- [ ] Audio silence splitting
-- [ ] Subtitle codec handling (text vs image subs)
 - [ ] Album art preservation
 - [ ] Loudnorm audio filter
 - [ ] Timeout handling

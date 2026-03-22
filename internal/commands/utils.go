@@ -1,13 +1,10 @@
 package commands
 
 import (
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -74,24 +71,38 @@ func (c *ShrinkCmd) scanDirectory(dirPath string) ([]ShrinkMedia, error) {
 
 		// Try to get accurate metadata using ffprobe for video/audio files
 		if utils.VideoExtensionMap[ext] || utils.AudioExtensionMap[ext] {
-			if probed, err := c.probeMedia(path); err == nil {
+			if probed, err := ProbeMedia(path); err == nil {
 				m.Duration = probed.Duration
-				if probed.VideoCount > 0 {
-					m.VideoCount = probed.VideoCount
+				m.VideoCount = len(probed.VideoStreams)
+				m.AudioCount = len(probed.AudioStreams)
+				m.SubtitleCount = len(probed.SubtitleStreams)
+
+				var vCodecs, aCodecs, sCodecs []string
+				for _, s := range probed.VideoStreams {
+					vCodecs = append(vCodecs, s.CodecName)
+					if m.Width == 0 {
+						m.Width = s.Width
+						m.Height = s.Height
+					}
 				}
-				if probed.AudioCount > 0 {
-					m.AudioCount = probed.AudioCount
+				for _, s := range probed.AudioStreams {
+					codecInfo := s.CodecName
+					if s.Channels > 0 {
+						codecInfo += fmt.Sprintf(" %dch", s.Channels)
+					}
+					aCodecs = append(aCodecs, codecInfo)
 				}
-				m.SubtitleCount = probed.SubtitleCount
-				if probed.VideoCodecs != "" {
-					m.VideoCodecs = probed.VideoCodecs
+				for _, s := range probed.SubtitleStreams {
+					label := s.CodecName
+					if lang := s.Tags["language"]; lang != "" {
+						label = lang
+					}
+					sCodecs = append(sCodecs, label)
 				}
-				if probed.AudioCodecs != "" {
-					m.AudioCodecs = probed.AudioCodecs
-				}
-				if probed.SubtitleCodecs != "" {
-					m.SubtitleCodecs = probed.SubtitleCodecs
-				}
+
+				m.VideoCodecs = strings.Join(vCodecs, ", ")
+				m.AudioCodecs = strings.Join(aCodecs, ", ")
+				m.SubtitleCodecs = strings.Join(sCodecs, ", ")
 			}
 		}
 
@@ -103,97 +114,6 @@ func (c *ShrinkCmd) scanDirectory(dirPath string) ([]ShrinkMedia, error) {
 	}
 
 	return media, nil
-}
-
-// probeMedia uses ffprobe to get accurate stream counts and metadata
-func (c *ShrinkCmd) probeMedia(path string) (*ShrinkMedia, error) {
-	if !utils.CommandExists("ffprobe") {
-		return nil, fmt.Errorf("ffprobe not available")
-	}
-
-	cmd := exec.Command("ffprobe",
-		"-v", "quiet",
-		"-hide_banner",
-		"-show_format",
-		"-show_streams",
-		"-of", "json",
-		path)
-
-	output, err := cmd.Output()
-	if err != nil {
-		return nil, err
-	}
-
-	var data struct {
-		Streams []struct {
-			CodecType   string            `json:"codec_type"`
-			CodecName   string            `json:"codec_name"`
-			Width       int               `json:"width"`
-			Height      int               `json:"height"`
-			RFrameRate  string            `json:"r_frame_rate"`
-			Channels    int               `json:"channels"`
-			SampleRate  string            `json:"sample_rate"`
-			Tags        map[string]string `json:"tags"`
-			Disposition map[string]int    `json:"disposition"`
-		} `json:"streams"`
-		Format struct {
-			Duration string            `json:"duration"`
-			Tags     map[string]string `json:"tags"`
-		} `json:"format"`
-	}
-
-	if err := json.Unmarshal(output, &data); err != nil {
-		return nil, err
-	}
-
-	m := &ShrinkMedia{
-		Path: path,
-	}
-
-	var vCodecs, aCodecs, sCodecs []string
-
-	for _, s := range data.Streams {
-		switch s.CodecType {
-		case "video":
-			// Skip attached pics (album art)
-			if s.Disposition["attached_pic"] == 1 || s.CodecName == "mjpeg" || s.CodecName == "png" {
-				continue
-			}
-			m.VideoCount++
-			codecInfo := s.CodecName
-			vCodecs = append(vCodecs, codecInfo)
-
-			if m.Width == 0 {
-				m.Width = s.Width
-				m.Height = s.Height
-			}
-		case "audio":
-			m.AudioCount++
-			codecInfo := s.CodecName
-			if s.Channels > 0 {
-				codecInfo += fmt.Sprintf(" %dch", s.Channels)
-			}
-			aCodecs = append(aCodecs, codecInfo)
-		case "subtitle":
-			m.SubtitleCount++
-			label := s.CodecName
-			if lang := s.Tags["language"]; lang != "" {
-				label = lang
-			}
-			sCodecs = append(sCodecs, label)
-		}
-	}
-
-	// Format info
-	if d, err := strconv.ParseFloat(data.Format.Duration, 64); err == nil {
-		m.Duration = d
-	}
-
-	m.VideoCodecs = strings.Join(vCodecs, ", ")
-	m.AudioCodecs = strings.Join(aCodecs, ", ")
-	m.SubtitleCodecs = strings.Join(sCodecs, ", ")
-
-	return m, nil
 }
 
 // applyTimestamps applies timestamps to a file or folder (recursively for folders)

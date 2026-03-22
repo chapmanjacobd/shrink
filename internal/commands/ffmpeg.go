@@ -31,7 +31,7 @@ func (p *FFmpegProcessor) Process(ctx context.Context, m *ShrinkMedia, cfg *Proc
 	}
 
 	// Probe the file
-	probe, err := p.ffprobe(m.Path)
+	probe, err := ProbeMedia(m.Path)
 	if err != nil {
 		return ProcessResult{SourcePath: m.Path, Error: err}
 	}

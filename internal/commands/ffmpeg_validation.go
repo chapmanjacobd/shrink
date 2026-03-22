@@ -32,7 +32,7 @@ func (p *FFmpegProcessor) validateTranscode(m ShrinkMedia, outputPath string, or
 			deleteTranscode = true
 		} else {
 			// Validate duration and dimensions
-			transcodeProbe, err := p.ffprobe(outputPath)
+			transcodeProbe, err := ProbeMedia(outputPath)
 			if err != nil {
 				deleteTranscode = true
 			} else if len(transcodeProbe.Streams) == 0 || transcodeProbe.Duration == 0 {
@@ -93,7 +93,7 @@ func (p *FFmpegProcessor) validateTranscode(m ShrinkMedia, outputPath string, or
 			break
 		}
 		// Validate dimensions for video split files
-		probe, err := p.ffprobe(match)
+		probe, err := ProbeMedia(match)
 		if err != nil || len(probe.Streams) == 0 {
 			hasInvalidFile = true
 			break
