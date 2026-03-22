@@ -84,14 +84,15 @@ func MoveFile(src, dst string) error {
 
 // FormatDuration formats seconds into human readable duration
 // Prints max two units, skipping zero values (except 0 → "0s")
-func FormatDuration(seconds int) string {
-	if seconds == 0 {
+func FormatDuration(seconds float64) string {
+	sInt := int(seconds)
+	if sInt == 0 {
 		return "0s"
 	}
-	d := seconds / 86400
-	h := (seconds % 86400) / 3600
-	m := (seconds % 3600) / 60
-	s := seconds % 60
+	d := sInt / 86400
+	h := (sInt % 86400) / 3600
+	m := (sInt % 3600) / 60
+	s := sInt % 60
 
 	var parts []string
 	if d > 0 {

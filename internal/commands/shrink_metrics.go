@@ -66,8 +66,8 @@ type MediaTypeStats struct {
 	CompressedSize int64
 	TotalSize      int64
 	FutureSize     int64
-	TotalTime      int   // processing time in seconds
-	TotalDuration  int64 // total media duration in seconds (for speed ratio)
+	TotalTime      float64 // processing time in seconds
+	TotalDuration  int64   // total media duration in seconds (for speed ratio)
 	CompletedAt    time.Time
 }
 
@@ -89,7 +89,7 @@ func (s *MediaTypeStats) AvgProcessingTime() int {
 	if s.Processed == 0 {
 		return 0
 	}
-	return s.TotalTime / s.Processed
+	return int(s.TotalTime / float64(s.Processed))
 }
 
 // SpeedRatio returns the processing speed ratio (e.g., 2.5x realtime)
@@ -97,7 +97,7 @@ func (s *MediaTypeStats) SpeedRatio() float64 {
 	if s.TotalTime == 0 || s.TotalDuration == 0 {
 		return 0
 	}
-	return float64(s.TotalDuration) / float64(s.TotalTime)
+	return float64(s.TotalDuration) / s.TotalTime
 }
 
 // ShrinkMetrics aggregates statistics across all media types
@@ -137,7 +137,7 @@ func (m *ShrinkMetrics) RecordStarted(mediaType string, path string) {
 }
 
 // RecordSuccess records a successful processing
-func (m *ShrinkMetrics) RecordSuccess(mediaType string, size, futureSize int64, processingTime int, duration int64) {
+func (m *ShrinkMetrics) RecordSuccess(mediaType string, size, futureSize int64, processingTime float64, duration int64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -152,13 +152,14 @@ func (m *ShrinkMetrics) RecordSuccess(mediaType string, size, futureSize int64, 
 }
 
 // RecordFailure records a failed processing
-func (m *ShrinkMetrics) RecordFailure(mediaType string) {
+func (m *ShrinkMetrics) RecordFailure(mediaType string, processingTime float64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	stats := m.getOrCreateType(mediaType)
 	stats.Processed++
 	stats.Failed++
+	stats.TotalTime += processingTime
 	stats.CompletedAt = time.Now()
 }
 
@@ -232,7 +233,8 @@ func (m *ShrinkMetrics) PrintProgress() {
 	// Calculate totals
 	var totalSuccess, totalFailed, totalSkipped, totalQueued, totalRunning int
 	var totalSavings int64
-	var totalTime, totalDuration int
+	var totalDuration int64
+	var totalTime float64
 
 	for _, stats := range m.types {
 		totalSuccess += stats.Success
@@ -241,7 +243,7 @@ func (m *ShrinkMetrics) PrintProgress() {
 		totalRunning += stats.Running
 		totalSavings += stats.SpaceSaved()
 		totalTime += stats.TotalTime
-		totalDuration += int(stats.TotalDuration)
+		totalDuration += stats.TotalDuration
 		totalQueued += stats.Total - stats.Processed - stats.Skipped
 	}
 
@@ -321,7 +323,7 @@ func (m *ShrinkMetrics) PrintProgress() {
 	// Print totals
 	overallSpeed := ""
 	if totalTime > 0 && totalDuration > 0 {
-		overallSpeed = fmt.Sprintf("%.1fx", float64(totalDuration)/float64(totalTime))
+		overallSpeed = fmt.Sprintf("%.1fx", float64(totalDuration)/totalTime)
 	}
 	rows = append(rows, []string{
 		"TOTAL",
@@ -392,7 +394,8 @@ func (m *ShrinkMetrics) LogSummary() {
 	// Calculate totals
 	var totalProcessed, totalSuccess, totalFailed int
 	var totalSize, totalFuture, totalSavings int64
-	var totalTime, totalDuration int
+	var totalDuration int64
+	var totalTime float64
 
 	for _, stats := range m.types {
 		totalProcessed += stats.Processed
@@ -402,7 +405,7 @@ func (m *ShrinkMetrics) LogSummary() {
 		totalFuture += stats.FutureSize
 		totalSavings += stats.SpaceSaved()
 		totalTime += stats.TotalTime
-		totalDuration += int(stats.TotalDuration)
+		totalDuration += stats.TotalDuration
 	}
 
 	// Sort media types for consistent output
@@ -450,7 +453,7 @@ func (m *ShrinkMetrics) LogSummary() {
 
 	overallSpeed := ""
 	if totalTime > 0 && totalDuration > 0 {
-		overallSpeed = fmt.Sprintf("%.1fx", float64(totalDuration)/float64(totalTime))
+		overallSpeed = fmt.Sprintf("%.1fx", float64(totalDuration)/totalTime)
 	}
 	rows = append(rows, []string{
 		"TOTAL",

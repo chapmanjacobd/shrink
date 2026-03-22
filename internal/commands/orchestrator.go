@@ -166,7 +166,7 @@ func (c *ShrinkCmd) printSummary(media []models.ShrinkMedia) {
 			utils.FormatSize(b.size),
 			utils.FormatSize(b.future),
 			utils.FormatSize(b.savings),
-			utils.FormatDuration(b.procTime),
+			utils.FormatDuration(float64(b.procTime)),
 			speed,
 		})
 	}
@@ -178,7 +178,7 @@ func (c *ShrinkCmd) printSummary(media []models.ShrinkMedia) {
 		utils.FormatSize(totalSize),
 		utils.FormatSize(totalFuture),
 		utils.FormatSize(totalSavings),
-		utils.FormatDuration(totalTime),
+		utils.FormatDuration(float64(totalTime)),
 		"",
 	})
 
@@ -253,13 +253,21 @@ func NewWorkerPool(c *ShrinkCmd) *WorkerPool {
 
 func (wp *WorkerPool) Acquire(ctx context.Context, category string) (func(), error) {
 	// Normalize category name for case-insensitive lookup
-	cat := strings.Title(strings.ToLower(strings.TrimSpace(category)))
-	sem := wp.sems[cat]
-	if sem == nil {
-		slog.Debug("Unknown category, falling back to Archived limit", "category", category, "normalized", cat)
-		sem = wp.sems["Archived"]
+	var cat string
+	switch strings.ToLower(strings.TrimSpace(category)) {
+	case "video":
+		cat = "Video"
+	case "audio":
+		cat = "Audio"
+	case "image":
+		cat = "Image"
+	case "text":
+		cat = "Text"
+	default:
+		cat = "Archived"
 	}
 
+	sem := wp.sems[cat]
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
@@ -369,23 +377,26 @@ func (e *Engine) processSingle(ctx context.Context, m models.ShrinkMedia) models
 
 	processor := e.registry.GetProcessor(&m)
 	if processor == nil {
-		e.metrics.RecordFailure(m.DisplayCategory())
+		e.metrics.RecordFailure(m.DisplayCategory(), 0)
 		return models.ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("no processor found")}
 	}
 
 	processCtx, cancel := context.WithTimeout(ctx, e.getTimeout(m))
 	defer cancel()
 
+	startTime := time.Now()
 	result := processor.Process(processCtx, &m, e.cfg, e.registry)
+	elapsedSeconds := time.Since(startTime).Seconds()
+	m.ProcessingTime = int(elapsedSeconds)
 
 	// Handle processing errors
 	if result.Error != nil {
-		return e.handleProcessingError(m, result)
+		return e.handleProcessingError(m, result, elapsedSeconds)
 	}
 
 	// Handle unsuccessful processing (e.g., invalid output)
 	if !result.Success {
-		return e.handleUnsuccessfulProcessing(m)
+		return e.handleUnsuccessfulProcessing(m, elapsedSeconds)
 	}
 
 	// Calculate new size and compare with original
@@ -402,10 +413,10 @@ func (e *Engine) processSingle(ctx context.Context, m models.ShrinkMedia) models
 	e.finalizeFileSwap(m, result, keepNewFiles)
 
 	if keepNewFiles {
-		e.finalizeSuccessfulProcessing(&m, result, originalAtime, originalMtime)
+		e.finalizeSuccessfulProcessing(&m, result, originalAtime, originalMtime, elapsedSeconds)
 	} else {
 		db.MarkShrinked(e.sqlDBs, m.Path)
-		e.metrics.RecordSuccess(m.DisplayCategory(), m.Size, m.Size, m.ProcessingTime, int64(m.Duration))
+		e.metrics.RecordSuccess(m.DisplayCategory(), m.Size, m.Size, elapsedSeconds, int64(m.Duration))
 	}
 
 	return result
@@ -418,7 +429,7 @@ func (e *Engine) handleBrokenArchive(m models.ShrinkMedia) models.ProcessResult 
 		e.cmd.moveToBroken(m.Path, m.PartFiles)
 	}
 	db.MarkDeleted(e.sqlDBs, m.Path)
-	e.metrics.RecordFailure(m.DisplayCategory())
+	e.metrics.RecordFailure(m.DisplayCategory(), 0)
 	return models.ProcessResult{SourcePath: m.Path, Success: false}
 }
 
@@ -432,7 +443,7 @@ func (e *Engine) captureTimestamps(path string) (time.Time, time.Time, error) {
 }
 
 // handleProcessingError handles errors from processing
-func (e *Engine) handleProcessingError(m models.ShrinkMedia, result models.ProcessResult) models.ProcessResult {
+func (e *Engine) handleProcessingError(m models.ShrinkMedia, result models.ProcessResult, elapsed float64) models.ProcessResult {
 	// Log the error (including timeouts and cancellations for visibility)
 	if result.Error == context.Canceled {
 		slog.Warn("Processing canceled by user", "path", m.Path)
@@ -445,7 +456,7 @@ func (e *Engine) handleProcessingError(m models.ShrinkMedia, result models.Proce
 			slog.Error("Processing failed", "path", m.Path, "error", result.Error)
 		}
 	}
-	e.metrics.RecordFailure(m.DisplayCategory())
+	e.metrics.RecordFailure(m.DisplayCategory(), elapsed)
 	if e.cfg.Common.MoveBroken != "" {
 		e.cmd.moveToBroken(m.Path, result.PartFiles)
 	}
@@ -453,19 +464,19 @@ func (e *Engine) handleProcessingError(m models.ShrinkMedia, result models.Proce
 }
 
 // handleUnsuccessfulProcessing handles processing that succeeded but produced no valid output
-func (e *Engine) handleUnsuccessfulProcessing(m models.ShrinkMedia) models.ProcessResult {
+func (e *Engine) handleUnsuccessfulProcessing(m models.ShrinkMedia, elapsed float64) models.ProcessResult {
 	// Processing succeeded but produced no valid output (e.g. invalid file)
 	if e.cfg.Common.DeleteUnplayable {
 		db.MarkDeleted(e.sqlDBs, m.Path)
 		os.Remove(m.Path)
 	}
-	e.metrics.RecordFailure(m.DisplayCategory())
+	e.metrics.RecordFailure(m.DisplayCategory(), elapsed)
 	return models.ProcessResult{SourcePath: m.Path, Success: false}
 }
 
 // finalizeSuccessfulProcessing handles post-processing for successful operations
 func (e *Engine) finalizeSuccessfulProcessing(m *models.ShrinkMedia, result models.ProcessResult,
-	originalAtime, originalMtime time.Time,
+	originalAtime, originalMtime time.Time, elapsed float64,
 ) {
 	e.updateMetadata(*m, result)
 	e.preserveTimestamps(m, result, originalAtime, originalMtime)
@@ -477,7 +488,7 @@ func (e *Engine) finalizeSuccessfulProcessing(m *models.ShrinkMedia, result mode
 	for _, out := range result.Outputs {
 		totalNewSize += out.Size
 	}
-	e.metrics.RecordSuccess(m.DisplayCategory(), m.Size, totalNewSize, m.ProcessingTime, int64(m.Duration))
+	e.metrics.RecordSuccess(m.DisplayCategory(), m.Size, totalNewSize, elapsed, int64(m.Duration))
 }
 
 // finalizeFileSwap handles the actual file replacement or cleanup

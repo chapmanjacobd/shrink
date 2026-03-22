@@ -11,7 +11,7 @@ func TestMetricsProgress(t *testing.T) {
 	metrics.RecordStarted("Video", "test.mp4")
 	metrics.RecordStarted("Audio", "test.mp3")
 	metrics.RecordSuccess("Video", 1000, 500, 10, 60)
-	metrics.RecordFailure("Audio")
+	metrics.RecordFailure("Audio", 5)
 	metrics.RecordSkipped("Image")
 
 	// Test PrintProgress (doesn't crash)
@@ -35,6 +35,7 @@ func TestProgressLogHandler(t *testing.T) {
 
 func TestMetricsHelpers(t *testing.T) {
 	s := &MediaTypeStats{
+		Processed:     1,
 		Success:       1,
 		TotalSize:     1000,
 		FutureSize:    500,

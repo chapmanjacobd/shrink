@@ -19,7 +19,7 @@ func TestFormatDuration(t *testing.T) {
 		{90000, "1d 1h"},
 	}
 	for _, tt := range tests {
-		got := FormatDuration(tt.sec)
+		got := FormatDuration(float64(tt.sec))
 		if got != tt.want {
 			t.Errorf("FormatDuration(%d) = %v, want %v", tt.sec, got, tt.want)
 		}
