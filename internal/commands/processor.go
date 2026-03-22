@@ -38,55 +38,71 @@ type MediaProcessor interface {
 	Category() string
 }
 
-// ProcessorConfig contains configuration for media processing
-type ProcessorConfig struct {
-	// Bitrates
+// VideoConfig contains configuration for video processing
+type VideoConfig struct {
+	TargetVideoBitrate   int64
+	MinSavingsVideo      float64
+	TranscodingVideoRate float64
+	Preset               string
+	CRF                  string
+	MaxVideoWidth        int
+	MaxVideoHeight       int
+	VideoOnly            bool
+	Keyframes            bool
+	NoPreserveVideo      bool
+}
+
+// AudioConfig contains configuration for audio processing
+type AudioConfig struct {
+	TargetAudioBitrate   int64
+	MinSavingsAudio      float64
+	TranscodingAudioRate float64
+	AudioOnly            bool
+	AlwaysSplit          bool
+	SplitLongerThan      float64
+	MinSplitSegment      float64
+}
+
+// ImageConfig contains configuration for image processing
+type ImageConfig struct {
+	TargetImageSize      int64
+	MinSavingsImage      float64
+	TranscodingImageTime float64
+	MaxImageWidth        int
+	MaxImageHeight       int
+}
+
+// TextConfig contains configuration for text/ebook processing
+type TextConfig struct {
+	SkipOCR  bool
+	ForceOCR bool
+	RedoOCR  bool
+	NoOCR    bool
+}
+
+// CommonConfig contains general configuration for all processors
+type CommonConfig struct {
 	SourceAudioBitrate int64
 	SourceVideoBitrate int64
-	TargetAudioBitrate int64
-	TargetVideoBitrate int64
-	TargetImageSize    int64
+	DeleteUnplayable   bool
+	DeleteLarger       bool
+	MoveBroken         string
+	Valid              bool
+	Invalid            bool
+	ForceShrink        bool
+	VerboseFFmpeg      bool
+	IncludeTimecode    bool
+	MaxWidthBuffer     float64
+	MaxHeightBuffer    float64
+}
 
-	// Savings thresholds (as decimals, e.g., 0.05 for 5%)
-	MinSavingsVideo float64
-	MinSavingsAudio float64
-	MinSavingsImage float64
-
-	// Processing rates
-	TranscodingVideoRate float64
-	TranscodingAudioRate float64
-	TranscodingImageTime float64
-
-	// FFmpeg options
-	Preset          string
-	CRF             string
-	MaxVideoWidth   int
-	MaxVideoHeight  int
-	MaxImageWidth   int
-	MaxImageHeight  int
-	Keyframes       bool
-	AudioOnly       bool
-	VideoOnly       bool
-	AlwaysSplit     bool
-	SplitLongerThan float64
-	MinSplitSegment float64
-	MaxWidthBuffer  float64
-	MaxHeightBuffer float64
-	NoPreserveVideo bool
-	IncludeTimecode bool
-	VerboseFFmpeg   bool
-	SkipOCR         bool
-	ForceOCR        bool
-	RedoOCR         bool
-	NoOCR           bool
-
-	// General
-	DeleteUnplayable bool
-	DeleteLarger     bool
-	MoveBroken       string
-	Valid            bool
-	Invalid          bool
-	ForceShrink      bool
+// ProcessorConfig contains comprehensive configuration for all media processing
+type ProcessorConfig struct {
+	Video  VideoConfig
+	Audio  AudioConfig
+	Image  ImageConfig
+	Text   TextConfig
+	Common CommonConfig
 }
 
 // BaseProcessor provides common functionality for all processors
@@ -134,7 +150,7 @@ func (r *ProcessorRegistry) GetAllProcessors() []MediaProcessor {
 
 // ShouldShrink determines if a file should be shrinked based on savings threshold
 func ShouldShrink(m *ShrinkMedia, futureSize int64, cfg *ProcessorConfig) bool {
-	if cfg.ForceShrink {
+	if cfg.Common.ForceShrink {
 		return true
 	}
 	shouldShrinkBuffer := int64(float64(futureSize) * getMinSavings(m, cfg))
@@ -144,11 +160,11 @@ func ShouldShrink(m *ShrinkMedia, futureSize int64, cfg *ProcessorConfig) bool {
 func getMinSavings(m *ShrinkMedia, cfg *ProcessorConfig) float64 {
 	switch strings.ToLower(m.Category) {
 	case "video":
-		return cfg.MinSavingsVideo
+		return cfg.Video.MinSavingsVideo
 	case "audio":
-		return cfg.MinSavingsAudio
+		return cfg.Audio.MinSavingsAudio
 	case "image", "text":
-		return cfg.MinSavingsImage
+		return cfg.Image.MinSavingsImage
 	default:
 		return 0.05 // Default 5%
 	}

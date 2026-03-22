@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/chapmanjacobd/shrink/internal/db"
 	"github.com/chapmanjacobd/shrink/internal/utils"
 )
 
@@ -231,10 +232,10 @@ func (c *ShrinkCmd) processSingle(m ShrinkMedia, registry *ProcessorRegistry,
 	// Handle broken archives - move to --move-broken without processing
 	if m.IsBroken {
 		slog.Info("Broken archive detected, moving to broken directory", "path", m.Path)
-		if cfg.MoveBroken != "" {
+		if cfg.Common.MoveBroken != "" {
 			c.moveToBroken(m.Path, m.PartFiles)
 		}
-		c.markDeleted(m.Path)
+		db.MarkDeleted(c.sqlDBs, m.Path)
 		metrics.RecordFailure(m.Category)
 		return ProcessResult{SourcePath: m.Path, Success: false}
 	}
@@ -245,7 +246,7 @@ func (c *ShrinkCmd) processSingle(m ShrinkMedia, registry *ProcessorRegistry,
 		// File doesn't exist - mark as skipped (deleted)
 		slog.Warn("File not found, marking as skipped", "path", m.Path)
 		metrics.RecordSkipped(m.Category)
-		c.markDeleted(m.Path)
+		db.MarkDeleted(c.sqlDBs, m.Path)
 		return ProcessResult{SourcePath: m.Path, Error: err}
 	} else {
 		originalAtime = stat.ModTime()
@@ -271,7 +272,7 @@ func (c *ShrinkCmd) processSingle(m ShrinkMedia, registry *ProcessorRegistry,
 	if result.Error != nil {
 		slog.Error("Processing failed", "path", m.Path, "error", result.Error)
 		metrics.RecordFailure(m.Category)
-		if cfg.MoveBroken != "" {
+		if cfg.Common.MoveBroken != "" {
 			c.moveToBroken(m.Path, result.PartFiles)
 		}
 		return result
@@ -279,14 +280,21 @@ func (c *ShrinkCmd) processSingle(m ShrinkMedia, registry *ProcessorRegistry,
 
 	if !result.Success {
 		// Processing succeeded but produced no valid output (e.g. invalid file)
-		if cfg.DeleteUnplayable {
-			c.markDeleted(m.Path)
+		if cfg.Common.DeleteUnplayable {
+			db.MarkDeleted(c.sqlDBs, m.Path)
 			os.Remove(m.Path)
 		}
 		metrics.RecordFailure(m.Category)
 		return result
 	}
 
+	c.handlePostProcessing(m, result, cfg, metrics, originalAtime, originalMtime)
+	return result
+}
+
+func (c *ShrinkCmd) handlePostProcessing(m ShrinkMedia, result ProcessResult,
+	cfg *ProcessorConfig, metrics *ShrinkMetrics, originalAtime, originalMtime time.Time,
+) {
 	// 1. Calculate new size and compare with original
 	var totalNewSize int64
 	for _, out := range result.Outputs {
@@ -294,7 +302,7 @@ func (c *ShrinkCmd) processSingle(m ShrinkMedia, registry *ProcessorRegistry,
 	}
 
 	keepNewFiles := true
-	if cfg.DeleteLarger && !cfg.ForceShrink && totalNewSize > m.Size {
+	if cfg.Common.DeleteLarger && !cfg.Common.ForceShrink && totalNewSize > m.Size {
 		keepNewFiles = false
 	}
 
@@ -309,7 +317,7 @@ func (c *ShrinkCmd) processSingle(m ShrinkMedia, registry *ProcessorRegistry,
 				}
 			}
 			if !foundInOutputs {
-				c.markDeleted(m.Path)
+				db.MarkDeleted(c.sqlDBs, m.Path)
 				os.Remove(m.Path)
 			}
 		}
@@ -320,11 +328,11 @@ func (c *ShrinkCmd) processSingle(m ShrinkMedia, registry *ProcessorRegistry,
 			// to preserve metadata like play_count, etc.
 			// Except for archives, where we want to keep the archive record as deleted.
 			if len(result.Outputs) == 1 && out.Path != m.Path && m.Category != "Archived" {
-				c.updateDatabase(m.Path, out.Path, out.Size, m.Duration)
+				db.UpdateMedia(c.sqlDBs, m.Path, out.Path, out.Size, m.Duration)
 			} else if out.Path != m.Path {
-				c.addDatabaseEntry(out.Path, out.Size, m.Duration)
+				db.AddMediaEntry(c.sqlDBs, out.Path, out.Size, m.Duration)
 			} else {
-				c.markShrinked(out.Path)
+				db.MarkShrinked(c.sqlDBs, out.Path)
 			}
 
 			if i == 0 && !originalAtime.IsZero() {
@@ -346,11 +354,9 @@ func (c *ShrinkCmd) processSingle(m ShrinkMedia, registry *ProcessorRegistry,
 				os.RemoveAll(out.Path) // RemoveAll because it might be a directory (TextProcessor/ArchiveProcessor)
 			}
 		}
-		c.markShrinked(m.Path)
+		db.MarkShrinked(c.sqlDBs, m.Path)
 		metrics.RecordSuccess(m.Category, m.Size, m.Size, m.ProcessingTime, int64(m.Duration))
 	}
-
-	return result
 }
 
 func (c *ShrinkCmd) getTimeout(m ShrinkMedia) time.Duration {

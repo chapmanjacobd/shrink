@@ -30,7 +30,7 @@ func (p *TextProcessor) CanProcess(m *ShrinkMedia) bool {
 
 func (p *TextProcessor) EstimateSize(m *ShrinkMedia, cfg *ProcessorConfig) (int64, int) {
 	// Rough estimate for ebooks
-	return cfg.TargetImageSize * 50, int(cfg.TranscodingImageTime * 12)
+	return cfg.Image.TargetImageSize * 50, int(cfg.Image.TranscodingImageTime * 12)
 }
 
 func (p *TextProcessor) Process(ctx context.Context, m *ShrinkMedia, cfg *ProcessorConfig) ProcessResult {
@@ -119,10 +119,10 @@ func (p *TextProcessor) runOCR(path string, cfg *ProcessorConfig) string {
 	// Auto-detect OCR capabilities if no explicit flag is set
 	// Matches Python behavior: if tesseract+gs available, default to --skip-text
 	// Otherwise, skip OCR entirely
-	useSkipText := cfg.SkipOCR
-	useForceOCR := cfg.ForceOCR
-	useRedoOCR := cfg.RedoOCR
-	skipOCR := cfg.NoOCR
+	useSkipText := cfg.Text.SkipOCR
+	useForceOCR := cfg.Text.ForceOCR
+	useRedoOCR := cfg.Text.RedoOCR
+	skipOCR := cfg.Text.NoOCR
 
 	if !useSkipText && !useForceOCR && !useRedoOCR && !skipOCR {
 		// No explicit flag set - auto-detect
@@ -298,7 +298,7 @@ func (p *TextProcessor) processEbookImages(ctx context.Context, images []string,
 		outputPath := strings.TrimSuffix(img, ext) + ".avif"
 		args := []string{
 			img,
-			"-resize", fmt.Sprintf("%dx%d>", cfg.MaxImageWidth, cfg.MaxImageHeight),
+			"-resize", fmt.Sprintf("%dx%d>", cfg.Image.MaxImageWidth, cfg.Image.MaxImageHeight),
 			outputPath,
 		}
 

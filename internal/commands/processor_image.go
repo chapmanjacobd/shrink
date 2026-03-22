@@ -31,7 +31,7 @@ func (p *ImageProcessor) CanProcess(m *ShrinkMedia) bool {
 }
 
 func (p *ImageProcessor) EstimateSize(m *ShrinkMedia, cfg *ProcessorConfig) (int64, int) {
-	return cfg.TargetImageSize, int(cfg.TranscodingImageTime)
+	return cfg.Image.TargetImageSize, int(cfg.Image.TranscodingImageTime)
 }
 
 func (p *ImageProcessor) Process(ctx context.Context, m *ShrinkMedia, cfg *ProcessorConfig) ProcessResult {
@@ -43,13 +43,36 @@ func (p *ImageProcessor) processImage(ctx context.Context, m *ShrinkMedia, cfg *
 		return ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("ImageMagick not installed")}
 	}
 
+	// Get dimensions if missing
+	if m.Width == 0 || m.Height == 0 {
+		width, height, err := getImageDimensions(m.Path)
+		if err == nil {
+			m.Width = width
+			m.Height = height
+		}
+	}
+
 	outputPath := strings.TrimSuffix(m.Path, filepath.Ext(m.Path)) + ".avif"
 
-	args := []string{
-		m.Path,
-		"-resize", fmt.Sprintf("%dx%d>", cfg.MaxImageWidth, cfg.MaxImageHeight),
-		outputPath,
+	args := []string{m.Path}
+
+	// Only resize if image exceeds limit + buffer
+	shouldResize := false
+	if m.Width > 0 && m.Height > 0 {
+		if float64(m.Width) > float64(cfg.Image.MaxImageWidth)*(1+cfg.Common.MaxWidthBuffer) ||
+			float64(m.Height) > float64(cfg.Image.MaxImageHeight)*(1+cfg.Common.MaxHeightBuffer) {
+			shouldResize = true
+		}
+	} else {
+		// If dimensions unknown, default to ImageMagick's internal shrink-only check
+		shouldResize = true
 	}
+
+	if shouldResize {
+		args = append(args, "-resize", fmt.Sprintf("%dx%d>", cfg.Image.MaxImageWidth, cfg.Image.MaxImageHeight))
+	}
+
+	args = append(args, outputPath)
 
 	cmd := exec.CommandContext(ctx, "magick", args...)
 	output, err := cmd.CombinedOutput()
@@ -99,9 +122,9 @@ func (p *ImageProcessor) processImage(ctx context.Context, m *ShrinkMedia, cfg *
 			os.Remove(outputPath)
 			return ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("AVIF file has invalid dimensions: %dx%d", width, height)}
 		}
-		if width > cfg.MaxImageWidth || height > cfg.MaxImageHeight {
+		if width > cfg.Image.MaxImageWidth || height > cfg.Image.MaxImageHeight {
 			os.Remove(outputPath)
-			return ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("AVIF file exceeds max dimensions: %dx%d > %dx%d", width, height, cfg.MaxImageWidth, cfg.MaxImageHeight)}
+			return ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("AVIF file exceeds max dimensions: %dx%d > %dx%d", width, height, cfg.Image.MaxImageWidth, cfg.Image.MaxImageHeight)}
 		}
 	}
 

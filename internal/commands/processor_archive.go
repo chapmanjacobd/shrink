@@ -243,9 +243,9 @@ func (p *ArchiveProcessor) EstimateSizeForArchive(m *ShrinkMedia, cfg *Processor
 			slog.Info("Found nested archive", "path", content.Path, "compressedSize", content.CompressedSize)
 			isProcessable = true
 			// Estimate based on compressed size (assume video content for simplicity)
-			duration := float64(content.CompressedSize) / float64(cfg.SourceVideoBitrate) * 8
-			futureSize = int64(duration * float64(cfg.TargetVideoBitrate) / 8)
-			processingTime = int(math.Ceil(duration / cfg.TranscodingVideoRate))
+			duration := float64(content.CompressedSize) / float64(cfg.Common.SourceVideoBitrate) * 8
+			futureSize = int64(duration * float64(cfg.Video.TargetVideoBitrate) / 8)
+			processingTime = int(math.Ceil(duration / cfg.Video.TranscodingVideoRate))
 			totalArchiveSize += content.Size
 			slog.Info("Nested archive estimation", "path", content.Path, "futureSize", futureSize, "archiveFileSize", content.Size)
 		}
@@ -256,35 +256,35 @@ func (p *ArchiveProcessor) EstimateSizeForArchive(m *ShrinkMedia, cfg *Processor
 			duration := content.Duration
 			if duration <= 0 {
 				// Estimate from compressed size (smaller = lower quality source)
-				duration = float64(content.CompressedSize) / float64(cfg.SourceVideoBitrate) * 8
+				duration = float64(content.CompressedSize) / float64(cfg.Common.SourceVideoBitrate) * 8
 			}
-			futureSize = int64(duration * float64(cfg.TargetVideoBitrate) / 8)
-			processingTime = int(math.Ceil(duration / cfg.TranscodingVideoRate))
+			futureSize = int64(duration * float64(cfg.Video.TargetVideoBitrate) / 8)
+			processingTime = int(math.Ceil(duration / cfg.Video.TranscodingVideoRate))
 		}
 		// Audio files
 		if content.MediaType == "audio" || (ext != "" && utils.AudioExtensionMap[ext]) {
 			isProcessable = true
 			duration := content.Duration
 			if duration <= 0 {
-				duration = float64(content.CompressedSize) / float64(cfg.SourceAudioBitrate) * 8
+				duration = float64(content.CompressedSize) / float64(cfg.Common.SourceAudioBitrate) * 8
 			}
-			futureSize = int64(duration * float64(cfg.TargetAudioBitrate) / 8)
-			processingTime = int(math.Ceil(duration / cfg.TranscodingAudioRate))
+			futureSize = int64(duration * float64(cfg.Audio.TargetAudioBitrate) / 8)
+			processingTime = int(math.Ceil(duration / cfg.Audio.TranscodingAudioRate))
 		}
 		// Image files
 		if content.MediaType == "image" || (ext != "" && utils.ImageExtensionMap[ext]) {
 			if ext != ".avif" { // Skip existing AVIF
 				isProcessable = true
-				futureSize = cfg.TargetImageSize
-				processingTime = int(cfg.TranscodingImageTime)
+				futureSize = cfg.Image.TargetImageSize
+				processingTime = int(cfg.Image.TranscodingImageTime)
 			}
 		}
 		// Text/Ebook files
 		if content.MediaType == "text" || (ext != "" && utils.TextExtensionMap[ext]) {
 			isProcessable = true
 			// Rough estimate for ebooks (compressed text is small)
-			futureSize = cfg.TargetImageSize * 50
-			processingTime = int(cfg.TranscodingImageTime * 12)
+			futureSize = cfg.Image.TargetImageSize * 50
+			processingTime = int(cfg.Image.TranscodingImageTime * 12)
 		}
 
 		if isProcessable {

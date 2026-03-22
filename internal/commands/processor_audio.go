@@ -30,11 +30,11 @@ func (p *AudioProcessor) CanProcess(m *ShrinkMedia) bool {
 func (p *AudioProcessor) EstimateSize(m *ShrinkMedia, cfg *ProcessorConfig) (int64, int) {
 	duration := m.Duration
 	if duration <= 0 {
-		duration = float64(m.Size) / float64(cfg.SourceAudioBitrate) * 8
+		duration = float64(m.Size) / float64(cfg.Common.SourceAudioBitrate) * 8
 	}
 
-	futureSize := int64(duration * float64(cfg.TargetAudioBitrate) / 8)
-	processingTime := int(math.Ceil(duration / cfg.TranscodingAudioRate))
+	futureSize := int64(duration * float64(cfg.Audio.TargetAudioBitrate) / 8)
+	processingTime := int(math.Ceil(duration / cfg.Audio.TranscodingAudioRate))
 
 	return futureSize, processingTime
 }

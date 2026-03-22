@@ -208,44 +208,54 @@ func (c *ShrinkCmd) Run(ctx *kong.Context) error {
 
 func (c *ShrinkCmd) buildProcessorConfig() *ProcessorConfig {
 	return &ProcessorConfig{
-		SourceAudioBitrate:   utils.ParseBitrate(c.SourceAudioBitrate),
-		SourceVideoBitrate:   utils.ParseBitrate(c.SourceVideoBitrate),
-		TargetAudioBitrate:   utils.ParseBitrate(c.TargetAudioBitrate),
-		TargetVideoBitrate:   utils.ParseBitrate(c.TargetVideoBitrate),
-		TargetImageSize:      utils.ParseSize(c.TargetImageSize),
-		MinSavingsVideo:      utils.ParsePercentOrBytes(c.MinSavingsVideo),
-		MinSavingsAudio:      utils.ParsePercentOrBytes(c.MinSavingsAudio),
-		MinSavingsImage:      utils.ParsePercentOrBytes(c.MinSavingsImage),
-		TranscodingVideoRate: c.TranscodingVideoRate,
-		TranscodingAudioRate: c.TranscodingAudioRate,
-		TranscodingImageTime: c.TranscodingImageTime,
-		Preset:               c.Preset,
-		CRF:                  c.CRF,
-		MaxVideoWidth:        c.MaxVideoWidth,
-		MaxVideoHeight:       c.MaxVideoHeight,
-		MaxImageWidth:        c.MaxImageWidth,
-		MaxImageHeight:       c.MaxImageHeight,
-		Keyframes:            c.Keyframes,
-		AudioOnly:            c.AudioOnly,
-		VideoOnly:            c.VideoOnly,
-		AlwaysSplit:          c.AlwaysSplit,
-		SplitLongerThan:      c.SplitLongerThan,
-		MinSplitSegment:      c.MinSplitSegment,
-		MaxWidthBuffer:       c.MaxWidthBuffer,
-		MaxHeightBuffer:      c.MaxHeightBuffer,
-		NoPreserveVideo:      c.NoPreserveVideo,
-		IncludeTimecode:      c.IncludeTimecode,
-		VerboseFFmpeg:        c.VerboseFFmpeg,
-		SkipOCR:              c.SkipOCR,
-		ForceOCR:             c.ForceOCR,
-		RedoOCR:              c.RedoOCR,
-		NoOCR:                c.NoOCR,
-		DeleteUnplayable:     c.DeleteUnplayable,
-		DeleteLarger:         c.DeleteLarger,
-		MoveBroken:           c.MoveBroken,
-		Valid:                c.Valid,
-		Invalid:              c.Invalid,
-		ForceShrink:          c.ForceShrink,
+		Common: CommonConfig{
+			SourceAudioBitrate: utils.ParseBitrate(c.SourceAudioBitrate),
+			SourceVideoBitrate: utils.ParseBitrate(c.SourceVideoBitrate),
+			DeleteUnplayable:   c.DeleteUnplayable,
+			DeleteLarger:       c.DeleteLarger,
+			MoveBroken:         c.MoveBroken,
+			Valid:              c.Valid,
+			Invalid:            c.Invalid,
+			ForceShrink:        c.ForceShrink,
+			VerboseFFmpeg:      c.VerboseFFmpeg,
+			IncludeTimecode:    c.IncludeTimecode,
+			MaxWidthBuffer:     c.MaxWidthBuffer,
+			MaxHeightBuffer:    c.MaxHeightBuffer,
+		},
+		Video: VideoConfig{
+			TargetVideoBitrate:   utils.ParseBitrate(c.TargetVideoBitrate),
+			MinSavingsVideo:      utils.ParsePercentOrBytes(c.MinSavingsVideo),
+			TranscodingVideoRate: c.TranscodingVideoRate,
+			Preset:               c.Preset,
+			CRF:                  c.CRF,
+			MaxVideoWidth:        c.MaxVideoWidth,
+			MaxVideoHeight:       c.MaxVideoHeight,
+			VideoOnly:            c.VideoOnly,
+			Keyframes:            c.Keyframes,
+			NoPreserveVideo:      c.NoPreserveVideo,
+		},
+		Audio: AudioConfig{
+			TargetAudioBitrate:   utils.ParseBitrate(c.TargetAudioBitrate),
+			MinSavingsAudio:      utils.ParsePercentOrBytes(c.MinSavingsAudio),
+			TranscodingAudioRate: c.TranscodingAudioRate,
+			AudioOnly:            c.AudioOnly,
+			AlwaysSplit:          c.AlwaysSplit,
+			SplitLongerThan:      c.SplitLongerThan,
+			MinSplitSegment:      c.MinSplitSegment,
+		},
+		Image: ImageConfig{
+			TargetImageSize:      utils.ParseSize(c.TargetImageSize),
+			MinSavingsImage:      utils.ParsePercentOrBytes(c.MinSavingsImage),
+			TranscodingImageTime: c.TranscodingImageTime,
+			MaxImageWidth:        c.MaxImageWidth,
+			MaxImageHeight:       c.MaxImageHeight,
+		},
+		Text: TextConfig{
+			SkipOCR:  c.SkipOCR,
+			ForceOCR: c.ForceOCR,
+			RedoOCR:  c.RedoOCR,
+			NoOCR:    c.NoOCR,
+		},
 	}
 }
 
@@ -342,10 +352,6 @@ func (c *ShrinkCmd) filterByTools(media []ShrinkMedia, tools InstalledTools) []S
 	return filtered
 }
 
-func (c *ShrinkCmd) markDeleted(path string) {
-	db.MarkDeleted(c.sqlDBs, path)
-}
-
 func (c *ShrinkCmd) moveToBroken(path string, partFiles []string) {
 	if c.MoveBroken == "" || path == "" {
 		return
@@ -381,19 +387,6 @@ func (c *ShrinkCmd) moveToBroken(path string, partFiles []string) {
 			}
 		}
 	}
-}
-
-func (c *ShrinkCmd) updateDatabase(oldPath, newPath string, newSize int64, duration float64) {
-	db.UpdateMedia(c.sqlDBs, oldPath, newPath, newSize, duration)
-}
-
-// addDatabaseEntry adds a new file entry to the database (for split files or archive contents)
-func (c *ShrinkCmd) addDatabaseEntry(path string, size int64, duration float64) {
-	db.AddMediaEntry(c.sqlDBs, path, size, duration)
-}
-
-func (c *ShrinkCmd) markShrinked(path string) {
-	db.MarkShrinked(c.sqlDBs, path)
 }
 
 func (c *ShrinkCmd) moveTo(path string) {

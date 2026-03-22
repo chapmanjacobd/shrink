@@ -30,11 +30,11 @@ func (p *VideoProcessor) CanProcess(m *ShrinkMedia) bool {
 func (p *VideoProcessor) EstimateSize(m *ShrinkMedia, cfg *ProcessorConfig) (int64, int) {
 	duration := m.Duration
 	if duration <= 0 {
-		duration = float64(m.Size) / float64(cfg.SourceVideoBitrate) * 8
+		duration = float64(m.Size) / float64(cfg.Common.SourceVideoBitrate) * 8
 	}
 
-	futureSize := int64(duration * float64(cfg.TargetVideoBitrate) / 8)
-	processingTime := int(math.Ceil(duration / cfg.TranscodingVideoRate))
+	futureSize := int64(duration * float64(cfg.Video.TargetVideoBitrate) / 8)
+	processingTime := int(math.Ceil(duration / cfg.Video.TranscodingVideoRate))
 
 	return futureSize, processingTime
 }

@@ -62,11 +62,11 @@ func (p *FFmpegProcessor) Process(ctx context.Context, m *ShrinkMedia, cfg *Proc
 	albumArtStream := getFirstStream(probe.AlbumArtStreams)
 
 	// Stream validation - skip files without expected streams
-	if videoStream == nil && cfg.VideoOnly {
+	if videoStream == nil && cfg.Video.VideoOnly {
 		return ProcessResult{SourcePath: m.Path, Success: true}
 	}
 
-	if audioStream == nil && cfg.AudioOnly {
+	if audioStream == nil && cfg.Audio.AudioOnly {
 		return ProcessResult{SourcePath: m.Path, Success: true}
 	}
 
@@ -82,7 +82,7 @@ func (p *FFmpegProcessor) Process(ctx context.Context, m *ShrinkMedia, cfg *Proc
 
 	// Determine output suffix
 	var outputSuffix string
-	if videoStream != nil && !cfg.AudioOnly {
+	if videoStream != nil && !cfg.Audio.AudioOnly {
 		outputSuffix = ".av1.mkv"
 	} else if audioStream != nil {
 		outputSuffix = ".mka"
@@ -124,7 +124,7 @@ func (p *FFmpegProcessor) Process(ctx context.Context, m *ShrinkMedia, cfg *Proc
 			slog.Error("FFmpeg error", "output", string(output), "path", m.Path)
 		}
 
-		if p.config.DeleteUnplayable {
+		if p.config.Common.DeleteUnplayable {
 			return ProcessResult{SourcePath: m.Path, Success: false, Error: err}
 		}
 		return ProcessResult{SourcePath: m.Path, Error: err}
@@ -140,7 +140,7 @@ func (p *FFmpegProcessor) buildFFmpegArgs(inputPath, outputPath string, probe *F
 ) []string {
 	// Build base command
 	logLevel := []string{"-hide_banner", "-loglevel", "warning"}
-	if p.config.VerboseFFmpeg {
+	if p.config.Common.VerboseFFmpeg {
 		logLevel = []string{"-v", "9", "-loglevel", "99"}
 	}
 
@@ -153,16 +153,16 @@ func (p *FFmpegProcessor) buildFFmpegArgs(inputPath, outputPath string, probe *F
 	)
 
 	// Video options
-	if videoStream != nil && !p.config.AudioOnly {
+	if videoStream != nil && !p.config.Audio.AudioOnly {
 		args = append(args, "-map", fmt.Sprintf("0:%d", videoStream.Index))
 
-		if p.config.Keyframes {
+		if p.config.Video.Keyframes {
 			args = append(args, "-c:v", "copy", "-bsf:v", "noise=drop=not(key)")
 		} else {
 			args = append(args,
 				"-c:v", "libsvtav1",
-				"-preset", p.config.Preset,
-				"-crf", p.config.CRF,
+				"-preset", p.config.Video.Preset,
+				"-crf", p.config.Video.CRF,
 				"-pix_fmt", "yuv420p10le",
 				"-svtav1-params", "tune=0:enable-overlays=1",
 			)
@@ -183,7 +183,7 @@ func (p *FFmpegProcessor) buildFFmpegArgs(inputPath, outputPath string, probe *F
 		args = append(args, p.buildAudioOptions(audioStream)...)
 
 		// Silence detection for splitting
-		isSplit := p.config.AlwaysSplit || (videoStream == nil && p.config.SplitLongerThan > 0 && probe.Duration > p.config.SplitLongerThan)
+		isSplit := p.config.Audio.AlwaysSplit || (videoStream == nil && p.config.Audio.SplitLongerThan > 0 && probe.Duration > p.config.Audio.SplitLongerThan)
 		if isSplit {
 			splits := p.detectSilence(inputPath)
 			if len(splits) > 0 {
@@ -200,7 +200,7 @@ func (p *FFmpegProcessor) buildFFmpegArgs(inputPath, outputPath string, probe *F
 	}
 
 	// Timecode streams
-	if p.config.IncludeTimecode {
+	if p.config.Common.IncludeTimecode {
 		args = append(args, "-map", "0:t")
 	}
 
@@ -334,33 +334,33 @@ func (p *FFmpegProcessor) buildScaleFilter(stereoMode string, width, height int)
 	switch stereoMode {
 	case "sbs":
 		perEyeWidth := width / 2
-		targetEyeWidth := p.config.MaxVideoWidth
+		targetEyeWidth := p.config.Video.MaxVideoWidth
 		targetTotalWidth := targetEyeWidth * 2
 
-		if float64(perEyeWidth) > float64(targetEyeWidth)*(1+p.config.MaxWidthBuffer) {
+		if float64(perEyeWidth) > float64(targetEyeWidth)*(1+p.config.Common.MaxWidthBuffer) {
 			filters = append(filters, fmt.Sprintf("scale=%d:-2", targetTotalWidth))
-		} else if float64(height) > float64(p.config.MaxVideoHeight)*(1+p.config.MaxHeightBuffer) {
-			filters = append(filters, fmt.Sprintf("scale=-2:%d", p.config.MaxVideoHeight))
+		} else if float64(height) > float64(p.config.Video.MaxVideoHeight)*(1+p.config.Common.MaxHeightBuffer) {
+			filters = append(filters, fmt.Sprintf("scale=-2:%d", p.config.Video.MaxVideoHeight))
 		} else {
 			filters = append(filters, "pad=trunc((iw+1)/2)*2:trunc((ih+1)/2)*2")
 		}
 	case "ou":
 		perEyeHeight := height / 2
-		targetEyeHeight := p.config.MaxVideoHeight
+		targetEyeHeight := p.config.Video.MaxVideoHeight
 		targetTotalHeight := targetEyeHeight * 2
 
-		if float64(perEyeHeight) > float64(targetEyeHeight)*(1+p.config.MaxHeightBuffer) {
+		if float64(perEyeHeight) > float64(targetEyeHeight)*(1+p.config.Common.MaxHeightBuffer) {
 			filters = append(filters, fmt.Sprintf("scale=-2:%d", targetTotalHeight))
-		} else if float64(width) > float64(p.config.MaxVideoWidth)*(1+p.config.MaxWidthBuffer) {
-			filters = append(filters, fmt.Sprintf("scale=%d:-2", p.config.MaxVideoWidth))
+		} else if float64(width) > float64(p.config.Video.MaxVideoWidth)*(1+p.config.Common.MaxWidthBuffer) {
+			filters = append(filters, fmt.Sprintf("scale=%d:-2", p.config.Video.MaxVideoWidth))
 		} else {
 			filters = append(filters, "pad=trunc((iw+1)/2)*2:trunc((ih+1)/2)*2")
 		}
 	default:
-		if float64(width) > float64(p.config.MaxVideoWidth)*(1+p.config.MaxWidthBuffer) {
-			filters = append(filters, fmt.Sprintf("scale=%d:-2", p.config.MaxVideoWidth))
-		} else if float64(height) > float64(p.config.MaxVideoHeight)*(1+p.config.MaxHeightBuffer) {
-			filters = append(filters, fmt.Sprintf("scale=-2:%d", p.config.MaxVideoHeight))
+		if float64(width) > float64(p.config.Video.MaxVideoWidth)*(1+p.config.Common.MaxWidthBuffer) {
+			filters = append(filters, fmt.Sprintf("scale=%d:-2", p.config.Video.MaxVideoWidth))
+		} else if float64(height) > float64(p.config.Video.MaxVideoHeight)*(1+p.config.Common.MaxHeightBuffer) {
+			filters = append(filters, fmt.Sprintf("scale=-2:%d", p.config.Video.MaxVideoHeight))
 		} else {
 			filters = append(filters, "pad=trunc((iw+1)/2)*2:trunc((ih+1)/2)*2")
 		}
@@ -390,7 +390,7 @@ func (p *FFmpegProcessor) detectSilence(path string) []string {
 			parts := strings.Split(line, "=")
 			if len(parts) > 1 {
 				t, _ := strconv.ParseFloat(parts[1], 64)
-				if t-prev >= p.config.MinSplitSegment {
+				if t-prev >= p.config.Audio.MinSplitSegment {
 					splits = append(splits, fmt.Sprintf("%.2f", t))
 					prev = t
 				}
