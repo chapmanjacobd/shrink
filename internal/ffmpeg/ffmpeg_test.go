@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -361,11 +362,15 @@ func TestBuildVideoFilters(t *testing.T) {
 func TestBuildAudioOptions(t *testing.T) {
 	cfg := &models.ProcessorConfig{}
 	p := NewFFmpegProcessor(cfg)
-	stream := &FFProbeStream{CodecName: "aac", Channels: 2}
+	stream := &FFProbeStream{CodecName: "aac", Channels: 2, Index: 0}
 
 	opts := p.buildAudioOptions(stream)
 	if len(opts) == 0 {
 		t.Errorf("expected audio options")
+	}
+	foundCodec := slices.Contains(opts, "-c:a:0")
+	if !foundCodec {
+		t.Errorf("expected -c:a:0 in audio options, got %v", opts)
 	}
 }
 
@@ -432,11 +437,11 @@ func TestBuildSubtitleOptions_MKVTextSubtitles_Copy(t *testing.T) {
 		codec  string
 		expect []string
 	}{
-		{"subrip", []string{"-map", "0:0", "-c:s", "copy"}},
-		{"srt", []string{"-map", "0:0", "-c:s", "copy"}},
-		{"ass", []string{"-map", "0:0", "-c:s", "copy"}},
-		{"ssa", []string{"-map", "0:0", "-c:s", "copy"}},
-		{"webvtt", []string{"-map", "0:0", "-c:s", "copy"}},
+		{"subrip", []string{"-map", "0:0", "-c:s:0", "copy"}},
+		{"srt", []string{"-map", "0:0", "-c:s:0", "copy"}},
+		{"ass", []string{"-map", "0:0", "-c:s:0", "copy"}},
+		{"ssa", []string{"-map", "0:0", "-c:s:0", "copy"}},
+		{"webvtt", []string{"-map", "0:0", "-c:s:0", "copy"}},
 	}
 
 	for _, tc := range testCases {
@@ -463,10 +468,10 @@ func TestBuildSubtitleOptions_MKVImageSubtitles_Copy(t *testing.T) {
 		codec  string
 		expect []string
 	}{
-		{"pgssub", []string{"-map", "0:0", "-c:s", "copy"}},
-		{"hdmv_pgs_subtitle", []string{"-map", "0:0", "-c:s", "copy"}},
-		{"dvd_subtitle", []string{"-map", "0:0", "-c:s", "copy"}},
-		{"vobsub", []string{"-map", "0:0", "-c:s", "copy"}},
+		{"pgssub", []string{"-map", "0:0", "-c:s:0", "copy"}},
+		{"hdmv_pgs_subtitle", []string{"-map", "0:0", "-c:s:0", "copy"}},
+		{"dvd_subtitle", []string{"-map", "0:0", "-c:s:0", "copy"}},
+		{"vobsub", []string{"-map", "0:0", "-c:s:0", "copy"}},
 	}
 
 	for _, tc := range testCases {
@@ -494,25 +499,25 @@ func TestBuildSubtitleOptions_TextSubtitles_ConvertToSRT(t *testing.T) {
 		codec  string
 		expect []string
 	}{
-		{"mov_text", []string{"-map", "0:0", "-c:s", "srt"}},
-		{"text", []string{"-map", "0:0", "-c:s", "srt"}},
-		{"utf8", []string{"-map", "0:0", "-c:s", "srt"}},
-		{"arib_caption", []string{"-map", "0:0", "-c:s", "srt"}},
-		{"libaribcaption", []string{"-map", "0:0", "-c:s", "srt"}},
-		{"libaribb24", []string{"-map", "0:0", "-c:s", "srt"}},
-		{"libzvbi_teletextdec", []string{"-map", "0:0", "-c:s", "srt"}},
-		{"dvb_teletext", []string{"-map", "0:0", "-c:s", "srt"}},
-		{"cc_dec", []string{"-map", "0:0", "-c:s", "srt"}},
-		{"jacosub", []string{"-map", "0:0", "-c:s", "srt"}},
-		{"microdvd", []string{"-map", "0:0", "-c:s", "srt"}},
-		{"mpl2", []string{"-map", "0:0", "-c:s", "srt"}},
-		{"pjs", []string{"-map", "0:0", "-c:s", "srt"}},
-		{"realtext", []string{"-map", "0:0", "-c:s", "srt"}},
-		{"sami", []string{"-map", "0:0", "-c:s", "srt"}},
-		{"stl", []string{"-map", "0:0", "-c:s", "srt"}},
-		{"subviewer", []string{"-map", "0:0", "-c:s", "srt"}},
-		{"subviewer1", []string{"-map", "0:0", "-c:s", "srt"}},
-		{"vplayer", []string{"-map", "0:0", "-c:s", "srt"}},
+		{"mov_text", []string{"-map", "0:0", "-c:s:0", "srt"}},
+		{"text", []string{"-map", "0:0", "-c:s:0", "srt"}},
+		{"utf8", []string{"-map", "0:0", "-c:s:0", "srt"}},
+		{"arib_caption", []string{"-map", "0:0", "-c:s:0", "srt"}},
+		{"libaribcaption", []string{"-map", "0:0", "-c:s:0", "srt"}},
+		{"libaribb24", []string{"-map", "0:0", "-c:s:0", "srt"}},
+		{"libzvbi_teletextdec", []string{"-map", "0:0", "-c:s:0", "srt"}},
+		{"dvb_teletext", []string{"-map", "0:0", "-c:s:0", "srt"}},
+		{"cc_dec", []string{"-map", "0:0", "-c:s:0", "srt"}},
+		{"jacosub", []string{"-map", "0:0", "-c:s:0", "srt"}},
+		{"microdvd", []string{"-map", "0:0", "-c:s:0", "srt"}},
+		{"mpl2", []string{"-map", "0:0", "-c:s:0", "srt"}},
+		{"pjs", []string{"-map", "0:0", "-c:s:0", "srt"}},
+		{"realtext", []string{"-map", "0:0", "-c:s:0", "srt"}},
+		{"sami", []string{"-map", "0:0", "-c:s:0", "srt"}},
+		{"stl", []string{"-map", "0:0", "-c:s:0", "srt"}},
+		{"subviewer", []string{"-map", "0:0", "-c:s:0", "srt"}},
+		{"subviewer1", []string{"-map", "0:0", "-c:s:0", "srt"}},
+		{"vplayer", []string{"-map", "0:0", "-c:s:0", "srt"}},
 	}
 
 	for _, tc := range testCases {
@@ -540,10 +545,10 @@ func TestBuildSubtitleOptions_ImageSubtitles_ConvertToPGS(t *testing.T) {
 		codec  string
 		expect []string
 	}{
-		{"dvdsub", []string{"-map", "0:0", "-c:s", "pgssub"}},
-		{"xsub", []string{"-map", "0:0", "-c:s", "pgssub"}},
-		{"dvb_subtitle", []string{"-map", "0:0", "-c:s", "pgssub"}},
-		{"dvbsub", []string{"-map", "0:0", "-c:s", "pgssub"}},
+		{"dvdsub", []string{"-map", "0:0", "-c:s:0", "pgssub"}},
+		{"xsub", []string{"-map", "0:0", "-c:s:0", "pgssub"}},
+		{"dvb_subtitle", []string{"-map", "0:0", "-c:s:0", "pgssub"}},
+		{"dvbsub", []string{"-map", "0:0", "-c:s:0", "pgssub"}},
 	}
 
 	for _, tc := range testCases {
@@ -603,9 +608,9 @@ func TestBuildSubtitleOptions_MultipleStreams(t *testing.T) {
 		t.Errorf("expected %d args for 5 streams, got %d", expectedArgs, len(opts))
 	}
 
-	// Verify structure: each stream should have -map, index, -c:s, codec
+	// Verify structure: each stream should have -map, index, -c:s:X, codec
 	expectedMaps := []string{"0:0", "0:1", "0:2", "0:3", "0:4"}
-	expectedCodecs := []string{"copy", "copy", "copy", "srt", "pgssub"}
+	expectedCodecs := []string{"-c:s:0", "copy", "-c:s:1", "copy", "-c:s:2", "copy", "-c:s:3", "srt", "-c:s:4", "pgssub"}
 
 	for i := range expectedMaps {
 		baseIdx := i * 4
@@ -613,8 +618,10 @@ func TestBuildSubtitleOptions_MultipleStreams(t *testing.T) {
 			if opts[baseIdx] != "-map" || opts[baseIdx+1] != expectedMaps[i] {
 				t.Errorf("stream %d: expected -map %s, got -map %s", i, expectedMaps[i], opts[baseIdx+1])
 			}
-			if opts[baseIdx+2] != "-c:s" || opts[baseIdx+3] != expectedCodecs[i] {
-				t.Errorf("stream %d: expected -c:s %s, got -c:s %s", i, expectedCodecs[i], opts[baseIdx+3])
+			codecFlag := expectedCodecs[i*2]
+			codecVal := expectedCodecs[i*2+1]
+			if opts[baseIdx+2] != codecFlag || opts[baseIdx+3] != codecVal {
+				t.Errorf("stream %d: expected %s %s, got %s %s", i, codecFlag, codecVal, opts[baseIdx+2], opts[baseIdx+3])
 			}
 		}
 	}
@@ -649,8 +656,8 @@ func TestBuildSubtitleOptions_CaseInsensitive(t *testing.T) {
 				if opts[0] != "-map" || opts[1] != "0:0" {
 					t.Errorf("expected -map 0:0, got %v", opts[:2])
 				}
-				if opts[2] != "-c:s" {
-					t.Errorf("expected -c:s, got %s", opts[2])
+				if opts[2] != "-c:s:0" {
+					t.Errorf("expected -c:s:0, got %s", opts[2])
 				}
 			}
 		})

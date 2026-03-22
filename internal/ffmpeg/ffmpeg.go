@@ -157,24 +157,24 @@ func (p *FFmpegProcessor) buildFFmpegArgs(inputPath, outputPath string, probe *F
 		args = append(args, "-map", fmt.Sprintf("0:%d", videoStream.Index))
 
 		if p.config.Video.Keyframes {
-			args = append(args, "-c:v", "copy", "-bsf:v", "noise=drop=not(key)")
+			args = append(args, fmt.Sprintf("-c:v:%d", videoStream.Index), "copy", fmt.Sprintf("-bsf:v:%d", videoStream.Index), "noise=drop=not(key)")
 		} else {
 			args = append(args,
-				"-c:v", "libsvtav1",
-				"-preset", p.config.Video.Preset,
-				"-crf", p.config.Video.CRF,
-				"-pix_fmt", "yuv420p10le",
-				"-svtav1-params", "tune=0:enable-overlays=1",
+				fmt.Sprintf("-c:v:%d", videoStream.Index), "libsvtav1",
+				fmt.Sprintf("-preset:v:%d", videoStream.Index), p.config.Video.Preset,
+				fmt.Sprintf("-crf:v:%d", videoStream.Index), p.config.Video.CRF,
+				fmt.Sprintf("-pix_fmt:v:%d", videoStream.Index), "yuv420p10le",
+				fmt.Sprintf("-svtav1-params:v:%d", videoStream.Index), "tune=0:enable-overlays=1",
 			)
 
 			// Build video filters
 			filters := p.buildVideoFilters(probe, videoStream)
 			if len(filters) > 0 {
-				args = append(args, "-vf", strings.Join(filters, ","))
+				args = append(args, fmt.Sprintf("-vf:v:%d", videoStream.Index), strings.Join(filters, ","))
 			}
 		}
 	} else if albumArtStream != nil {
-		args = append(args, "-map", fmt.Sprintf("0:%d", albumArtStream.Index), "-c:v", "copy")
+		args = append(args, "-map", fmt.Sprintf("0:%d", albumArtStream.Index), fmt.Sprintf("-c:v:%d", albumArtStream.Index), "copy")
 	}
 
 	// Audio options
@@ -199,7 +199,7 @@ func (p *FFmpegProcessor) buildFFmpegArgs(inputPath, outputPath string, probe *F
 
 	// Timecode streams
 	if p.config.Common.IncludeTimecode {
-		args = append(args, "-map", "0:t")
+		args = append(args, "-map", "0:t", "-c:t", "copy")
 	}
 
 	// Metadata and global flags (matching Python order)
@@ -257,16 +257,16 @@ func (p *FFmpegProcessor) buildAudioOptions(stream *FFProbeStream) []string {
 
 	// Channel config
 	if channels == 1 {
-		args = append(args, "-ac", "1")
+		args = append(args, fmt.Sprintf("-ac:%d", stream.Index), "1")
 	} else {
-		args = append(args, "-ac", "2")
+		args = append(args, fmt.Sprintf("-ac:%d", stream.Index), "2")
 	}
 
 	// Bitrate config
 	if bitrate >= 256000 {
-		args = append(args, "-b:a", "128k")
+		args = append(args, fmt.Sprintf("-b:a:%d", stream.Index), "128k")
 	} else {
-		args = append(args, "-b:a", "64k", "-frame_duration", "40", "-apply_phase_inv", "0")
+		args = append(args, fmt.Sprintf("-b:a:%d", stream.Index), "64k", fmt.Sprintf("-frame_duration:%d", stream.Index), "40", fmt.Sprintf("-apply_phase_inv:%d", stream.Index), "0")
 	}
 
 	// Sample rate config
@@ -280,9 +280,9 @@ func (p *FFmpegProcessor) buildAudioOptions(stream *FFProbeStream) []string {
 	}
 
 	args = append(args,
-		"-c:a", "libopus",
-		"-ar", strconv.Itoa(opusRate),
-		"-af", "loudnorm=i=-18:tp=-3:lra=17",
+		fmt.Sprintf("-c:a:%d", stream.Index), "libopus",
+		fmt.Sprintf("-ar:%d", stream.Index), strconv.Itoa(opusRate),
+		fmt.Sprintf("-af:%d", stream.Index), "loudnorm=i=-18:tp=-3:lra=17",
 	)
 
 	return args
@@ -318,13 +318,13 @@ func (p *FFmpegProcessor) buildSubtitleOptions(subtitleStreams []FFProbeStream) 
 
 		if mkvTextSubs[codec] || mkvImageSubs[codec] {
 			// Already in MKV-compatible format, copy as-is
-			args = append(args, "-map", fmt.Sprintf("0:%d", idx), "-c:s", "copy")
+			args = append(args, "-map", fmt.Sprintf("0:%d", idx), fmt.Sprintf("-c:s:%d", idx), "copy")
 		} else if textSubs[codec] {
 			// Convert text subtitles to SRT
-			args = append(args, "-map", fmt.Sprintf("0:%d", idx), "-c:s", "srt")
+			args = append(args, "-map", fmt.Sprintf("0:%d", idx), fmt.Sprintf("-c:s:%d", idx), "srt")
 		} else if imageSubs[codec] {
 			// Convert image subtitles to PGS
-			args = append(args, "-map", fmt.Sprintf("0:%d", idx), "-c:s", "pgssub")
+			args = append(args, "-map", fmt.Sprintf("0:%d", idx), fmt.Sprintf("-c:s:%d", idx), "pgssub")
 		} else {
 			// Unknown codec - log warning and skip
 			slog.Warn("Unknown subtitle codec, skipping", "codec", codec, "index", idx)

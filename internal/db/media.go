@@ -149,9 +149,9 @@ func MarkShrinked(databases []*sql.DB, path string) {
 }
 
 // BulkMarkOptimizedExtensions marks files with already-optimized extensions as shrinked
-// This includes: .av1.mkv, .opus, .mka, .avif
+// This includes: .av1.mkv, .opus, .mka, .avif, .oga, .ogg
 func BulkMarkOptimizedExtensions(databases []*sql.DB) {
-	optimizedExtensions := []string{".av1.mkv", ".opus", ".mka", ".avif"}
+	optimizedExtensions := []string{".av1.mkv", ".opus", ".mka", ".avif", ".oga", ".ogg"}
 
 	for _, sqlDB := range databases {
 		for _, ext := range optimizedExtensions {
