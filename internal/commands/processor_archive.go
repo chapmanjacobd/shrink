@@ -74,6 +74,9 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *models.Shri
 		if json.Unmarshal(jsonBytes, &lsarJSON) == nil && len(lsarJSON.LsarProperties.XADVolumes) > 0 {
 			partFiles = lsarJSON.LsarProperties.XADVolumes
 			slog.Info("Multi-part archive detected", "path", m.Path, "parts", len(partFiles))
+			for i, p := range partFiles {
+				slog.Debug("Part file from lsar", "index", i, "path", p)
+			}
 		}
 	}
 
@@ -264,7 +267,7 @@ func (p *ArchiveProcessor) EstimateSizeForArchive(m *models.ShrinkMedia, cfg *mo
 		}
 	}
 
-	// If lsar failed (empty contents due to error), archive is broken
+	// If lsar failed (empty contents due to error or missing parts), archive is broken
 	if lsarFailed {
 		return 0, 0, false, 0
 	}
@@ -400,6 +403,7 @@ func (p *ArchiveProcessor) getPartFiles(path string) []string {
 					if info, err := os.Stat(partFile); err == nil && !info.IsDir() {
 						if !pathsEqual(partFile, path) {
 							partFilesMap[partFile] = true
+							slog.Debug("Found multi-part archive part (lsar)", "path", partFile)
 						}
 					}
 				}
@@ -410,7 +414,39 @@ func (p *ArchiveProcessor) getPartFiles(path string) []string {
 	// Also use glob to find any additional part files that lsar might have missed
 	// Common multi-part archive patterns: .z01, .z02, .zip, .001, .002, .rar, etc.
 	ext := strings.ToLower(filepath.Ext(baseName))
-	baseWithoutExt := strings.TrimSuffix(baseName, ext)
+
+	// baseWithoutExt should be the name before the first archive-related extension
+	// e.g., "test.zip" -> "test", "test.tar.gz" -> "test"
+	baseWithoutExt := baseName
+	for {
+		e := strings.ToLower(filepath.Ext(baseWithoutExt))
+		if e == "" {
+			break
+		}
+		// If it's a known archive extension or a part extension (like .z01, .001), trim it
+		isArchiveExt := false
+		for _, ae := range utils.ArchiveExtensions {
+			if e == "."+ae {
+				isArchiveExt = true
+				break
+			}
+		}
+		// Check for .zNN or .NNN
+		if !isArchiveExt {
+			if len(e) == 4 && e[1] == 'z' && e[2] >= '0' && e[2] <= '9' && e[3] >= '0' && e[3] <= '9' {
+				isArchiveExt = true
+			} else if len(e) == 4 && e[1] >= '0' && e[1] <= '9' && e[2] >= '0' && e[2] <= '9' && e[3] >= '0' && e[3] <= '9' {
+				isArchiveExt = true
+			}
+		}
+
+		if isArchiveExt {
+			baseWithoutExt = strings.TrimSuffix(baseWithoutExt, e)
+		} else {
+			break
+		}
+	}
+	slog.Debug("Globbing for parts", "baseWithoutExt", baseWithoutExt, "dir", dir)
 
 	// Pattern 1: .zNN parts (Zip split files)
 	if pattern, err := filepath.Glob(filepath.Join(dir, baseWithoutExt+".z*")); err == nil {
@@ -418,6 +454,7 @@ func (p *ArchiveProcessor) getPartFiles(path string) []string {
 			if info, err := os.Stat(p); err == nil && !info.IsDir() {
 				if !pathsEqual(p, path) {
 					partFilesMap[p] = true
+					slog.Debug("Found multi-part archive part (glob-z)", "path", p)
 				}
 			}
 		}
@@ -429,6 +466,7 @@ func (p *ArchiveProcessor) getPartFiles(path string) []string {
 			if info, err := os.Stat(p); err == nil && !info.IsDir() {
 				if !pathsEqual(p, path) {
 					partFilesMap[p] = true
+					slog.Debug("Found multi-part archive part (glob-NNN)", "path", p)
 				}
 			}
 		}
