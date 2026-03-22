@@ -43,8 +43,8 @@ func ConnectWithInit(dbPath string) (*sql.DB, string, error) {
 	return db, dbPath, nil
 }
 
-// GetSchema returns the database schema SQL
-func GetSchema() string {
+// GetTableSchema returns the database table schema SQL
+func GetTableSchema() string {
 	return `
 CREATE TABLE IF NOT EXISTS media (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -65,6 +65,12 @@ CREATE TABLE IF NOT EXISTS media (
     is_shrinked INTEGER DEFAULT 0,
     play_count INTEGER DEFAULT 0
 );
+`
+}
+
+// GetIndexSchema returns the database index schema SQL
+func GetIndexSchema() string {
+	return `
 CREATE INDEX IF NOT EXISTS idx_media_path ON media(path);
 CREATE INDEX IF NOT EXISTS idx_media_type ON media(media_type);
 CREATE INDEX IF NOT EXISTS idx_media_deleted ON media(time_deleted);
@@ -73,13 +79,16 @@ CREATE INDEX IF NOT EXISTS idx_media_deleted ON media(time_deleted);
 
 // InitDB initializes the database with the required schema and runs migrations
 func InitDB(db *sql.DB) error {
-	schema := GetSchema()
-	if _, err := db.Exec(schema); err != nil {
-		return fmt.Errorf("failed to create schema: %w", err)
+	if _, err := db.Exec(GetTableSchema()); err != nil {
+		return fmt.Errorf("failed to create table schema: %w", err)
 	}
 
 	if err := MigrateDB(db); err != nil {
 		return fmt.Errorf("failed to migrate database: %w", err)
+	}
+
+	if _, err := db.Exec(GetIndexSchema()); err != nil {
+		return fmt.Errorf("failed to create index schema: %w", err)
 	}
 
 	return nil

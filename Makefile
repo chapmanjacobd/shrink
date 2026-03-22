@@ -35,7 +35,11 @@ ubuntu-deps:
 		pandoc \
 		wget \
 		imagemagick \
-		unar
+		unar \
+		libheif-plugin-aomdec \
+		libheif-plugin-aomenc \
+		libheif-plugin-libde265 \
+		libavif15
 	sudo -v && wget -qO- https://download.calibre-ebook.com/linux-installer.sh | sudo sh /dev/stdin
 
 macos-deps:

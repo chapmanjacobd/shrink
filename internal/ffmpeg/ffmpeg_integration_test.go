@@ -1,5 +1,4 @@
 //go:build integration
-// +build integration
 
 // Package ffmpeg provides integration tests using real FFmpeg for end-to-end validation.
 // These tests require FFmpeg, FFprobe, and related tools to be installed.
@@ -150,12 +149,12 @@ func TestIntegration_VideoTranscode_H264_to_AV1(t *testing.T) {
 
 	cfg := &models.ProcessorConfig{
 		Video: models.VideoConfig{
-			Preset:             "10", // Fast preset for tests
-			CRF:                "50", // Lower quality for faster tests
-			MinSavingsVideo:    0.05,
+			Preset:               "10", // Fast preset for tests
+			CRF:                  "50", // Lower quality for faster tests
+			MinSavingsVideo:      0.05,
 			TranscodingVideoRate: 1.0,
-			MaxVideoWidth:      1920,
-			MaxVideoHeight:     1080,
+			MaxVideoWidth:        1920,
+			MaxVideoHeight:       1080,
 		},
 		Common: models.CommonConfig{
 			SourceVideoBitrate: 1500000,
@@ -211,12 +210,12 @@ func TestIntegration_VideoTranscode_WithSubtitles(t *testing.T) {
 
 	cfg := &models.ProcessorConfig{
 		Video: models.VideoConfig{
-			Preset:             "10",
-			CRF:                "50",
-			MinSavingsVideo:    0.05,
+			Preset:               "10",
+			CRF:                  "50",
+			MinSavingsVideo:      0.05,
 			TranscodingVideoRate: 1.0,
-			MaxVideoWidth:      1920,
-			MaxVideoHeight:     1080,
+			MaxVideoWidth:        1920,
+			MaxVideoHeight:       1080,
 		},
 		Common: models.CommonConfig{
 			SourceVideoBitrate: 1500000,
@@ -226,12 +225,12 @@ func TestIntegration_VideoTranscode_WithSubtitles(t *testing.T) {
 
 	processor := NewFFmpegProcessor(cfg)
 	m := &models.ShrinkMedia{
-		Path:         inputPath,
-		Size:         getFileSize(inputPath),
-		Duration:     10.0,
-		VideoCount:   1,
+		Path:           inputPath,
+		Size:           getFileSize(inputPath),
+		Duration:       10.0,
+		VideoCount:     1,
 		SubtitleCodecs: "mov_text",
-		Ext:          ".mkv",
+		Ext:            ".mkv",
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -283,9 +282,9 @@ func TestIntegration_VideoTranscode_AlreadyAV1(t *testing.T) {
 
 	cfg := &models.ProcessorConfig{
 		Video: models.VideoConfig{
-			Preset:             "10",
-			CRF:                "50",
-			MinSavingsVideo:    0.05,
+			Preset:               "10",
+			CRF:                  "50",
+			MinSavingsVideo:      0.05,
 			TranscodingVideoRate: 1.0,
 		},
 		Common: models.CommonConfig{
@@ -489,9 +488,9 @@ func TestIntegration_VideoTranscode_Timeout(t *testing.T) {
 
 	cfg := &models.ProcessorConfig{
 		Video: models.VideoConfig{
-			Preset:             "10",
-			CRF:                "50",
-			MinSavingsVideo:    0.05,
+			Preset:               "10",
+			CRF:                  "50",
+			MinSavingsVideo:      0.05,
 			TranscodingVideoRate: 1.0,
 		},
 		Common: models.CommonConfig{
@@ -576,12 +575,12 @@ func TestIntegration_VideoTranscode_Stereo360(t *testing.T) {
 
 	cfg := &models.ProcessorConfig{
 		Video: models.VideoConfig{
-			Preset:             "10",
-			CRF:                "50",
-			MinSavingsVideo:    0.05,
+			Preset:               "10",
+			CRF:                  "50",
+			MinSavingsVideo:      0.05,
 			TranscodingVideoRate: 1.0,
-			MaxVideoWidth:      1920,
-			MaxVideoHeight:     1080,
+			MaxVideoWidth:        1920,
+			MaxVideoHeight:       1080,
 		},
 		Common: models.CommonConfig{
 			SourceVideoBitrate: 1500000,

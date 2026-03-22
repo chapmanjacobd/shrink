@@ -544,12 +544,12 @@ func TestBuildSubtitleOptions_MultipleStreams(t *testing.T) {
 
 	// Mix of different subtitle types
 	streams := []FFProbeStream{
-		{CodecName: "subrip", Index: 0},    // copy (mkvTextSubs)
-		{CodecName: "ass", Index: 1},       // copy (mkvTextSubs)
-		{CodecName: "pgssub", Index: 2},    // copy (mkvImageSubs)
-		{CodecName: "mov_text", Index: 3},  // convert to srt (textSubs only)
-		{CodecName: "dvdsub", Index: 4},    // convert to pgs (imageSubs only)
-		{CodecName: "unknown", Index: 5},   // skip
+		{CodecName: "subrip", Index: 0},   // copy (mkvTextSubs)
+		{CodecName: "ass", Index: 1},      // copy (mkvTextSubs)
+		{CodecName: "pgssub", Index: 2},   // copy (mkvImageSubs)
+		{CodecName: "mov_text", Index: 3}, // convert to srt (textSubs only)
+		{CodecName: "dvdsub", Index: 4},   // convert to pgs (imageSubs only)
+		{CodecName: "unknown", Index: 5},  // skip
 	}
 
 	opts := p.buildSubtitleOptions(streams)
@@ -565,7 +565,7 @@ func TestBuildSubtitleOptions_MultipleStreams(t *testing.T) {
 	expectedMaps := []string{"0:0", "0:1", "0:2", "0:3", "0:4"}
 	expectedCodecs := []string{"copy", "copy", "copy", "srt", "pgssub"}
 
-	for i := 0; i < len(expectedMaps); i++ {
+	for i := range expectedMaps {
 		baseIdx := i * 4
 		if baseIdx+3 < len(opts) {
 			if opts[baseIdx] != "-map" || opts[baseIdx+1] != expectedMaps[i] {

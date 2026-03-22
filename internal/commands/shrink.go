@@ -25,9 +25,9 @@ type ShrinkCmd struct {
 
 	Databases []string `arg:"" required:"" help:"SQLite database files or directories to scan"`
 
-	sqlDBs              []*sql.DB
-	unknownExtensions   map[string]int64
-	skippedByTool       map[string]int64 // Tracks known extensions skipped due to missing tools (e.g., "ffmpeg: mkv")
+	sqlDBs            []*sql.DB
+	unknownExtensions map[string]int64
+	skippedByTool     map[string]int64 // Tracks known extensions skipped due to missing tools (e.g., "ffmpeg: mkv")
 }
 
 func (c *ShrinkCmd) Run(ctx *kong.Context) error {
