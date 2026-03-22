@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/chapmanjacobd/shrink/internal/db"
@@ -273,6 +274,11 @@ func (e *Engine) processMedia(ctx context.Context, media []models.ShrinkMedia) {
 	var wg sync.WaitGroup
 	done := make(chan struct{})
 
+	// StopAll flag and context cancellation for environment errors
+	var stopAll atomic.Bool
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	// Progress printer goroutine
 	go func() {
 		ticker := time.NewTicker(200 * time.Millisecond)
@@ -293,6 +299,11 @@ func (e *Engine) processMedia(ctx context.Context, media []models.ShrinkMedia) {
 		go func(original models.ShrinkMedia) {
 			defer wg.Done()
 
+			// Skip if stopAll already set
+			if stopAll.Load() {
+				return
+			}
+
 			release, err := pool.Acquire(ctx, original.Category)
 			if err != nil {
 				return
@@ -303,7 +314,13 @@ func (e *Engine) processMedia(ctx context.Context, media []models.ShrinkMedia) {
 			e.metrics.SetCurrentFile(original.Path)
 			defer e.metrics.SetCurrentFile("")
 
-			e.processSingle(ctx, original)
+			result := e.processSingle(ctx, original)
+
+			// Check for stop-all signal (environment error)
+			if result.StopAll {
+				stopAll.Store(true)
+				cancel()
+			}
 		}(m)
 	}
 

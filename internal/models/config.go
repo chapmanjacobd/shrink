@@ -17,6 +17,7 @@ type ProcessResult struct {
 	Success    bool                // Whether the overall operation succeeded
 	Error      error               // Error if the operation failed
 	Output     string              // Full command output (e.g. from ffmpeg)
+	StopAll    bool                // Whether to stop all processing (e.g. environment error)
 }
 
 // VideoConfig contains configuration for video processing

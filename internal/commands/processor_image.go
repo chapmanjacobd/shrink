@@ -92,7 +92,7 @@ func (p *ImageProcessor) processImage(ctx context.Context, m *models.ShrinkMedia
 		isEnvError := isImageMagickEnvironmentError(errorLog)
 
 		if isEnvError {
-			return models.ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("ImageMagick environment error: %w", err), Output: string(output)}
+			return models.ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("ImageMagick environment error: %w", err), Output: string(output), StopAll: true}
 		} else if isUnsupported {
 			os.Remove(outputPath)
 			slog.Info("Unsupported image format, keeping original", "path", m.Path)

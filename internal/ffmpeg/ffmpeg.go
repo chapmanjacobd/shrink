@@ -113,15 +113,20 @@ func (p *FFmpegProcessor) Process(ctx context.Context, m *models.ShrinkMedia, cf
 		errorLog := strings.Split(string(output), "\n")
 		isUnsupported := p.isUnsupportedError(errorLog)
 		isEnvError := p.isEnvironmentError(errorLog)
+		isFileErr := p.isFileError(errorLog)
 
 		if isEnvError {
-			// Environment errors should be re-raised (they're not file-specific)
-			return models.ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("ffmpeg environment error: %w", err), Output: string(output)}
+			// Environment errors should stop all processing (OOM, signal, hardware failure)
+			return models.ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("ffmpeg environment error: %w", err), Output: string(output), StopAll: true}
 		} else if isUnsupported {
 			// Unsupported codec/format - remove transcode attempt and return original
 			os.Remove(outputPath)
 			slog.Info("Unsupported format, keeping original", "path", m.Path)
 			return models.ProcessResult{SourcePath: m.Path, Success: true, Outputs: []models.ProcessOutputFile{{Path: m.Path, Size: m.Size}}}
+		} else if isFileErr {
+			// File error (corrupt, missing, etc.) - remove transcode attempt and move to broken
+			os.Remove(outputPath)
+			return models.ProcessResult{SourcePath: m.Path, Success: false, Error: fmt.Errorf("file error: %w", err), Output: string(output)}
 		}
 
 		if p.config.Common.DeleteUnplayable {

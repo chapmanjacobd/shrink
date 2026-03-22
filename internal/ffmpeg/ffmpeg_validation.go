@@ -165,3 +165,21 @@ func (p *FFmpegProcessor) isEnvironmentError(errorLog []string) bool {
 	}
 	return false
 }
+
+// isFileError checks if FFmpeg error is due to file corruption or access issues
+func (p *FFmpegProcessor) isFileError(errorLog []string) bool {
+	fileErrorPatterns := []string{
+		"invalid data", "corrupt", "truncated", "missing", "cannot open",
+		"no such file", "permission denied", "input/output error",
+		"unsuccessful decode", "header missing",
+	}
+	for _, line := range errorLog {
+		lineLower := strings.ToLower(line)
+		for _, pattern := range fileErrorPatterns {
+			if strings.Contains(lineLower, pattern) {
+				return true
+			}
+		}
+	}
+	return false
+}
