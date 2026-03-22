@@ -252,8 +252,11 @@ func NewWorkerPool(c *ShrinkCmd) *WorkerPool {
 }
 
 func (wp *WorkerPool) Acquire(ctx context.Context, category string) (func(), error) {
-	sem := wp.sems[category]
+	// Normalize category name for case-insensitive lookup
+	cat := strings.Title(strings.ToLower(strings.TrimSpace(category)))
+	sem := wp.sems[cat]
 	if sem == nil {
+		slog.Debug("Unknown category, falling back to Archived limit", "category", category, "normalized", cat)
 		sem = wp.sems["Archived"]
 	}
 
@@ -309,6 +312,9 @@ func (e *Engine) processMedia(ctx context.Context, media []models.ShrinkMedia) {
 				return
 			}
 			defer release()
+
+			// Record that the file is actually running now
+			e.metrics.RecordRunning(original.DisplayCategory())
 
 			// Set current file for progress display
 			e.metrics.SetCurrentFile(original.Path)

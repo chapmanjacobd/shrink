@@ -25,7 +25,8 @@ func NewTextProcessor() *TextProcessor {
 }
 
 func (p *TextProcessor) CanProcess(m *models.ShrinkMedia) bool {
-	return utils.TextExtensionMap[m.Ext]
+	mt := strings.ToLower(m.MediaType)
+	return mt == "text" || strings.HasPrefix(mt, "text/") || utils.TextExtensionMap[m.Ext]
 }
 
 func (p *TextProcessor) EstimateSize(m *models.ShrinkMedia, cfg *models.ProcessorConfig) models.ProcessableInfo {

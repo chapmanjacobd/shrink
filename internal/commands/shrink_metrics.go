@@ -62,6 +62,7 @@ type MediaTypeStats struct {
 	Success        int
 	Failed         int
 	Skipped        int
+	Running        int
 	CompressedSize int64
 	TotalSize      int64
 	FutureSize     int64
@@ -143,6 +144,7 @@ func (m *ShrinkMetrics) RecordSuccess(mediaType string, size, futureSize int64, 
 	stats := m.getOrCreateType(mediaType)
 	stats.Processed++
 	stats.Success++
+	stats.Running--
 	stats.TotalSize += size
 	stats.FutureSize += futureSize
 	stats.TotalTime += processingTime
@@ -158,7 +160,17 @@ func (m *ShrinkMetrics) RecordFailure(mediaType string) {
 	stats := m.getOrCreateType(mediaType)
 	stats.Processed++
 	stats.Failed++
+	stats.Running--
 	stats.CompletedAt = time.Now()
+}
+
+// RecordRunning records that a media item is starting to be processed
+func (m *ShrinkMetrics) RecordRunning(mediaType string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	stats := m.getOrCreateType(mediaType)
+	stats.Running++
 }
 
 // RecordSkipped records a skipped media item
@@ -199,21 +211,6 @@ func (m *ShrinkMetrics) PrintProgress() {
 	}
 	m.lastPrintTime = now
 
-	// Calculate totals
-	var totalSuccess, totalFailed, totalSkipped, totalQueued int
-	var totalSavings int64
-	var totalTime, totalDuration int
-
-	for _, stats := range m.types {
-		totalSuccess += stats.Success
-		totalFailed += stats.Failed
-		totalSkipped += stats.Skipped
-		totalSavings += stats.SpaceSaved()
-		totalTime += stats.TotalTime
-		totalDuration += int(stats.TotalDuration)
-		totalQueued += stats.Total - stats.Processed - stats.Skipped
-	}
-
 	// Build the progress output
 	var sb strings.Builder
 
@@ -226,8 +223,24 @@ func (m *ShrinkMetrics) PrintProgress() {
 	sb.WriteString(clearSeq + "\n")
 	sb.WriteString(clearSeq)
 
+	// Calculate totals
+	var totalSuccess, totalFailed, totalSkipped, totalQueued, totalRunning int
+	var totalSavings int64
+	var totalTime, totalDuration int
+
+	for _, stats := range m.types {
+		totalSuccess += stats.Success
+		totalFailed += stats.Failed
+		totalSkipped += stats.Skipped
+		totalRunning += stats.Running
+		totalSavings += stats.SpaceSaved()
+		totalTime += stats.TotalTime
+		totalDuration += int(stats.TotalDuration)
+		totalQueued += stats.Total - stats.Processed - stats.Skipped
+	}
+
 	// Print summary table
-	headers := []string{"Media Type", "Queue", "Skip", "Fail", "OK", "Saved", "Time", "Speed"}
+	headers := []string{"Media Type", "Queued", "Running", "Skip", "Fail", "OK", "Saved", "Time", "Speed"}
 	var rows [][]string
 
 	// Sort media types by Queue (descending) for consistent ordering
@@ -255,6 +268,7 @@ func (m *ShrinkMetrics) PrintProgress() {
 			cStats.Success += stats.Success
 			cStats.Failed += stats.Failed
 			cStats.Skipped += stats.Skipped
+			cStats.Running += stats.Running
 			cStats.TotalSize += stats.TotalSize
 			cStats.FutureSize += stats.FutureSize
 			cStats.TotalTime += stats.TotalTime
@@ -288,6 +302,7 @@ func (m *ShrinkMetrics) PrintProgress() {
 		rows = append(rows, []string{
 			mt.name,
 			strconv.Itoa(mt.queue),
+			strconv.Itoa(mt.stats.Running),
 			strconv.Itoa(mt.stats.Skipped),
 			strconv.Itoa(mt.stats.Failed),
 			strconv.Itoa(mt.stats.Success),
@@ -305,6 +320,7 @@ func (m *ShrinkMetrics) PrintProgress() {
 	rows = append(rows, []string{
 		"TOTAL",
 		strconv.Itoa(totalQueued),
+		strconv.Itoa(totalRunning),
 		strconv.Itoa(totalSkipped),
 		strconv.Itoa(totalFailed),
 		strconv.Itoa(totalSuccess),

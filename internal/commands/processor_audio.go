@@ -24,8 +24,9 @@ func NewAudioProcessor(ffmpeg *ffmpeg.FFmpegProcessor) *AudioProcessor {
 }
 
 func (p *AudioProcessor) CanProcess(m *models.ShrinkMedia) bool {
-	return (strings.HasPrefix(m.MediaType, "audio/") || strings.Contains(m.MediaType, " audio")) ||
-		(utils.AudioExtensionMap[m.Ext] && m.VideoCount == 0)
+	mt := strings.ToLower(m.MediaType)
+	return mt == "audio" || mt == "audiobook" || strings.HasPrefix(mt, "audio/") || strings.Contains(mt, " audio") ||
+		((utils.AudioExtensionMap[m.Ext] || utils.VideoExtensionMap[m.Ext]) && m.VideoCount == 0 && m.AudioCount >= 1)
 }
 
 func (p *AudioProcessor) EstimateSize(m *models.ShrinkMedia, cfg *models.ProcessorConfig) models.ProcessableInfo {
