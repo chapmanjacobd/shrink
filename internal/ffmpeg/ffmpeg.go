@@ -112,7 +112,6 @@ func (p *FFmpegProcessor) Process(ctx context.Context, m *models.ShrinkMedia, cf
 		// Categorize FFmpeg errors
 		errorLog := strings.Split(string(output), "\n")
 		isUnsupported := p.isUnsupportedError(errorLog)
-		isFileError := p.isFileError(errorLog)
 		isEnvError := p.isEnvironmentError(errorLog)
 
 		if isEnvError {

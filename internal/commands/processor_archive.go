@@ -65,17 +65,30 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *models.Shri
 	partFiles := p.getPartFiles(m.Path)
 	if len(partFiles) > 0 {
 		slog.Info("Multi-part archive detected", "path", m.Path, "parts", len(partFiles))
+		for i, p := range partFiles {
+			slog.Info("Part file identified", "index", i, "path", p)
+		}
 	}
 
-	// Extract archive - use -no-directory to prevent creating nested archive-name folders
+	// Log archive contents before extraction
+	if contents, lsarFailed := p.lsarWithStatus(m.Path); !lsarFailed {
+		slog.Info("Lsar identified files in archive", "path", m.Path, "count", len(contents))
+		for _, c := range contents {
+			slog.Debug("Archive content", "file", c.Path, "size", c.Size)
+		}
+	} else {
+		slog.Warn("Lsar failed to list archive contents", "path", m.Path)
+	}
+
+	// Extract archive - use -force-rename to extract files.
+	// We avoid -no-directory as it can sometimes cause issues with split archives on some platforms.
+	// We use the base name and set cmd.Dir to help unar find parts.
 	outputDir := filepath.Join(filepath.Dir(m.Path), filepath.Base(m.Path)+".extracted")
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
 		return models.ProcessResult{SourcePath: m.Path, PartFiles: partFiles, Error: err}
 	}
 
-	// Use -no-directory and -force-rename to extract files directly into outputDir without creating subfolders
-	// -force-rename is needed for nested multi-part archives
-	cmd := exec.CommandContext(ctx, unar, "-no-directory", "-force-rename", "-o", outputDir, m.Path)
+	cmd := exec.CommandContext(ctx, unar, "-force-rename", "-o", outputDir, filepath.Base(m.Path))
 	cmd.Dir = filepath.Dir(m.Path)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -85,7 +98,6 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *models.Shri
 	}
 
 	// Verify that something was actually extracted
-	// On Windows, unar might exit with 0 even if it fails to extract due to missing parts
 	entries, err := os.ReadDir(outputDir)
 	if err != nil || len(entries) == 0 {
 		os.RemoveAll(outputDir)
@@ -94,7 +106,7 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *models.Shri
 
 	// Log extracted files for debugging
 	for _, entry := range entries {
-		slog.Debug("Extracted file", "archive", m.Path, "file", entry.Name())
+		slog.Info("Extracted item", "archive", m.Path, "name", entry.Name(), "isDir", entry.IsDir())
 	}
 
 	// Flatten any wrapper folders that might have been created
@@ -647,16 +659,20 @@ func flattenWrapperFolders(rootDir string) {
 		return
 	}
 
-	// Filter out hidden files
+	// Filter out hidden files and system junk
 	var nonHidden []string
 	for _, entry := range entries {
-		if !strings.HasPrefix(entry.Name(), ".") {
-			nonHidden = append(nonHidden, entry.Name())
+		name := entry.Name()
+		if strings.HasPrefix(name, ".") || name == "__MACOSX" || name == "Thumbs.db" || name == "desktop.ini" {
+			slog.Debug("Ignoring system junk during flatten check", "name", name)
+			continue
 		}
+		nonHidden = append(nonHidden, name)
 	}
 
 	// Only flatten if there's exactly one entry
 	if len(nonHidden) != 1 {
+		slog.Debug("Not flattening wrapper folder: multiple or zero non-hidden entries", "count", len(nonHidden), "entries", nonHidden)
 		return
 	}
 
@@ -695,6 +711,8 @@ func flattenWrapperFolders(rootDir string) {
 		newPath := filepath.Join(rootDir, entry.Name())
 		if err := os.Rename(oldPath, newPath); err != nil {
 			slog.Warn("Failed to flatten wrapper folder entry", "from", oldPath, "to", newPath, "error", err)
+		} else {
+			slog.Debug("Flattened entry", "from", oldPath, "to", newPath)
 		}
 	}
 
@@ -709,4 +727,7 @@ func flattenWrapperFolders(rootDir string) {
 	} else {
 		os.RemoveAll(singlePath)
 	}
+
+	// Recursive call to handle nested wrapper folders (e.g. wrapper/wrapper/contents)
+	flattenWrapperFolders(rootDir)
 }

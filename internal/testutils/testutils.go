@@ -103,7 +103,14 @@ func RunScenario(t *testing.T, s Scenario, runCmd func(dbPath, tempDir string, a
 	for _, expectedFile := range s.ExpectFiles {
 		path := filepath.Join(tempDir, filepath.FromSlash(expectedFile))
 		if _, err := os.Stat(path); os.IsNotExist(err) {
-			t.Errorf("expected file missing: %s", expectedFile)
+			// Log folder contents for debugging
+			dir := filepath.Dir(path)
+			entries, _ := os.ReadDir(dir)
+			var names []string
+			for _, e := range entries {
+				names = append(names, e.Name())
+			}
+			t.Errorf("expected file missing: %s. Folder %s contains: %v", expectedFile, dir, names)
 		}
 	}
 
@@ -111,7 +118,14 @@ func RunScenario(t *testing.T, s Scenario, runCmd func(dbPath, tempDir string, a
 	for _, missingFile := range s.ExpectMissing {
 		path := filepath.Join(tempDir, filepath.FromSlash(missingFile))
 		if _, err := os.Stat(path); err == nil {
-			t.Errorf("expected file to be missing, but it exists: %s", missingFile)
+			// Log folder contents for debugging
+			dir := filepath.Dir(path)
+			entries, _ := os.ReadDir(dir)
+			var names []string
+			for _, e := range entries {
+				names = append(names, e.Name())
+			}
+			t.Errorf("expected file to be missing, but it exists: %s. Folder %s contains: %v", missingFile, dir, names)
 		}
 	}
 

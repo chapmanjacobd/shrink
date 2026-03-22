@@ -22,12 +22,9 @@ func TestFlattenWrapperFolders(t *testing.T) {
 	// Flatten
 	flattenWrapperFolders(tempDir)
 
-	// Should be moved to tempDir/inner/test.txt?
-	// Wait, flattenWrapperFolders flattens if there is only ONE entry in a folder and it's a directory.
-	// tempDir has 'wrapper'. wrapper has 'inner'.
-	// So tempDir/wrapper/inner becomes tempDir/inner.
-
-	newPath := filepath.Join(tempDir, "inner", "test.txt")
+	// Since flattenWrapperFolders is now recursive, it should flatten BOTH wrapper and inner
+	// tempDir/wrapper/inner/test.txt -> tempDir/inner/test.txt -> tempDir/test.txt
+	newPath := filepath.Join(tempDir, "test.txt")
 	if _, err := os.Stat(newPath); os.IsNotExist(err) {
 		t.Errorf("expected flattened file missing at %s", newPath)
 	}

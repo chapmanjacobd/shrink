@@ -318,7 +318,14 @@ func TestShrinkMultiPartArchive(t *testing.T) {
 	}
 	for _, f := range expectedFiles {
 		if _, err := os.Stat(f); os.IsNotExist(err) {
-			t.Errorf("expected file missing: %s", f)
+			// Log folder contents for debugging
+			dir := filepath.Dir(f)
+			entries, _ := os.ReadDir(dir)
+			var names []string
+			for _, e := range entries {
+				names = append(names, e.Name())
+			}
+			t.Errorf("expected file missing: %s. Folder %s contains: %v", f, dir, names)
 		}
 	}
 

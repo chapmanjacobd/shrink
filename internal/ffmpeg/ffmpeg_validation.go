@@ -149,23 +149,6 @@ func (p *FFmpegProcessor) isUnsupportedError(errorLog []string) bool {
 	return false
 }
 
-// isFileError checks if FFmpeg error is file-specific (corrupt, missing, etc.)
-func (p *FFmpegProcessor) isFileError(errorLog []string) bool {
-	fileErrorPatterns := []string{
-		"invalid data", "corrupt", "truncated", "missing", "cannot open",
-		"no such file", "permission denied", "input/output error",
-	}
-	for _, line := range errorLog {
-		lineLower := strings.ToLower(line)
-		for _, pattern := range fileErrorPatterns {
-			if strings.Contains(lineLower, pattern) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
 // isEnvironmentError checks if FFmpeg error is environment-related (OOM, signal, etc.)
 func (p *FFmpegProcessor) isEnvironmentError(errorLog []string) bool {
 	envErrorPatterns := []string{
