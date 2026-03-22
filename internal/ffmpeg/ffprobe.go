@@ -116,6 +116,10 @@ func GetImageDimensions(path string) (int, int, error) {
 }
 
 func (p *FFmpegProcessor) isAnimationFromProbe(probe *FFProbeResult) *bool {
+	if probe == nil {
+		result := false
+		return &result
+	}
 	if len(probe.AudioStreams) > 0 {
 		result := true
 		return &result

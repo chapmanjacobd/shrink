@@ -17,6 +17,7 @@ func TestDatabaseLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open failed: %v", err)
 	}
+	defer db.Close()
 
 	// 1. InitDB
 	err = InitDB(db)
@@ -39,7 +40,6 @@ func TestDatabaseLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("MigrateDB failed: %v", err)
 	}
-	db.Close()
 
 	// 4. ConnectWithInit (should not error on existing DB)
 	db3, _, err := ConnectWithInit(dbPath)

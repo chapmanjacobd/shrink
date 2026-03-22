@@ -32,6 +32,31 @@ func NewArchiveProcessor(ffmpeg *ffmpeg.FFmpegProcessor) *ArchiveProcessor {
 	}
 }
 
+// extractLSARJSON extracts valid JSON from lsar output, handling potential extra text on Windows
+func extractLSARJSON(output []byte) []byte {
+	// On Windows, lsar may output text before/after JSON. Find JSON boundaries.
+	// Look for the first '{' and last '}' to extract valid JSON
+	startIdx := -1
+	endIdx := -1
+	for i, b := range output {
+		if b == '{' {
+			startIdx = i
+			break
+		}
+	}
+	for i := len(output) - 1; i >= 0; i-- {
+		if output[i] == '}' {
+			endIdx = i
+			break
+		}
+	}
+
+	if startIdx >= 0 && endIdx > startIdx {
+		return output[startIdx : endIdx+1]
+	}
+	return output
+}
+
 func (p *ArchiveProcessor) CanProcess(m *models.ShrinkMedia) bool {
 	return m.MediaType == "archive" || utils.ArchiveExtensionMap[m.Ext]
 }
@@ -47,12 +72,13 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *models.Shri
 	// Check for multi-part archives (XAD volumes)
 	var partFiles []string
 	if lsarOutput, err := exec.Command("lsar", "-json", m.Path).CombinedOutput(); err == nil {
+		jsonBytes := extractLSARJSON(lsarOutput)
 		var lsarJSON struct {
 			LsarProperties struct {
 				XADVolumes []string `json:"XADVolumes"`
 			} `json:"lsarProperties"`
 		}
-		if json.Unmarshal(lsarOutput, &lsarJSON) == nil && len(lsarJSON.LsarProperties.XADVolumes) > 0 {
+		if json.Unmarshal(jsonBytes, &lsarJSON) == nil && len(lsarJSON.LsarProperties.XADVolumes) > 0 {
 			partFiles = lsarJSON.LsarProperties.XADVolumes
 			slog.Info("Multi-part archive detected", "path", m.Path, "parts", len(partFiles))
 		}
@@ -193,12 +219,13 @@ func (p *ArchiveProcessor) EstimateSizeForArchive(m *models.ShrinkMedia, cfg *mo
 	// Check for multi-part archives and verify all parts exist
 	totalArchiveSize := m.Size
 	if lsarOutput, err := exec.Command("lsar", "-json", m.Path).CombinedOutput(); err == nil {
+		jsonBytes := extractLSARJSON(lsarOutput)
 		var lsarJSON struct {
 			LsarProperties struct {
 				XADVolumes []string `json:"XADVolumes"`
 			} `json:"lsarProperties"`
 		}
-		if json.Unmarshal(lsarOutput, &lsarJSON) == nil && len(lsarJSON.LsarProperties.XADVolumes) > 0 {
+		if json.Unmarshal(jsonBytes, &lsarJSON) == nil && len(lsarJSON.LsarProperties.XADVolumes) > 0 {
 			// Sum up sizes of all parts
 			totalArchiveSize = 0
 			allPartsExist := true
@@ -323,12 +350,13 @@ func (p *ArchiveProcessor) getPartFiles(path string) []string {
 
 	// Get parts from lsar XADVolumes
 	if lsarOutput, err := exec.Command("lsar", "-json", path).CombinedOutput(); err == nil {
+		jsonBytes := extractLSARJSON(lsarOutput)
 		var lsarJSON struct {
 			LsarProperties struct {
 				XADVolumes []string `json:"XADVolumes"`
 			} `json:"lsarProperties"`
 		}
-		if json.Unmarshal(lsarOutput, &lsarJSON) == nil && len(lsarJSON.LsarProperties.XADVolumes) > 0 {
+		if json.Unmarshal(jsonBytes, &lsarJSON) == nil && len(lsarJSON.LsarProperties.XADVolumes) > 0 {
 			for _, partFile := range lsarJSON.LsarProperties.XADVolumes {
 				if !filepath.IsAbs(partFile) {
 					partFile = filepath.Join(dir, partFile)
@@ -399,9 +427,33 @@ func (p *ArchiveProcessor) lsarWithStatus(path string) ([]models.ShrinkMedia, bo
 	output, err := exec.Command("lsar", "-json", path).CombinedOutput()
 	lsarFailed := err != nil
 
+	// On Windows, lsar may output text before/after JSON. Find JSON boundaries.
+	// Look for the first '{' and last '}' to extract valid JSON
+	startIdx := -1
+	endIdx := -1
+	for i, b := range output {
+		if b == '{' {
+			startIdx = i
+			break
+		}
+	}
+	for i := len(output) - 1; i >= 0; i-- {
+		if output[i] == '}' {
+			endIdx = i
+			break
+		}
+	}
+
+	var jsonBytes []byte
+	if startIdx >= 0 && endIdx > startIdx {
+		jsonBytes = output[startIdx : endIdx+1]
+	} else {
+		jsonBytes = output
+	}
+
 	// Parse JSON to check for lsarError field
 	var rawJSON map[string]any
-	if jsonErr := json.Unmarshal(output, &rawJSON); jsonErr == nil {
+	if jsonErr := json.Unmarshal(jsonBytes, &rawJSON); jsonErr == nil {
 		if lsarErr, ok := rawJSON["lsarError"]; ok {
 			if lsarErrNum, ok := lsarErr.(float64); ok && lsarErrNum != 0 {
 				lsarFailed = true
@@ -421,7 +473,7 @@ func (p *ArchiveProcessor) lsarWithStatus(path string) ([]models.ShrinkMedia, bo
 		} `json:"lsarContents"`
 	}
 
-	if err := json.Unmarshal(output, &result); err != nil {
+	if err := json.Unmarshal(jsonBytes, &result); err != nil {
 		slog.Error("Failed to unmarshal lsar output", "error", err, "path", path)
 		return nil, lsarFailed
 	}

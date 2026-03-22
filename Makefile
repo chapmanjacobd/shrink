@@ -46,7 +46,7 @@ macos-deps:
 	-brew install --cask calibre
 
 windows-deps:
-	choco install calibre ffmpeg sqlite imagemagick unar --no-progress --stop-on-first-failure
+	choco install calibre ffmpeg-full sqlite imagemagick unar --no-progress --stop-on-first-failure
 
 go-deps:
 	go install honnef.co/go/tools/cmd/staticcheck@latest
