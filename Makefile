@@ -38,7 +38,7 @@ ubuntu-deps:
 		libheif-plugin-aomdec \
 		libheif-plugin-aomenc \
 		libheif-plugin-libde265
-	sudo snap install imagemagick --classic
+	sudo -v && wget -qO- https://imagemagick.org/archive/binaries/magick -O /usr/local/bin/magick && sudo chmod +x /usr/local/bin/magick
 	sudo -v && wget -qO- https://download.calibre-ebook.com/linux-installer.sh | sudo sh /dev/stdin
 
 macos-deps:

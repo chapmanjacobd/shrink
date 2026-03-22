@@ -387,16 +387,14 @@ func PrintTableToString(headers []string, rows [][]string) string {
 	}
 
 	// Determine column alignment based on header names
-	// Numeric columns should be right-aligned
-	rightAlignHeaders := map[string]bool{
-		"Size": true, "Saved": true, "Time": true, "Speed": true,
-		"Success": true, "Failed": true, "Skipped": true,
-		"Queue": true, "OK": true, "Count": true, "Total": true,
-		"Duration": true, "Processed": true,
+	// Default is right-align for numbers; special-case text columns for left-align
+	leftAlignHeaders := map[string]bool{
+		"Media Type": true, "Type": true, "Name": true, "File": true,
+		"Path": true, "Status": true, "Format": true, "Codec": true,
 	}
 	isNumericCol := make([]bool, numCols)
 	for i, h := range headers {
-		if rightAlignHeaders[h] {
+		if !leftAlignHeaders[h] {
 			isNumericCol[i] = true
 		}
 	}
