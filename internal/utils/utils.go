@@ -100,7 +100,10 @@ func ParseBitrate(s string) int64 {
 	} else if before, ok := strings.CutSuffix(s, "bps"); ok {
 		s = before
 	}
-	n, _ := strconv.ParseInt(s, 10, 64)
+	n, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return 0
+	}
 	return n * multiplier
 }
 
@@ -120,7 +123,10 @@ func ParseSize(s string) int64 {
 	} else if before, ok := strings.CutSuffix(s, "B"); ok {
 		s = before
 	}
-	n, _ := strconv.ParseInt(s, 10, 64)
+	n, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return 0
+	}
 	return n * multiplier
 }
 
@@ -128,7 +134,10 @@ func ParseSize(s string) int64 {
 func ParsePercentOrBytes(s string) float64 {
 	s = strings.TrimSpace(s)
 	if before, ok := strings.CutSuffix(s, "%"); ok {
-		pct, _ := strconv.ParseFloat(before, 64)
+		pct, err := strconv.ParseFloat(before, 64)
+		if err != nil {
+			return 0
+		}
 		return pct / 100.0
 	}
 	return float64(ParseSize(s))

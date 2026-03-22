@@ -426,6 +426,9 @@ func (c *ShrinkCmd) getActualDuration(path string) float64 {
 		return 0
 	}
 
-	duration, _ := strconv.ParseFloat(result.Format.Duration, 64)
+	duration, err := strconv.ParseFloat(result.Format.Duration, 64)
+	if err != nil {
+		return 0
+	}
 	return duration
 }

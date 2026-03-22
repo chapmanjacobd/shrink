@@ -66,7 +66,9 @@ func (p *FFmpegProcessor) ffprobe(path string) (*FFProbeResult, error) {
 
 	// Parse duration from format
 	if probe.Format.Duration != "" {
-		probe.Duration, _ = strconv.ParseFloat(probe.Format.Duration, 64)
+		if d, err := strconv.ParseFloat(probe.Format.Duration, 64); err == nil {
+			probe.Duration = d
+		}
 	}
 
 	// Categorize streams
@@ -145,9 +147,12 @@ func parseFPS(probe *FFProbeResult) float64 {
 	if len(parts) != 2 {
 		return 0
 	}
-	num, _ := strconv.ParseFloat(parts[0], 64)
-	den, _ := strconv.ParseFloat(parts[1], 64)
-	if den == 0 {
+	num, err := strconv.ParseFloat(parts[0], 64)
+	if err != nil {
+		return 0
+	}
+	den, err := strconv.ParseFloat(parts[1], 64)
+	if err != nil || den == 0 {
 		return 0
 	}
 	return num / den

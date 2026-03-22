@@ -380,7 +380,11 @@ func (p *FFmpegProcessor) detectSilence(path string) []string {
 		"-vn", "-sn", "-f", "s16le", "-y", "/dev/null",
 	}
 
-	output, _ := exec.Command("ffmpeg", args...).CombinedOutput()
+	output, err := exec.Command("ffmpeg", args...).CombinedOutput()
+	if err != nil {
+		slog.Warn("Silence detection failed", "path", path, "error", err)
+		return nil
+	}
 	lines := strings.Split(string(output), "\n")
 
 	var splits []string
@@ -389,8 +393,8 @@ func (p *FFmpegProcessor) detectSilence(path string) []string {
 		if strings.Contains(line, "lavfi.silence_start") {
 			parts := strings.Split(line, "=")
 			if len(parts) > 1 {
-				t, _ := strconv.ParseFloat(parts[1], 64)
-				if t-prev >= p.config.Audio.MinSplitSegment {
+				t, err := strconv.ParseFloat(parts[1], 64)
+				if err == nil && t-prev >= p.config.Audio.MinSplitSegment {
 					splits = append(splits, fmt.Sprintf("%.2f", t))
 					prev = t
 				}
@@ -431,17 +435,26 @@ func getFirstStream(streams []FFProbeStream) *FFProbeStream {
 }
 
 func parseBitrate(s string) int {
-	n, _ := strconv.Atoi(s)
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return 0
+	}
 	return n
 }
 
 func parseSampleRate(s string) int {
-	n, _ := strconv.Atoi(s)
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return 0
+	}
 	return n
 }
 
 func parseInt(s string) int {
-	n, _ := strconv.Atoi(s)
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return 0
+	}
 	return n
 }
 
