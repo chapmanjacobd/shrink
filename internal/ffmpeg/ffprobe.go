@@ -1,4 +1,4 @@
-package commands
+package ffmpeg
 
 import (
 	"encoding/json"
