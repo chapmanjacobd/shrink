@@ -102,8 +102,17 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *models.Shri
 		return models.ProcessResult{SourcePath: m.Path, PartFiles: partFiles, Error: err}
 	}
 
+	// Verify that something was actually extracted
+	// On Windows, unar might exit with 0 even if it fails to extract due to missing parts
+	entries, err := os.ReadDir(outputDir)
+	if err != nil || len(entries) == 0 {
+		os.RemoveAll(outputDir)
+		return models.ProcessResult{SourcePath: m.Path, PartFiles: partFiles, Error: fmt.Errorf("extraction produced no files")}
+	}
+
 	// Flatten any wrapper folders that might have been created
 	flattenWrapperFolders(outputDir)
+
 
 	// Find and process all media recursively
 	filepath.Walk(outputDir, func(path string, info os.FileInfo, err error) error {
@@ -127,7 +136,7 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *models.Shri
 						os.Remove(path)
 					} else {
 						for _, out := range res.Outputs {
-							if out.Path != path {
+							if !pathsEqual(out.Path, path) {
 								os.Remove(out.Path)
 							}
 						}
@@ -166,7 +175,7 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *models.Shri
 					} else {
 						// Delete transcode and keep original
 						for _, out := range res.Outputs {
-							if out.Path != path {
+							if !pathsEqual(out.Path, path) {
 								os.Remove(out.Path)
 							}
 						}
@@ -186,7 +195,7 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *models.Shri
 				os.Remove(path)
 				// Also delete any multi-part archive parts
 				for _, partFile := range nestedPartFiles {
-					if partFile != path {
+					if !pathsEqual(partFile, path) {
 						os.Remove(partFile)
 					}
 				}
@@ -202,11 +211,12 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *models.Shri
 		if !filepath.IsAbs(partFile) {
 			partFile = filepath.Join(filepath.Dir(m.Path), partFile)
 		}
-		if partFile != m.Path {
+		if !pathsEqual(partFile, m.Path) {
 			os.Remove(partFile)
 			slog.Debug("Deleted multi-part archive part", "path", partFile)
 		}
 	}
+
 
 
 	return models.ProcessResult{
@@ -358,12 +368,26 @@ func (p *ArchiveProcessor) Process(ctx context.Context, m *models.ShrinkMedia, c
 	return p.ExtractAndProcess(ctx, m, cfg, imageProc, p.ffmpeg, registry)
 }
 
+// pathsEqual compares two paths for equality, handling Windows case-insensitivity
+func pathsEqual(p1, p2 string) bool {
+	abs1, err1 := filepath.Abs(p1)
+	abs2, err2 := filepath.Abs(p2)
+	if err1 != nil || err2 != nil {
+		return p1 == p2
+	}
+	// Case-insensitive comparison for Windows
+	if strings.EqualFold(abs1, abs2) {
+		return true
+	}
+	// Clean paths for extra safety
+	return filepath.Clean(abs1) == filepath.Clean(abs2)
+}
+
 // getPartFiles returns list of all part files for a multi-part archive
 func (p *ArchiveProcessor) getPartFiles(path string) []string {
 	partFilesMap := make(map[string]bool)
 	dir := filepath.Dir(path)
 	baseName := filepath.Base(path)
-	absMainPath, _ := filepath.Abs(path)
 
 	// Get parts from lsar XADVolumes
 	lsar := utils.GetCommandPath("lsar")
@@ -382,8 +406,7 @@ func (p *ArchiveProcessor) getPartFiles(path string) []string {
 					}
 					// Only include files that exist and are not the main archive
 					if info, err := os.Stat(partFile); err == nil && !info.IsDir() {
-						absPartPath, _ := filepath.Abs(partFile)
-						if absPartPath != absMainPath {
+						if !pathsEqual(partFile, path) {
 							partFilesMap[partFile] = true
 						}
 					}
@@ -401,8 +424,7 @@ func (p *ArchiveProcessor) getPartFiles(path string) []string {
 	if pattern, err := filepath.Glob(filepath.Join(dir, baseWithoutExt+".z*")); err == nil {
 		for _, p := range pattern {
 			if info, err := os.Stat(p); err == nil && !info.IsDir() {
-				absPartPath, _ := filepath.Abs(p)
-				if absPartPath != absMainPath {
+				if !pathsEqual(p, path) {
 					partFilesMap[p] = true
 				}
 			}
@@ -413,13 +435,13 @@ func (p *ArchiveProcessor) getPartFiles(path string) []string {
 	if pattern, err := filepath.Glob(filepath.Join(dir, baseWithoutExt+".???")); err == nil {
 		for _, p := range pattern {
 			if info, err := os.Stat(p); err == nil && !info.IsDir() {
-				absPartPath, _ := filepath.Abs(p)
-				if absPartPath != absMainPath {
+				if !pathsEqual(p, path) {
 					partFilesMap[p] = true
 				}
 			}
 		}
 	}
+
 
 
 	// Pattern 3: .partNN.rar or .rNN.rar (RAR split files)
