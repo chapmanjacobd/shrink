@@ -40,18 +40,24 @@ func FormatDuration(seconds int) string {
 	if seconds == 0 {
 		return "-"
 	}
-	d := seconds / 86400
+	y := seconds / (365 * 86400)
+	d := (seconds % (365 * 86400)) / 86400
 	h := (seconds % 86400) / 3600
 	m := (seconds % 3600) / 60
-	s := seconds % 60
 
-	if d > 0 {
-		return fmt.Sprintf("%dd %02d:%02d", d, h, m)
+	if y > 0 {
+		return fmt.Sprintf("%dy %dd", y, d)
+	}
+	if d > 45 {
+		return fmt.Sprintf("%dd", y*365+d)
+	}
+	if h > 72 {
+		return fmt.Sprintf("%dh", (y*365+d)*24+h)
 	}
 	if h > 0 {
-		return fmt.Sprintf("%d:%02d:%02d", h, m, s)
+		return fmt.Sprintf("%dh %dm", h, m)
 	}
-	return fmt.Sprintf("%02d:%02d", m, s)
+	return fmt.Sprintf("%dm", m)
 }
 
 // FormatSize formats bytes into human readable size using base 1024
