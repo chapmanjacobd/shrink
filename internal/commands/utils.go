@@ -38,6 +38,9 @@ func (c *ShrinkCmd) scanDirectory(dirPath string) ([]models.ShrinkMedia, error) 
 		// Check if this is a media file
 		isMedia := utils.MediaExtensionMap[ext] || utils.ArchiveExtensionMap[ext]
 		if !isMedia {
+			if ext != "" {
+				c.unknownExtensions[ext] += info.Size()
+			}
 			return nil
 		}
 

@@ -119,7 +119,7 @@ func (c *ShrinkCmd) printSummary(media []models.ShrinkMedia) {
 	// Print summary table
 	fmt.Println()
 	fmt.Printf("%-24s %6s %12s %12s %12s %12s %12s\n",
-		"Media Type", "Count", "Current", "Future", "Savings", "Proc Time", "Speed")
+		"Media Type", "Count", "Current", "Future", "Savings", "ETA", "Speed")
 	fmt.Println(strings.Repeat("-", 95))
 
 	// Sort keys for consistent output
@@ -151,6 +151,36 @@ func (c *ShrinkCmd) printSummary(media []models.ShrinkMedia) {
 		utils.FormatSize(totalFuture),
 		utils.FormatSize(totalSavings),
 		utils.FormatDuration(totalTime))
+	fmt.Println()
+
+	c.printUnknownExtensions()
+}
+
+func (c *ShrinkCmd) printUnknownExtensions() {
+	if len(c.unknownExtensions) == 0 {
+		return
+	}
+
+	fmt.Println("Unknown File Extensions Scanned")
+	fmt.Printf("%-12s %12s\n", "Extension", "Total Size")
+	fmt.Println(strings.Repeat("-", 25))
+
+	// Sort by size descending
+	type extSize struct {
+		ext  string
+		size int64
+	}
+	var sorted []extSize
+	for ext, size := range c.unknownExtensions {
+		sorted = append(sorted, extSize{ext, size})
+	}
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i].size > sorted[j].size
+	})
+
+	for _, es := range sorted {
+		fmt.Printf("%-12s %12s\n", es.ext, utils.FormatSize(es.size))
+	}
 	fmt.Println()
 }
 
@@ -254,7 +284,7 @@ func (c *ShrinkCmd) processSingle(ctx context.Context, m models.ShrinkMedia, reg
 	var originalAtime, originalMtime time.Time
 	if stat, err := os.Stat(m.Path); err != nil {
 		// File doesn't exist - mark as skipped (deleted)
-		slog.Warn("File not found, marking as skipped", "path", m.Path)
+		slog.Info("File not found, marking as skipped", "path", m.Path)
 		metrics.RecordSkipped(m.DisplayCategory())
 		db.MarkDeleted(c.sqlDBs, m.Path)
 		return models.ProcessResult{SourcePath: m.Path, Error: err}
@@ -280,7 +310,10 @@ func (c *ShrinkCmd) processSingle(ctx context.Context, m models.ShrinkMedia, reg
 	result := processor.Process(processCtx, &m, cfg, registry)
 
 	if result.Error != nil {
-		slog.Error("Processing failed", "path", m.Path, "error", result.Error)
+		// Only log if it's not a timeout or cancellation (those are logged by the processor)
+		if result.Error != context.DeadlineExceeded && result.Error != context.Canceled {
+			slog.Error("Processing failed", "path", m.Path, "error", result.Error)
+		}
 		metrics.RecordFailure(m.DisplayCategory())
 		if cfg.Common.MoveBroken != "" {
 			c.moveToBroken(m.Path, result.PartFiles)
@@ -381,17 +414,22 @@ func (c *ShrinkCmd) preserveTimestamps(m *models.ShrinkMedia, result models.Proc
 }
 
 func (c *ShrinkCmd) getTimeout(m models.ShrinkMedia) time.Duration {
+	timeoutMult := 1.0
+	if utils.HasUnreliableDuration(m.Ext) {
+		timeoutMult = 2.0 // Double timeout for unreliable formats (VOB, etc)
+	}
+
 	switch m.Category {
 	case "Video":
 		duration := utils.GetDurationForTimeout(m.Duration, m.Size, m.Ext)
 		if duration > 30 {
-			return time.Duration(duration*c.VideoTimeoutMult) * time.Second
+			return time.Duration(duration*c.VideoTimeoutMult*timeoutMult) * time.Second
 		}
 		return utils.ParseDurationString(c.VideoTimeout)
 	case "Audio":
 		duration := m.Duration
 		if duration > 30 {
-			return time.Duration(duration*c.AudioTimeoutMult) * time.Second
+			return time.Duration(duration*c.AudioTimeoutMult*timeoutMult) * time.Second
 		}
 		return utils.ParseDurationString(c.AudioTimeout)
 	case "Image":

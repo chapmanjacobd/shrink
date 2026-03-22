@@ -1,3 +1,4 @@
+// Package ffmpeg provides wrappers for FFmpeg and FFprobe operations.
 package ffmpeg
 
 import (

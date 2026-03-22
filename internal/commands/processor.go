@@ -18,7 +18,7 @@ func (b *BaseProcessor) Category() string {
 	return b.category
 }
 
-// ProcessorRegistry manages all media processors
+// MediaRegistry manages all media processors
 type MediaRegistry struct {
 	processors []models.MediaProcessor
 }
@@ -56,8 +56,14 @@ func ShouldShrink(m *models.ShrinkMedia, futureSize int64, cfg *models.Processor
 	if cfg.Common.ForceShrink {
 		return true
 	}
-	shouldShrinkBuffer := int64(float64(futureSize) * getMinSavings(m, cfg))
-	return m.Size > (futureSize + shouldShrinkBuffer)
+	minSavings := getMinSavings(m, cfg)
+	if minSavings < 1.0 {
+		// Threshold is a percentage of future size
+		shouldShrinkBuffer := int64(float64(futureSize) * minSavings)
+		return m.Size > (futureSize + shouldShrinkBuffer)
+	}
+	// Threshold is absolute bytes
+	return (m.Size - futureSize) >= int64(minSavings)
 }
 
 func getMinSavings(m *models.ShrinkMedia, cfg *models.ProcessorConfig) float64 {

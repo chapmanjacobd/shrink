@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -24,13 +25,16 @@ type ShrinkCmd struct {
 
 	Databases []string `arg:"" required:"" help:"SQLite database files or directories to scan"`
 
-	sqlDBs []*sql.DB
+	sqlDBs            []*sql.DB
+	unknownExtensions map[string]int64
 }
 
 func (c *ShrinkCmd) Run(ctx *kong.Context) error {
 	c.ApplyProfile()
 	models.SetupLogging(c.Verbose)
 	defer c.closeDatabases()
+
+	c.unknownExtensions = make(map[string]int64)
 
 	// Build processor configuration
 	cfg := c.buildProcessorConfig()
@@ -63,6 +67,7 @@ func (c *ShrinkCmd) Run(ctx *kong.Context) error {
 
 	slog.Info("Loaded media", "count", len(allMedia))
 	if len(allMedia) == 0 {
+		c.printUnknownExtensions()
 		slog.Info("No media found")
 		return nil
 	}
@@ -318,9 +323,36 @@ func (c *ShrinkCmd) moveToBroken(path string, partFiles []string) {
 
 func (c *ShrinkCmd) moveTo(path string) {
 	if c.Move != "" && path != "" {
+		if err := os.MkdirAll(c.Move, 0o755); err != nil {
+			slog.Warn("Failed to create move destination directory", "dir", c.Move, "error", err)
+			return
+		}
 		dest := filepath.Join(c.Move, filepath.Base(path))
+		// Try Rename first (fast on same filesystem)
 		if err := os.Rename(path, dest); err != nil {
-			slog.Warn("Failed to move file", "from", path, "to", dest, "error", err)
+			// If rename fails (e.g. cross-filesystem), try copying
+			in, err := os.Open(path)
+			if err != nil {
+				slog.Warn("Failed to move file (failed to open source)", "from", path, "to", dest, "error", err)
+				return
+			}
+			defer in.Close()
+
+			out, err := os.Create(dest)
+			if err != nil {
+				slog.Warn("Failed to move file (failed to create dest)", "from", path, "to", dest, "error", err)
+				return
+			}
+			defer out.Close()
+
+			if _, err = io.Copy(out, in); err != nil {
+				slog.Warn("Failed to move file (failed to copy content)", "from", path, "to", dest, "error", err)
+				return
+			}
+
+			// Delete original after successful copy
+			in.Close()
+			os.Remove(path)
 		}
 	}
 }

@@ -1,3 +1,4 @@
+// Package models defines the core data structures used throughout the application.
 package models
 
 // ProcessOutputFile represents a new file created by a processor

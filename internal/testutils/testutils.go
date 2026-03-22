@@ -1,3 +1,4 @@
+// Package testutils provides helper functions and types for testing the shrink application.
 package testutils
 
 import (
@@ -11,7 +12,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
-// Define structural types for natural language testing
+// TestFile represents a file used in natural language testing scenarios
 type TestFile struct {
 	Name      string
 	SrcPath   string // Path to tiny media in testdata

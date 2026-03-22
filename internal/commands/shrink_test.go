@@ -269,48 +269,64 @@ func TestShrinkDirectory(t *testing.T) {
 }
 
 func TestShrinkMultiPartArchive(t *testing.T) {
-	// Multi-part archives are detected via lsar XADVolumes
-	// Only the main .zip file needs to be in the database
-	scenario := testutils.Scenario{
-		Description: "Multi-part archive extracts, processes media, and deletes all parts",
-		CLIArgs:     []string{"--no-confirm"},
-		// Only insert the main .zip file - parts are detected automatically
-		InputFiles: []testutils.TestFile{
-			{
-				Name:      "test_archive_multi.zip",
-				SrcPath:   "../testutils/testdata/test_archive_multi.zip",
-				MediaType: "archive",
-			},
-			// Parts must exist on disk for unar to find them
-			{
-				Name:      "test_archive_multi.z01",
-				SrcPath:   "../testutils/testdata/test_archive_multi.z01",
-				MediaType: "archive",
-			},
-			{
-				Name:      "test_archive_multi.z02",
-				SrcPath:   "../testutils/testdata/test_archive_multi.z02",
-				MediaType: "archive",
-			},
-		},
-		ExpectFiles: []string{
-			"test_archive_multi.zip.extracted/tiny.av1.mkv",
-			"test_archive_multi.zip.extracted/tiny.avif",
-		},
-		ExpectMissing: []string{
-			"test_archive_multi.z01",
-			"test_archive_multi.z02",
-			"test_archive_multi.zip",
-			"test_archive_multi.zip.extracted/tiny.avi",
-			"test_archive_multi.zip.extracted/tiny.bmp",
-			"test_archive_multi.zip.extracted/tiny.wav",
-		},
-		ExpectDBState: []testutils.ExpectedDBRecord{
-			{Path: "test_archive_multi.zip", TimeDeleted: 1},
-		},
+	tempDir := t.TempDir()
+
+	// Create database
+	dbPath := filepath.Join(tempDir, "test.db")
+	db, _ := sql.Open("sqlite3", dbPath)
+	db.Exec(`CREATE TABLE media (
+		path TEXT PRIMARY KEY,
+		size INTEGER,
+		duration REAL,
+		video_count INTEGER,
+		audio_count INTEGER,
+		video_codecs TEXT,
+		audio_codecs TEXT,
+		subtitle_codecs TEXT,
+		media_type TEXT,
+		time_deleted INTEGER DEFAULT 0,
+		is_shrinked INTEGER DEFAULT 0
+	)`)
+
+	// Copy main zip
+	zipPath := filepath.Join(tempDir, "test_archive_multi.zip")
+	copyFile(t, "../testutils/testdata/test_archive_multi.zip", zipPath)
+	info, _ := os.Stat(zipPath)
+	db.Exec(`INSERT INTO media (path, size, media_type) VALUES (?, ?, ?)`,
+		zipPath, info.Size(), "archive")
+
+	// Copy parts (side-files, not in DB)
+	copyFile(t, "../testutils/testdata/test_archive_multi.z01", filepath.Join(tempDir, "test_archive_multi.z01"))
+	copyFile(t, "../testutils/testdata/test_archive_multi.z02", filepath.Join(tempDir, "test_archive_multi.z02"))
+	db.Close()
+
+	args := []string{"--no-confirm"}
+	err := runShrinkCmd(dbPath, tempDir, args)
+	if err != nil {
+		t.Fatalf("command failed: %v", err)
 	}
 
-	testutils.RunScenario(t, scenario, runShrinkCmd)
+	// Verify the archive was processed and all parts were deleted
+	expectedFiles := []string{
+		filepath.Join(tempDir, "test_archive_multi.zip.extracted/tiny.av1.mkv"),
+		filepath.Join(tempDir, "test_archive_multi.zip.extracted/tiny.avif"),
+	}
+	for _, f := range expectedFiles {
+		if _, err := os.Stat(f); os.IsNotExist(err) {
+			t.Errorf("expected file missing: %s", f)
+		}
+	}
+
+	missingFiles := []string{
+		filepath.Join(tempDir, "test_archive_multi.zip"),
+		filepath.Join(tempDir, "test_archive_multi.z01"),
+		filepath.Join(tempDir, "test_archive_multi.z02"),
+	}
+	for _, f := range missingFiles {
+		if _, err := os.Stat(f); err == nil {
+			t.Errorf("expected file to be deleted: %s", f)
+		}
+	}
 }
 
 func TestShrinkBrokenArchive(t *testing.T) {

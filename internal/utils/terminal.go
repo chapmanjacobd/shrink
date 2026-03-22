@@ -1,3 +1,4 @@
+// Package utils provides common utility functions for file systems and terminal interaction.
 package utils
 
 import (
@@ -9,45 +10,59 @@ import (
 	"golang.org/x/term"
 )
 
-// TerminalWidth tracks the current terminal width
-type TerminalWidth struct {
+// TerminalSize tracks the current terminal dimensions
+type TerminalSize struct {
 	mu       sync.RWMutex
 	width    int
+	height   int
 	initOnce sync.Once
 }
 
-var terminalWidth TerminalWidth
+var terminalSize TerminalSize
 
 // GetTerminalWidth returns the current terminal width
 func GetTerminalWidth() int {
-	terminalWidth.initOnce.Do(func() {
-		terminalWidth.updateWidth()
-		terminalWidth.watchResize()
+	terminalSize.initOnce.Do(func() {
+		terminalSize.updateSize()
+		terminalSize.watchResize()
 	})
-	terminalWidth.mu.RLock()
-	defer terminalWidth.mu.RUnlock()
-	return terminalWidth.width
+	terminalSize.mu.RLock()
+	defer terminalSize.mu.RUnlock()
+	return terminalSize.width
+}
+
+// GetTerminalHeight returns the current terminal height
+func GetTerminalHeight() int {
+	terminalSize.initOnce.Do(func() {
+		terminalSize.updateSize()
+		terminalSize.watchResize()
+	})
+	terminalSize.mu.RLock()
+	defer terminalSize.mu.RUnlock()
+	return terminalSize.height
 }
 
 // watchResize listens for terminal resize events
-func (t *TerminalWidth) watchResize() {
+func (t *TerminalSize) watchResize() {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGWINCH)
 	go func() {
 		for range sigChan {
-			t.updateWidth()
+			t.updateSize()
 		}
 	}()
 }
 
-// updateWidth gets the current terminal width
-func (t *TerminalWidth) updateWidth() {
-	w, _, err := term.GetSize(int(os.Stdout.Fd()))
+// updateSize gets the current terminal dimensions
+func (t *TerminalSize) updateSize() {
+	w, h, err := term.GetSize(int(os.Stdout.Fd()))
 	if err != nil {
 		w = 80 // Fallback
+		h = 24
 	}
 	t.mu.Lock()
 	t.width = w
+	t.height = h
 	t.mu.Unlock()
 }
 

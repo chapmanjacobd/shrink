@@ -224,7 +224,7 @@ func (m *ShrinkMetrics) PrintProgress() {
 
 	// Print summary table header
 	sb.WriteString(fmt.Sprintf("%-12s %6s %6s %6s %6s %10s %10s %8s\n",
-		"Media Type", "Queue", "Skip", "Fail", "OK", "Saved", "Time", "Speed"))
+		"Media Type", "Queue", "Skip", "Fail", "OK", "Saved", "ETA", "Speed"))
 	sb.WriteString(strings.Repeat("-", 78))
 	sb.WriteString("\n")
 
@@ -235,12 +235,46 @@ func (m *ShrinkMetrics) PrintProgress() {
 		queue int
 	}
 	var sortedTypes []mediaTypeStats
-	for mediaType, stats := range m.types {
-		queue := stats.Total - stats.Processed - stats.Skipped
-		sortedTypes = append(sortedTypes, mediaTypeStats{name: mediaType, stats: stats, queue: queue})
+
+	// Check if we should collapse categories (if too many entries for terminal)
+	collapse := len(m.types) > (utils.GetTerminalHeight() + 8)
+
+	if collapse {
+		collapsed := make(map[string]*MediaTypeStats)
+		for mt, stats := range m.types {
+			category := strings.Split(mt, ":")[0]
+			cStats := collapsed[category]
+			if cStats == nil {
+				cStats = &MediaTypeStats{}
+				collapsed[category] = cStats
+			}
+			cStats.Total += stats.Total
+			cStats.Processed += stats.Processed
+			cStats.Success += stats.Success
+			cStats.Failed += stats.Failed
+			cStats.Skipped += stats.Skipped
+			cStats.TotalSize += stats.TotalSize
+			cStats.FutureSize += stats.FutureSize
+			cStats.TotalTime += stats.TotalTime
+			cStats.TotalDuration += stats.TotalDuration
+		}
+		for category, stats := range collapsed {
+			queue := stats.Total - stats.Processed - stats.Skipped
+			sortedTypes = append(sortedTypes, mediaTypeStats{name: category, stats: stats, queue: queue})
+		}
+	} else {
+		for mediaType, stats := range m.types {
+			queue := stats.Total - stats.Processed - stats.Skipped
+			sortedTypes = append(sortedTypes, mediaTypeStats{name: mediaType, stats: stats, queue: queue})
+		}
 	}
+
 	sort.Slice(sortedTypes, func(i, j int) bool {
-		return sortedTypes[i].queue > sortedTypes[j].queue
+		a, b := sortedTypes[i], sortedTypes[j]
+		if a.queue != b.queue {
+			return a.queue > b.queue
+		}
+		return a.name < b.name
 	})
 
 	for _, mt := range sortedTypes {

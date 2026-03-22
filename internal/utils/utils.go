@@ -51,15 +51,15 @@ func FormatDuration(seconds int) string {
 	if h > 0 {
 		return fmt.Sprintf("%d:%02d:%02d", h, m, s)
 	}
-	return fmt.Sprintf("%d:%02d", m, s)
+	return fmt.Sprintf("%02d:%02d", m, s)
 }
 
-// FormatSize formats bytes into human readable size
+// FormatSize formats bytes into human readable size using base 1024
 func FormatSize(bytes int64) string {
 	if bytes == 0 {
 		return "-"
 	}
-	const unit = 1000
+	const unit = 1024
 	if bytes < unit {
 		return fmt.Sprintf("%d B", bytes)
 	}
@@ -87,16 +87,19 @@ func ParseDurationString(s string) time.Duration {
 	return time.Duration(n * float64(time.Minute))
 }
 
-// ParseBitrate parses bitrate strings like "128kbps", "1Mbps"
+// ParseBitrate parses bitrate strings like "128kbps", "1Mbps", "1k", "1M"
 func ParseBitrate(s string) int64 {
 	s = strings.ToLower(strings.TrimSpace(s))
+	if s == "" {
+		return 0
+	}
 	multiplier := int64(1)
-	if strings.HasSuffix(s, "kbps") {
+	if strings.HasSuffix(s, "kbps") || strings.HasSuffix(s, "k") {
 		multiplier = 1000
-		s = strings.TrimSuffix(s, "kbps")
-	} else if strings.HasSuffix(s, "mbps") {
+		s = strings.TrimSuffix(strings.TrimSuffix(s, "kbps"), "k")
+	} else if strings.HasSuffix(s, "mbps") || strings.HasSuffix(s, "m") {
 		multiplier = 1000000
-		s = strings.TrimSuffix(s, "mbps")
+		s = strings.TrimSuffix(strings.TrimSuffix(s, "mbps"), "m")
 	} else if before, ok := strings.CutSuffix(s, "bps"); ok {
 		s = before
 	}
@@ -107,19 +110,22 @@ func ParseBitrate(s string) int64 {
 	return n * multiplier
 }
 
-// ParseSize parses size strings like "30KiB", "1MB"
+// ParseSize parses size strings like "30KiB", "1MB", "1G"
 func ParseSize(s string) int64 {
 	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0
+	}
 	multiplier := int64(1)
-	if strings.HasSuffix(s, "KiB") || strings.HasSuffix(s, "KB") {
+	if strings.HasSuffix(s, "KiB") || strings.HasSuffix(s, "KB") || strings.HasSuffix(s, "k") || strings.HasSuffix(s, "K") {
 		multiplier = 1024
-		s = strings.TrimSuffix(strings.TrimSuffix(s, "KiB"), "KB")
-	} else if strings.HasSuffix(s, "MiB") || strings.HasSuffix(s, "MB") {
+		s = strings.TrimSuffix(strings.TrimSuffix(strings.TrimSuffix(strings.TrimSuffix(s, "KiB"), "KB"), "k"), "K")
+	} else if strings.HasSuffix(s, "MiB") || strings.HasSuffix(s, "MB") || strings.HasSuffix(s, "m") || strings.HasSuffix(s, "M") {
 		multiplier = 1024 * 1024
-		s = strings.TrimSuffix(strings.TrimSuffix(s, "MiB"), "MB")
-	} else if strings.HasSuffix(s, "GiB") || strings.HasSuffix(s, "GB") {
+		s = strings.TrimSuffix(strings.TrimSuffix(strings.TrimSuffix(strings.TrimSuffix(s, "MiB"), "MB"), "m"), "M")
+	} else if strings.HasSuffix(s, "GiB") || strings.HasSuffix(s, "GB") || strings.HasSuffix(s, "g") || strings.HasSuffix(s, "G") {
 		multiplier = 1024 * 1024 * 1024
-		s = strings.TrimSuffix(strings.TrimSuffix(s, "GiB"), "GB")
+		s = strings.TrimSuffix(strings.TrimSuffix(strings.TrimSuffix(strings.TrimSuffix(s, "GiB"), "GB"), "g"), "G")
 	} else if before, ok := strings.CutSuffix(s, "B"); ok {
 		s = before
 	}
@@ -140,7 +146,13 @@ func ParsePercentOrBytes(s string) float64 {
 		}
 		return pct / 100.0
 	}
-	return float64(ParseSize(s))
+	// Check if it's a size string (has non-digit suffix)
+	if len(s) > 0 && (s[len(s)-1] < '0' || s[len(s)-1] > '9') {
+		return float64(ParseSize(s))
+	}
+	// Plain float (could be percentage or bytes depending on value)
+	n, _ := strconv.ParseFloat(s, 64)
+	return n
 }
 
 var SQLiteExtensions = []string{".sqlite", ".sqlite3", ".db", ".db3", ".s3db", ".sl3"}
@@ -183,7 +195,8 @@ var ImageExtensions = []string{
 }
 
 var TextExtensions = []string{
-	"epub", "mobi", "pdf", "azw", "azw3", "fb2", "djvu", "cbz", "cbr", "zim",
+	"epub", "mobi", "pdf", "azw", "azw3", "fb2", "djvu",
+	"azw4", "cbc", "chm", "docx", "fbz", "htmlz", "lit", "lrf", "odt",
 }
 
 var (
@@ -223,7 +236,7 @@ var SubtitleExtensions = []string{
 }
 
 var ArchiveExtensions = []string{
-	"7z", "arj", "arc", "adf", "br", "bz2", "gz", "iso", "lha", "lzh", "lzx", "pak", "rar", "sit", "tar", "tar.bz2", "tar.gz", "tar.xz", "tar.zst", "tbz2", "tgz", "txz", "tzst", "xz", "zoo", "zip", "zst", "zstd",
+	"7z", "arj", "arc", "adf", "br", "bz2", "gz", "iso", "lha", "lzh", "lzx", "pak", "rar", "sit", "tar", "tar.bz2", "tar.gz", "tar.xz", "tar.zst", "tbz2", "tgz", "txz", "tzst", "xz", "zoo", "zip", "zst", "zstd", "cbz", "cbr",
 }
 
 // UnreliableDurationFormats are formats known to have unreliable duration metadata
@@ -306,6 +319,9 @@ func EstimateDurationFromSizeWithFormat(size int64, ext string) float64 {
 //
 // Returns 0 if size is invalid (<= 0)
 func GetDurationForTimeout(duration float64, size int64, ext string) float64 {
+	if est, ok := ShouldOverrideDuration(duration, size, ext); ok {
+		return est
+	}
 	if duration > 0 {
 		return duration
 	}

@@ -80,7 +80,7 @@ func ProbeMedia(path string) (*FFProbeResult, error) {
 	for _, s := range probe.Streams {
 		switch s.CodecType {
 		case "video":
-			//attached pics (album art) often have mjpeg or png codec
+			// attached pics (album art) often have mjpeg or png codec
 			if s.Disposition["attached_pic"] == 1 || s.CodecName == "mjpeg" || s.CodecName == "png" {
 				probe.AlbumArtStreams = append(probe.AlbumArtStreams, s)
 			} else if s.Width > 0 || s.Height > 0 {

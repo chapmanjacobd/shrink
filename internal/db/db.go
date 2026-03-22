@@ -1,3 +1,4 @@
+// Package db provides database access and migration logic for media metadata.
 package db
 
 import (

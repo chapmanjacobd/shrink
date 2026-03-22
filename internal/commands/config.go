@@ -1,3 +1,4 @@
+// Package commands implements the CLI commands and orchestration logic for the shrink application.
 package commands
 
 // Config contains all command-line flags and configuration for the shrink application
