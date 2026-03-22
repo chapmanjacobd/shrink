@@ -81,7 +81,7 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *models.Shri
 	if err != nil {
 		// Clean up on failure
 		os.RemoveAll(outputDir)
-		return models.ProcessResult{SourcePath: m.Path, PartFiles: partFiles, Error: fmt.Errorf("unar error: %v, output: %s", err, string(output))}
+		return models.ProcessResult{SourcePath: m.Path, PartFiles: partFiles, Error: err, Output: string(output)}
 	}
 
 	// Verify that something was actually extracted
@@ -89,7 +89,7 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *models.Shri
 	entries, err := os.ReadDir(outputDir)
 	if err != nil || len(entries) == 0 {
 		os.RemoveAll(outputDir)
-		return models.ProcessResult{SourcePath: m.Path, PartFiles: partFiles, Error: fmt.Errorf("extraction produced no files. unar output: %s", string(output))}
+		return models.ProcessResult{SourcePath: m.Path, PartFiles: partFiles, Error: fmt.Errorf("extraction produced no files"), Output: string(output)}
 	}
 
 	// Log extracted files for debugging
@@ -172,7 +172,11 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *models.Shri
 			nestedMedia := &models.ShrinkMedia{Path: path, Size: info.Size(), Ext: ext, MediaType: "archive"}
 			res := p.ExtractAndProcess(ctx, nestedMedia, cfg, imageProc, ffmpegProc, registry)
 			if res.Error != nil {
-				slog.Warn("Failed to extract nested archive", "path", path, "error", res.Error)
+				if res.Output != "" {
+					slog.Warn("Failed to extract nested archive", "path", path, "error", res.Error, "output", res.Output)
+				} else {
+					slog.Warn("Failed to extract nested archive", "path", path, "error", res.Error)
+				}
 			}
 			if res.Success {
 				// Get part files for multi-part archives BEFORE deleting the main file

@@ -400,7 +400,11 @@ func (c *ShrinkCmd) handleProcessingError(m models.ShrinkMedia, result models.Pr
 	} else if result.Error == context.DeadlineExceeded {
 		slog.Error("Processing timed out", "path", m.Path)
 	} else {
-		slog.Error("Processing failed", "path", m.Path, "error", result.Error)
+		if result.Output != "" {
+			slog.Error("Processing failed", "path", m.Path, "error", result.Error, "output", result.Output)
+		} else {
+			slog.Error("Processing failed", "path", m.Path, "error", result.Error)
+		}
 	}
 	metrics.RecordFailure(m.DisplayCategory())
 	if cfg.Common.MoveBroken != "" {

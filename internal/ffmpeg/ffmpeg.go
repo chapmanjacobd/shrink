@@ -117,23 +117,18 @@ func (p *FFmpegProcessor) Process(ctx context.Context, m *models.ShrinkMedia, cf
 
 		if isEnvError {
 			// Environment errors should be re-raised (they're not file-specific)
-			return models.ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("ffmpeg environment error: %w", err)}
+			return models.ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("ffmpeg environment error: %w", err), Output: string(output)}
 		} else if isUnsupported {
 			// Unsupported codec/format - remove transcode attempt and return original
 			os.Remove(outputPath)
 			slog.Info("Unsupported format, keeping original", "path", m.Path)
 			return models.ProcessResult{SourcePath: m.Path, Success: true, Outputs: []models.ProcessOutputFile{{Path: m.Path, Size: m.Size}}}
-		} else if isFileError {
-			// File-specific error - continue processing (may be recoverable)
-			slog.Warn("FFmpeg file error", "output", string(output), "path", m.Path)
-		} else {
-			slog.Error("FFmpeg error", "output", string(output), "path", m.Path)
 		}
 
 		if p.config.Common.DeleteUnplayable {
-			return models.ProcessResult{SourcePath: m.Path, Success: false, Error: err}
+			return models.ProcessResult{SourcePath: m.Path, Success: false, Error: err, Output: string(output)}
 		}
-		return models.ProcessResult{SourcePath: m.Path, Error: err}
+		return models.ProcessResult{SourcePath: m.Path, Error: err, Output: string(output)}
 	}
 
 	// Validate transcode (may return multiple results if splitting was used)

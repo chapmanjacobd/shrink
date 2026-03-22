@@ -74,11 +74,11 @@ func (p *TextProcessor) processText(ctx context.Context, m *models.ShrinkMedia, 
 	}
 
 	cmd := exec.CommandContext(ctx, ebookConvert, args...)
-	_, err := cmd.CombinedOutput()
+	output, err := cmd.CombinedOutput()
 	if err != nil {
 		// Clean up on failure
 		os.RemoveAll(outputDir)
-		return models.ProcessResult{SourcePath: m.Path, Error: err}
+		return models.ProcessResult{SourcePath: m.Path, Error: err, Output: string(output)}
 	}
 
 	if !p.folderExists(outputDir) {

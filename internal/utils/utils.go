@@ -486,15 +486,6 @@ func PrintTableToString(headers []string, rows [][]string) string {
 	}
 	sb.WriteString(fmt.Sprintf(headerFormat, headerArgs...))
 
-	// Print separator
-	totalWidth := 0
-	for _, w := range colWidths {
-		totalWidth += w
-	}
-	totalWidth += len(colWidths) - 1 // add spaces between columns
-	sb.WriteString(strings.Repeat("-", totalWidth))
-	sb.WriteString("\n")
-
 	// Print rows
 	for _, row := range rows {
 		rowArgs := make([]any, numCols)

@@ -14,6 +14,7 @@ type ProcessResult struct {
 	PartFiles  []string            // Multi-part archive part files (for cleanup)
 	Success    bool                // Whether the overall operation succeeded
 	Error      error               // Error if the operation failed
+	Output     string              // Full command output (e.g. from ffmpeg)
 }
 
 // VideoConfig contains configuration for video processing
