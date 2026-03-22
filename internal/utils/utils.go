@@ -386,21 +386,47 @@ func PrintTableToString(headers []string, rows [][]string) string {
 		}
 	}
 
-	// Build format string
-	var headerParts []string
-	for _, w := range colWidths {
-		headerParts = append(headerParts, fmt.Sprintf("%%-%ds", w))
+	// Determine column alignment based on header names
+	// Numeric columns should be right-aligned
+	rightAlignHeaders := map[string]bool{
+		"Size": true, "Saved": true, "Time": true, "Speed": true,
+		"Success": true, "Failed": true, "Skipped": true,
+		"Queue": true, "OK": true, "Count": true, "Total": true,
+		"Duration": true, "Processed": true,
 	}
-	format := strings.Join(headerParts, " ") + "\n"
+	isNumericCol := make([]bool, numCols)
+	for i, h := range headers {
+		if rightAlignHeaders[h] {
+			isNumericCol[i] = true
+		}
+	}
+
+	// Build format strings (add 1 extra space padding per column)
+	// Use right-align for numeric columns, left-align for text
+	var headerFormatParts []string
+	for _, w := range colWidths {
+		headerFormatParts = append(headerFormatParts, fmt.Sprintf("%%-%ds", w+1))
+	}
+	headerFormat := strings.Join(headerFormatParts, " ") + "\n"
+
+	var rowFormatParts []string
+	for i, w := range colWidths {
+		if isNumericCol[i] {
+			rowFormatParts = append(rowFormatParts, fmt.Sprintf("%%%ds", w+1))
+		} else {
+			rowFormatParts = append(rowFormatParts, fmt.Sprintf("%%-%ds", w+1))
+		}
+	}
+	rowFormat := strings.Join(rowFormatParts, " ") + "\n"
 
 	var sb strings.Builder
 
 	// Print headers
-	headerArgs := make([]interface{}, len(headers))
+	headerArgs := make([]any, len(headers))
 	for i, h := range headers {
 		headerArgs[i] = h
 	}
-	sb.WriteString(fmt.Sprintf(format, headerArgs...))
+	sb.WriteString(fmt.Sprintf(headerFormat, headerArgs...))
 
 	// Print separator
 	totalWidth := 0
@@ -413,15 +439,15 @@ func PrintTableToString(headers []string, rows [][]string) string {
 
 	// Print rows
 	for _, row := range rows {
-		rowArgs := make([]interface{}, numCols)
-		for i := 0; i < numCols; i++ {
+		rowArgs := make([]any, numCols)
+		for i := range numCols {
 			if i < len(row) {
 				rowArgs[i] = row[i]
 			} else {
 				rowArgs[i] = ""
 			}
 		}
-		sb.WriteString(fmt.Sprintf(format, rowArgs...))
+		sb.WriteString(fmt.Sprintf(rowFormat, rowArgs...))
 	}
 
 	return sb.String()
