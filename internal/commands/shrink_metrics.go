@@ -248,7 +248,7 @@ func (m *ShrinkMetrics) PrintProgress() {
 	}
 
 	// Print summary table
-	headers := []string{"Media Type", "Queued", "Running", "Skip", "Fail", "OK", "Saved", "Time", "Speed"}
+	headers := []string{"Media Type", "Queued", "Running", "Skip", "Fail", "OK", "Saved", "Speed"}
 	var rows [][]string
 
 	// Sort media types by Queue (descending) for consistent ordering
@@ -309,7 +309,6 @@ func (m *ShrinkMetrics) PrintProgress() {
 		if mt.stats.SpeedRatio() > 0 {
 			speed = fmt.Sprintf("%.1fx", mt.stats.SpeedRatio())
 		}
-		timeStr := utils.FormatDuration(mt.stats.TotalTime)
 		rows = append(rows, []string{
 			mt.name,
 			strconv.Itoa(mt.queue),
@@ -318,7 +317,6 @@ func (m *ShrinkMetrics) PrintProgress() {
 			strconv.Itoa(mt.stats.Failed),
 			strconv.Itoa(mt.stats.Success),
 			utils.FormatSize(mt.stats.SpaceSaved()),
-			timeStr,
 			speed,
 		})
 	}
@@ -336,7 +334,6 @@ func (m *ShrinkMetrics) PrintProgress() {
 		strconv.Itoa(totalFailed),
 		strconv.Itoa(totalSuccess),
 		utils.FormatSize(totalSavings),
-		utils.FormatDuration(totalTime),
 		overallSpeed,
 	})
 
@@ -434,7 +431,7 @@ func (m *ShrinkMetrics) LogSummary() {
 	fmt.Println("PROCESSING COMPLETE")
 	fmt.Println(strings.Repeat("=", 78))
 
-	headers := []string{"Media Type", "Success", "Failed", "Skipped", "Saved", "Time", "Speed"}
+	headers := []string{"Media Type", "Success", "Failed", "Skipped", "Saved", "Speed"}
 	var rows [][]string
 
 	for _, mt := range sortedTypes {
@@ -442,14 +439,12 @@ func (m *ShrinkMetrics) LogSummary() {
 		if mt.stats.SpeedRatio() > 0 {
 			speed = fmt.Sprintf("%.1fx", mt.stats.SpeedRatio())
 		}
-		timeStr := utils.FormatDuration(mt.stats.TotalTime)
 		rows = append(rows, []string{
 			mt.name,
 			strconv.Itoa(mt.stats.Success),
 			strconv.Itoa(mt.stats.Failed),
 			strconv.Itoa(mt.stats.Skipped),
 			utils.FormatSize(mt.stats.SpaceSaved()),
-			timeStr,
 			speed,
 		})
 	}
@@ -464,7 +459,6 @@ func (m *ShrinkMetrics) LogSummary() {
 		strconv.Itoa(totalFailed),
 		strconv.Itoa(totalProcessed - totalSuccess - totalFailed),
 		utils.FormatSize(totalSavings),
-		utils.FormatDuration(totalTime),
 		overallSpeed,
 	})
 
