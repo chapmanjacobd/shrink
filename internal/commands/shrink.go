@@ -315,7 +315,13 @@ func (c *ShrinkCmd) canProcessMedia(m *models.ShrinkMedia, tools InstalledTools)
 	// Image - requires ImageMagick
 	isImage := m.MediaType == "image" || (utils.ImageExtensionMap[m.Ext] && m.Duration == 0)
 	if isImage {
-		return "magick", tools.ImageMagick
+		if utils.CommandExists("magick") {
+			return "magick", tools.ImageMagick
+		}
+		if utils.CommandExists("convert") {
+			return "convert", tools.ImageMagick
+		}
+		return "magick", false
 	}
 
 	// Text - requires Calibre

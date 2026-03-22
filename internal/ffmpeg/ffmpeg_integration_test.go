@@ -22,10 +22,10 @@ import (
 // skipIfNoFFmpeg skips the test if FFmpeg is not available
 func skipIfNoFFmpeg(t *testing.T) {
 	if !utils.CommandExists("ffmpeg") {
-		t.Skip("ffmpeg not available, skipping integration test")
+		t.Fatalf("ffmpeg not available")
 	}
 	if !utils.CommandExists("ffprobe") {
-		t.Skip("ffprobe not available, skipping integration test")
+		t.Fatalf("ffprobe not available")
 	}
 }
 
@@ -133,7 +133,7 @@ Test subtitle line 2
 	if err != nil {
 		// If mov_text fails, try without subtitles (test will skip)
 		t.Logf("failed to create test video with subtitles: %v\n%s", err, output)
-		t.Skip("mov_text subtitle codec not supported, skipping test")
+		t.Fatalf("mov_text subtitle codec not supported")
 	}
 	return videoPath
 }
@@ -206,7 +206,7 @@ func TestIntegration_VideoTranscode_WithSubtitles(t *testing.T) {
 	}
 
 	if len(probe.SubtitleStreams) == 0 {
-		t.Skip("no subtitle streams found, skipping test")
+		t.Fatalf("no subtitle streams found")
 	}
 
 	cfg := &models.ProcessorConfig{
@@ -452,10 +452,6 @@ func TestIntegration_AudioTranscode_WithSilenceSplit(t *testing.T) {
 
 func TestIntegration_ImageTranscode_JPEG_to_AVIF(t *testing.T) {
 	skipIfNoFFmpeg(t)
-
-	if !utils.CommandExists("magick") {
-		t.Skip("ImageMagick not available, skipping image test")
-	}
 
 	tempDir := t.TempDir()
 	inputPath := createTestImage(t, tempDir, "input.jpg", 800, 600)

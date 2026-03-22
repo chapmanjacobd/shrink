@@ -283,6 +283,11 @@ func (p *TextProcessor) findImages(dir string) []string {
 
 // processEbookImages converts images to AVIF
 func (p *TextProcessor) processEbookImages(ctx context.Context, images []string, cfg *models.ProcessorConfig) {
+	imCmd := getImageMagickCommand()
+	if imCmd == "" {
+		slog.Warn("ImageMagick not available, skipping ebook image conversion")
+		return
+	}
 	for _, img := range images {
 		ext := strings.ToLower(filepath.Ext(img))
 		// Skip formats that shouldn't be converted to AVIF
@@ -297,7 +302,7 @@ func (p *TextProcessor) processEbookImages(ctx context.Context, images []string,
 			outputPath,
 		}
 
-		cmd := exec.CommandContext(ctx, "magick", args...)
+		cmd := exec.CommandContext(ctx, imCmd, args...)
 		if err := cmd.Run(); err != nil {
 			slog.Warn("Failed to convert ebook image", "path", img, "error", err)
 			continue

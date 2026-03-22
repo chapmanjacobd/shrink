@@ -152,7 +152,7 @@ type InstalledTools struct {
 func (c *ShrinkCmd) checkInstalledTools() InstalledTools {
 	tools := InstalledTools{
 		FFmpeg:      utils.CommandExists("ffmpeg"),
-		ImageMagick: utils.CommandExists("magick"),
+		ImageMagick: utils.CommandExists("magick") || utils.CommandExists("convert"),
 		Calibre:     utils.CommandExists("ebook-convert"),
 		Unar:        utils.CommandExists("lsar"),
 	}

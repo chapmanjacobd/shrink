@@ -40,7 +40,8 @@ func (p *ImageProcessor) Process(ctx context.Context, m *models.ShrinkMedia, cfg
 }
 
 func (p *ImageProcessor) processImage(ctx context.Context, m *models.ShrinkMedia, cfg *models.ProcessorConfig) models.ProcessResult {
-	if !utils.CommandExists("magick") {
+	imCmd := getImageMagickCommand()
+	if imCmd == "" {
 		return models.ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("ImageMagick not installed")}
 	}
 
@@ -75,7 +76,7 @@ func (p *ImageProcessor) processImage(ctx context.Context, m *models.ShrinkMedia
 
 	args = append(args, outputPath)
 
-	cmd := exec.CommandContext(ctx, "magick", args...)
+	cmd := exec.CommandContext(ctx, imCmd, args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		// Clean up on failure
@@ -181,4 +182,16 @@ func isImageMagickEnvironmentError(errorLog []string) bool {
 		}
 	}
 	return false
+}
+
+// getImageMagickCommand returns the appropriate ImageMagick command ("magick" or "convert")
+// Returns empty string if neither is available
+func getImageMagickCommand() string {
+	if utils.CommandExists("magick") {
+		return "magick"
+	}
+	if utils.CommandExists("convert") {
+		return "convert"
+	}
+	return ""
 }
