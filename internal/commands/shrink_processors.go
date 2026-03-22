@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/chapmanjacobd/shrink/internal/utils"
 )
@@ -210,7 +211,7 @@ func (p *ImageProcessor) processImage(ctx context.Context, m *ShrinkMedia, cfg *
 	outputPath := strings.TrimSuffix(m.Path, filepath.Ext(m.Path)) + ".avif"
 
 	args := []string{
-		"convert", m.Path,
+		m.Path,
 		"-resize", fmt.Sprintf("%dx%d>", cfg.MaxImageWidth, cfg.MaxImageHeight),
 		outputPath,
 	}
@@ -247,6 +248,26 @@ func (p *ImageProcessor) processImage(ctx context.Context, m *ShrinkMedia, cfg *
 	if err != nil || outputStats.Size() == 0 {
 		os.Remove(outputPath)
 		return ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("output file empty or missing")}
+	}
+
+	// Small delay to ensure file is fully written and flushed
+	time.Sleep(100 * time.Millisecond)
+
+	// Verify AVIF file is valid using ffprobe
+	if strings.HasSuffix(outputPath, ".avif") {
+		width, height, err := getImageDimensions(outputPath)
+		if err != nil {
+			os.Remove(outputPath)
+			return ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("AVIF validation failed: %w", err)}
+		}
+		if width <= 1 || height <= 1 {
+			os.Remove(outputPath)
+			return ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("AVIF file has invalid dimensions: %dx%d", width, height)}
+		}
+		if width > cfg.MaxImageWidth || height > cfg.MaxImageHeight {
+			os.Remove(outputPath)
+			return ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("AVIF file exceeds max dimensions: %dx%d > %dx%d", width, height, cfg.MaxImageWidth, cfg.MaxImageHeight)}
+		}
 	}
 
 	return ProcessResult{
@@ -591,7 +612,7 @@ func (p *TextProcessor) processEbookImages(ctx context.Context, images []string,
 
 		outputPath := strings.TrimSuffix(img, ext) + ".avif"
 		args := []string{
-			"convert", img,
+			img,
 			"-resize", fmt.Sprintf("%dx%d>", cfg.MaxImageWidth, cfg.MaxImageHeight),
 			outputPath,
 		}
@@ -625,6 +646,44 @@ func shouldConvertToAVIF(ext string) bool {
 		".svgz": true, // Compressed SVG
 	}
 	return !skipExts[ext]
+}
+
+// getImageDimensions uses ffprobe to get the actual width and height of an image
+func getImageDimensions(path string) (int, int, error) {
+	if !utils.CommandExists("ffprobe") {
+		return 0, 0, fmt.Errorf("ffprobe not available")
+	}
+
+	cmd := exec.Command("ffprobe",
+		"-v", "quiet",
+		"-print_format", "json",
+		"-show_streams",
+		path)
+
+	output, err := cmd.Output()
+	if err != nil {
+		return 0, 0, err
+	}
+
+	var data struct {
+		Streams []struct {
+			CodecType string `json:"codec_type"`
+			Width     int    `json:"width"`
+			Height    int    `json:"height"`
+		} `json:"streams"`
+	}
+
+	if err := json.Unmarshal(output, &data); err != nil {
+		return 0, 0, err
+	}
+
+	for _, stream := range data.Streams {
+		if stream.CodecType == "video" && stream.Width > 0 && stream.Height > 0 {
+			return stream.Width, stream.Height, nil
+		}
+	}
+
+	return 0, 0, fmt.Errorf("no video stream found")
 }
 
 // updateImageReferences updates HTML files to reference new AVIF files
@@ -742,17 +801,17 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *ShrinkMedia
 			imgMedia := &ShrinkMedia{Path: path, Size: fileSize, Ext: ext, Category: "Image"}
 			futureSize, _ := imageProc.EstimateSize(imgMedia, cfg)
 			if ShouldShrink(imgMedia, futureSize, cfg) {
-				res := imageProc.processImage(ctx, imgMedia, cfg)
+				imgCtx, imgCancel := context.WithTimeout(context.Background(), 10*time.Minute)
+				res := imageProc.processImage(imgCtx, imgMedia, cfg)
+				imgCancel()
 				if res.Success && len(res.Outputs) > 0 {
 					var totalSize int64
 					for _, out := range res.Outputs {
 						totalSize += out.Size
 					}
-					// Only keep if smaller
 					if totalSize < fileSize {
 						os.Remove(path)
 					} else {
-						// Delete transcode and keep original
 						for _, out := range res.Outputs {
 							os.Remove(out.Path)
 						}
@@ -769,7 +828,10 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *ShrinkMedia
 			media := &ShrinkMedia{Path: path, Size: fileSize, Ext: ext, Category: category}
 			futureSize, _ := processor.EstimateSize(media, cfg)
 			if ShouldShrink(media, futureSize, cfg) {
-				res := ffmpeg.Process(ctx, media, cfg)
+				// Create a new context for media processing to avoid parent timeout issues
+				mediaCtx, mediaCancel := context.WithTimeout(context.Background(), 30*time.Minute)
+				res := ffmpeg.Process(mediaCtx, media, cfg)
+				mediaCancel()
 				if res.Success && len(res.Outputs) > 0 {
 					var totalSize int64
 					for _, out := range res.Outputs {

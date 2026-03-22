@@ -252,6 +252,8 @@ func (c *ShrinkCmd) buildProcessorConfig() *ProcessorConfig {
 		CRF:                  c.CRF,
 		MaxVideoWidth:        c.MaxVideoWidth,
 		MaxVideoHeight:       c.MaxVideoHeight,
+		MaxImageWidth:        c.MaxImageWidth,
+		MaxImageHeight:       c.MaxImageHeight,
 		Keyframes:            c.Keyframes,
 		AudioOnly:            c.AudioOnly,
 		VideoOnly:            c.VideoOnly,

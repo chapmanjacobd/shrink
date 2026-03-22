@@ -443,16 +443,34 @@ func (p *FFmpegProcessor) validateTranscode(m ShrinkMedia, outputPath string, or
 		if outputStats.Size() == 0 {
 			deleteTranscode = true
 		} else {
-			// Validate duration
+			// Validate duration and dimensions
 			transcodeProbe, err := p.ffprobe(outputPath)
 			if err != nil {
 				deleteTranscode = true
 			} else if len(transcodeProbe.Streams) == 0 || transcodeProbe.Duration == 0 {
 				deleteTranscode = true
-			} else if !utils.ArchiveExtensionMap[m.Ext] {
-				diff := math.Abs(originalProbe.Duration-transcodeProbe.Duration) / originalProbe.Duration * 100
-				if diff > 5.0 {
-					deleteTranscode = true
+			} else {
+				// Check for invalid dimensions (e.g., 1x1 from overwrite race conditions)
+				// Only check non-album-art video streams
+				for _, stream := range transcodeProbe.VideoStreams {
+					// Skip album art (0x0 dimensions in probe)
+					if stream.Width > 0 && stream.Height > 0 {
+						if stream.Width <= 1 || stream.Height <= 1 {
+							deleteTranscode = true
+							slog.Debug("Invalid video dimensions", "path", outputPath, "width", stream.Width, "height", stream.Height)
+							break
+						}
+					}
+				}
+				// Check duration matches original (within 5% tolerance)
+				// Skip this check for archives and text since extracted/converted contents may have different duration
+				isArchive := utils.ArchiveExtensionMap[m.Ext]
+				isText := utils.TextExtensionMap[m.Ext]
+				if !isArchive && !isText {
+					diff := math.Abs(originalProbe.Duration-transcodeProbe.Duration) / originalProbe.Duration * 100
+					if diff > 5.0 {
+						deleteTranscode = true
+					}
 				}
 			}
 		}
@@ -485,6 +503,26 @@ func (p *FFmpegProcessor) validateTranscode(m ShrinkMedia, outputPath string, or
 		stats, err := os.Stat(match)
 		if err != nil || stats.Size() == 0 {
 			hasInvalidFile = true
+			break
+		}
+		// Validate dimensions for video split files
+		probe, err := p.ffprobe(match)
+		if err != nil || len(probe.Streams) == 0 {
+			hasInvalidFile = true
+			break
+		}
+		// Check for invalid dimensions (e.g., 1x1 from overwrite race conditions)
+		// Only check non-album-art video streams
+		for _, stream := range probe.VideoStreams {
+			if stream.Width > 0 && stream.Height > 0 {
+				if stream.Width <= 1 || stream.Height <= 1 {
+					hasInvalidFile = true
+					slog.Debug("Invalid video dimensions in split file", "path", match, "width", stream.Width, "height", stream.Height)
+					break
+				}
+			}
+		}
+		if hasInvalidFile {
 			break
 		}
 		totalNewSize += stats.Size()

@@ -326,8 +326,6 @@ func (m *ShrinkMetrics) ClearProgress() {
 // LogSummary logs the final metrics summary
 func (m *ShrinkMetrics) LogSummary() {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	m.completed = time.Now()
 	duration := m.completed.Sub(m.started)
 
@@ -347,6 +345,23 @@ func (m *ShrinkMetrics) LogSummary() {
 		totalDuration += int(stats.TotalDuration)
 	}
 
+	// Sort media types for consistent output
+	type mediaTypeStats struct {
+		name  string
+		stats *MediaTypeStats
+	}
+	var sortedTypes []mediaTypeStats
+	for mediaType, stats := range m.types {
+		// Create a copy of stats to use outside the lock
+		statsCopy := *stats
+		sortedTypes = append(sortedTypes, mediaTypeStats{name: mediaType, stats: &statsCopy})
+	}
+	m.mu.Unlock()
+
+	sort.Slice(sortedTypes, func(i, j int) bool {
+		return sortedTypes[i].name < sortedTypes[j].name
+	})
+
 	// Print summary table to stdout (always visible regardless of log level)
 	fmt.Println()
 	fmt.Println(strings.Repeat("=", 78))
@@ -355,19 +370,6 @@ func (m *ShrinkMetrics) LogSummary() {
 	fmt.Printf("%-12s %8s %8s %8s %10s %10s %8s\n",
 		"Media Type", "Success", "Failed", "Skipped", "Saved", "Time", "Speed")
 	fmt.Println(strings.Repeat("-", 78))
-
-	// Sort media types for consistent output
-	type mediaTypeStats struct {
-		name  string
-		stats *MediaTypeStats
-	}
-	var sortedTypes []mediaTypeStats
-	for mediaType, stats := range m.types {
-		sortedTypes = append(sortedTypes, mediaTypeStats{name: mediaType, stats: stats})
-	}
-	sort.Slice(sortedTypes, func(i, j int) bool {
-		return sortedTypes[i].name < sortedTypes[j].name
-	})
 
 	for _, mt := range sortedTypes {
 		speed := ""
@@ -403,6 +405,7 @@ func (m *ShrinkMetrics) LogSummary() {
 	fmt.Println()
 
 	// Also log for verbose mode
+	// This can safely call slog.Info because we no longer hold the lock
 	slog.Info("Processing complete",
 		"duration", duration.String(),
 		"processed", totalProcessed,
