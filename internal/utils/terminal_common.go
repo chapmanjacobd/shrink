@@ -1,17 +1,9 @@
 package utils
 
-import "runtime"
-
 // GetClearLineSequence returns the escape sequence to clear/overwrite a line.
-// For OSes that support it, we use \x1b[1K (Erase from beginning of line to cursor).
+// We use \x1b[K (Erase from cursor to end of line) which is standard for overwriting.
 func GetClearLineSequence() string {
-	if runtime.GOOS == "windows" {
-		// Older Windows versions might only support \x1b[K
-		// But modern Windows 10+ with VT mode enabled supports both.
-		// The user specifically asked for \x1b[1K where supported.
-		return "\033[1K"
-	}
-	return "\033[1K"
+	return "\033[K"
 }
 
 // TruncateMiddle truncates a string in the middle with ellipsis

@@ -221,9 +221,10 @@ func (m *ShrinkMetrics) PrintProgress() {
 	displayPath := m.currentFile
 	displayPath = utils.TruncateMiddle(displayPath, utils.GetTerminalWidth())
 	clearSeq := utils.GetClearLineSequence()
-	sb.WriteString(clearSeq + "\n" + clearSeq + "Starting to process file:\n")
-	sb.WriteString(clearSeq + displayPath)
-	sb.WriteString("\n" + clearSeq + "\n" + clearSeq)
+	sb.WriteString("Starting to process file:" + clearSeq + "\n")
+	sb.WriteString(displayPath + clearSeq + "\n")
+	sb.WriteString(clearSeq + "\n")
+	sb.WriteString(clearSeq)
 
 	// Print summary table
 	headers := []string{"Media Type", "Queue", "Skip", "Fail", "OK", "Saved", "Time", "Speed"}
@@ -326,7 +327,6 @@ func (m *ShrinkMetrics) PrintProgress() {
 	}
 	fmt.Print(output) // Print progress
 	// Clear remaining lines from old progress (in case new progress is shorter)
-	clearSeq := utils.GetClearLineSequence()
 	for i := lineCount; i < m.linesPrinted; i++ {
 		fmt.Printf("%s\n", clearSeq) // Clear line and move down
 	}
