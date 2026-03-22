@@ -21,8 +21,8 @@ import (
 // ArchiveProcessor handles archive file processing
 type ArchiveProcessor struct {
 	BaseProcessor
-	ffmpeg        *ffmpeg.FFmpegProcessor
 	unarInstalled bool
+	ffmpeg        *ffmpeg.FFmpegProcessor
 }
 
 func NewArchiveProcessor(ffmpeg *ffmpeg.FFmpegProcessor) *ArchiveProcessor {

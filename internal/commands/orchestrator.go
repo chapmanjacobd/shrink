@@ -42,11 +42,11 @@ type EngineConfig struct {
 
 // Engine coordinates the media analysis and processing lifecycle.
 type Engine struct {
-	cfg      *models.ProcessorConfig
+	ui       UI
 	sqlDBs   []*sql.DB
+	cfg      *models.ProcessorConfig
 	registry *MediaRegistry
 	metrics  *ShrinkMetrics
-	ui       UI
 	engCfg   EngineConfig
 }
 

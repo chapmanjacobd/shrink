@@ -22,11 +22,11 @@ type ProcessResult struct {
 
 // VideoConfig contains configuration for video processing
 type VideoConfig struct {
+	Preset               string
+	CRF                  string
 	TargetVideoBitrate   int64
 	MinSavingsVideo      float64
 	TranscodingVideoRate float64
-	Preset               string
-	CRF                  string
 	MaxVideoWidth        int
 	MaxVideoHeight       int
 	VideoOnly            bool
@@ -39,10 +39,10 @@ type AudioConfig struct {
 	TargetAudioBitrate   int64
 	MinSavingsAudio      float64
 	TranscodingAudioRate float64
-	AudioOnly            bool
-	AlwaysSplit          bool
 	SplitLongerThan      float64
 	MinSplitSegment      float64
+	AudioOnly            bool
+	AlwaysSplit          bool
 }
 
 // ImageConfig contains configuration for image processing
@@ -64,18 +64,18 @@ type TextConfig struct {
 
 // CommonConfig contains general configuration for all processors
 type CommonConfig struct {
+	MoveBroken         string
 	SourceAudioBitrate int64
 	SourceVideoBitrate int64
+	MaxWidthBuffer     float64
+	MaxHeightBuffer    float64
 	DeleteUnplayable   bool
 	DeleteLarger       bool
-	MoveBroken         string
 	Valid              bool
 	Invalid            bool
 	ForceShrink        bool
 	VerboseFFmpeg      bool
 	IncludeTimecode    bool
-	MaxWidthBuffer     float64
-	MaxHeightBuffer    float64
 }
 
 // ProcessorConfig contains comprehensive configuration for all media processing

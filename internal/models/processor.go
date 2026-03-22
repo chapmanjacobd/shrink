@@ -4,12 +4,12 @@ import "context"
 
 // ProcessableInfo contains information about whether and how a media item can be processed
 type ProcessableInfo struct {
+	PartFiles      []string // Associated files (e.g. multi-part archive volumes)
 	FutureSize     int64
+	ActualSize     int64 // Used if the actual size differs from the reported size (e.g. multi-part archives)
 	ProcessingTime int
 	IsProcessable  bool
-	ActualSize     int64    // Used if the actual size differs from the reported size (e.g. multi-part archives)
-	IsBroken       bool     // Whether the media item is broken/unreadable
-	PartFiles      []string // Associated files (e.g. multi-part archive volumes)
+	IsBroken       bool // Whether the media item is broken/unreadable
 }
 
 // MediaProcessor defines the interface for processing different media types

@@ -15,14 +15,14 @@ import (
 // MediaRecord represents a row in the media table
 type MediaRecord struct {
 	Path           string
-	Size           int64
-	Duration       float64
-	VideoCount     int
-	AudioCount     int
 	VideoCodecs    string
 	AudioCodecs    string
 	SubtitleCodecs string
 	MediaType      string
+	Size           int64
+	Duration       float64
+	VideoCount     int
+	AudioCount     int
 }
 
 // LoadMediaFromDB loads all processable media from a database

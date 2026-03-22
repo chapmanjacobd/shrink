@@ -84,10 +84,10 @@ func (s *MediaTypeStats) SpeedRatio() float64 {
 
 // ShrinkMetrics aggregates statistics across all media types
 type ShrinkMetrics struct {
-	mu            sync.RWMutex
-	started       time.Time
 	types         map[string]*MediaTypeStats
 	currentFile   string
+	mu            sync.RWMutex
+	started       time.Time
 	lastPrintTime time.Time
 	linesPrinted  int // Track how many lines we printed for cursor repositioning
 	isTTY         bool

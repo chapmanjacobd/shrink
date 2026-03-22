@@ -29,10 +29,10 @@ type Config struct {
 }
 
 type CoreFlags struct {
+	Profile   string `default:"balance" help:"Profile preset: quality, speed, balance (default to balance preset 7 crf 40)" enum:"quality,speed,balance" env:"SHRINK_PROFILE"`
 	Verbose   int    `short:"v" type:"counter" help:"Enable verbose logging (-v for info, -vv for debug)" env:"SHRINK_VERBOSE"`
 	Simulate  bool   `help:"Dry run; don't actually do anything" env:"SHRINK_SIMULATE"`
 	NoConfirm bool   `short:"y" help:"Don't ask for confirmation" env:"SHRINK_NO_CONFIRM"`
-	Profile   string `default:"balance" help:"Profile preset: quality, speed, balance (default to balance preset 7 crf 40)" enum:"quality,speed,balance" env:"SHRINK_PROFILE"`
 }
 
 type PathFilterFlags struct {
@@ -82,10 +82,10 @@ type TranscodingFlags struct {
 }
 
 type VideoFlags struct {
-	MaxVideoHeight  int    `default:"960" help:"Maximum video height" env:"SHRINK_MAX_VIDEO_HEIGHT"`
-	MaxVideoWidth   int    `default:"1440" help:"Maximum video width" env:"SHRINK_MAX_VIDEO_WIDTH"`
 	Preset          string `help:"SVT-AV1 preset (0-13, lower is slower/better) (default depends on profile)" env:"SHRINK_PRESET"`
 	CRF             string `help:"CRF value for SVT-AV1 (0-63, lower is better) (default depends on profile)" env:"SHRINK_CRF"`
+	MaxVideoHeight  int    `default:"960" help:"Maximum video height" env:"SHRINK_MAX_VIDEO_HEIGHT"`
+	MaxVideoWidth   int    `default:"1440" help:"Maximum video width" env:"SHRINK_MAX_VIDEO_WIDTH"`
 	Keyframes       bool   `help:"Extract keyframes only" env:"SHRINK_KEYFRAMES"`
 	NoPreserveVideo bool   `help:"Don't preserve video when audio-only" env:"SHRINK_NO_PRESERVE_VIDEO"`
 	IncludeTimecode bool   `help:"Include timecode streams in output" env:"SHRINK_INCLUDE_TIMECODE"`
@@ -115,16 +115,16 @@ type ParallelFlags struct {
 }
 
 type TimeoutFlags struct {
-	VideoTimeoutMult float64 `default:"3.0" help:"Video timeout multiplier (timeout = duration * multiplier)" env:"SHRINK_VIDEO_TIMEOUT_MULT"`
-	AudioTimeoutMult float64 `default:"0.5" help:"Audio timeout multiplier (timeout = duration * multiplier)" env:"SHRINK_AUDIO_TIMEOUT_MULT"`
 	VideoTimeout     string  `default:"90m" help:"Video timeout when duration is unknown" env:"SHRINK_VIDEO_TIMEOUT"`
 	AudioTimeout     string  `default:"10m" help:"Audio timeout when duration is unknown" env:"SHRINK_AUDIO_TIMEOUT"`
 	ImageTimeout     string  `default:"10m" help:"Image timeout" env:"SHRINK_IMAGE_TIMEOUT"`
 	TextTimeout      string  `default:"20m" help:"Text timeout" env:"SHRINK_TEXT_TIMEOUT"`
-	DeleteUnplayable bool    `help:"Delete unplayable files" env:"SHRINK_DELETE_UNPLAYABLE"`
-	AlwaysSplit      bool    `help:"Always split audio on silence" env:"SHRINK_ALWAYS_SPLIT"`
+	VideoTimeoutMult float64 `default:"3.0" help:"Video timeout multiplier (timeout = duration * multiplier)" env:"SHRINK_VIDEO_TIMEOUT_MULT"`
+	AudioTimeoutMult float64 `default:"0.5" help:"Audio timeout multiplier (timeout = duration * multiplier)" env:"SHRINK_AUDIO_TIMEOUT_MULT"`
 	SplitLongerThan  float64 `help:"Split audio longer than N seconds" env:"SHRINK_SPLIT_LONGER_THAN"`
 	MinSplitSegment  float64 `default:"60" help:"Minimum split segment duration in seconds" env:"SHRINK_MIN_SPLIT_SEGMENT"`
+	DeleteUnplayable bool    `help:"Delete unplayable files" env:"SHRINK_DELETE_UNPLAYABLE"`
+	AlwaysSplit      bool    `help:"Always split audio on silence" env:"SHRINK_ALWAYS_SPLIT"`
 }
 
 func (c *Config) ApplyProfile() {

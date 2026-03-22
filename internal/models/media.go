@@ -2,22 +2,22 @@ package models
 
 // ShrinkMedia represents a media file to be processed
 type ShrinkMedia struct {
+	PartFiles      []string // For multi-part archives: list of all part files
 	Path           string
+	MediaType      string
+	Ext            string
+	Category       string
 	Size           int64
 	Duration       float64
+	FutureSize     int64
+	Savings        int64
+	CompressedSize int64
 	VideoCount     int
 	AudioCount     int
 	Width          int
 	Height         int
-	MediaType      string
-	Ext            string
-	Category       string
-	FutureSize     int64
-	Savings        int64
 	ProcessingTime int
-	CompressedSize int64
-	IsBroken       bool     // For archives: lsar failed to read contents
-	PartFiles      []string // For multi-part archives: list of all part files
+	IsBroken       bool // For archives: lsar failed to read contents
 }
 
 // DisplayCategory returns the category with the extension suffix (e.g. "Video: mp4")

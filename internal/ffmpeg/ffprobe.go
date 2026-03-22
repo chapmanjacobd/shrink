@@ -12,41 +12,39 @@ import (
 
 // FFProbeResult represents ffprobe JSON output
 type FFProbeResult struct {
-	Streams  []FFProbeStream `json:"streams"`
-	Format   FFProbeFormat   `json:"format"`
-	Path     string          `json:"-"`
-	Duration float64         `json:"-"`
-
-	// Categorized streams
 	VideoStreams    []FFProbeStream `json:"-"`
 	AudioStreams    []FFProbeStream `json:"-"`
 	SubtitleStreams []FFProbeStream `json:"-"`
 	AlbumArtStreams []FFProbeStream `json:"-"`
+	Streams         []FFProbeStream `json:"streams"`
+	Path            string          `json:"-"`
+	Format          FFProbeFormat   `json:"format"`
+	Duration        float64         `json:"-"`
 }
 
 // FFProbeStream represents a stream in ffprobe output
 type FFProbeStream struct {
-	Index       int               `json:"index"`
+	Tags        map[string]string `json:"tags"`
+	Disposition map[string]int    `json:"disposition"`
 	CodecType   string            `json:"codec_type"`
 	CodecName   string            `json:"codec_name"`
 	Duration    string            `json:"duration"`
 	NbFrames    string            `json:"nb_frames"`
-	Width       int               `json:"width"`
-	Height      int               `json:"height"`
 	RFrameRate  string            `json:"r_frame_rate"`
 	BitRate     string            `json:"bit_rate"`
 	SampleRate  string            `json:"sample_rate"`
+	Index       int               `json:"index"`
+	Width       int               `json:"width"`
+	Height      int               `json:"height"`
 	Channels    int               `json:"channels"`
-	Tags        map[string]string `json:"tags"`
-	Disposition map[string]int    `json:"disposition"`
 }
 
 // FFProbeFormat represents the format section of ffprobe output
 type FFProbeFormat struct {
+	Tags      map[string]string `json:"tags"`
 	Duration  string            `json:"duration"`
 	BitRate   string            `json:"bit_rate"`
 	NbStreams int               `json:"nb_streams"`
-	Tags      map[string]string `json:"tags"`
 }
 
 // ProbeMedia probes a media file and returns metadata
