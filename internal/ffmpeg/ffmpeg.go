@@ -152,35 +152,47 @@ func (p *FFmpegProcessor) buildFFmpegArgs(inputPath, outputPath string, probe *F
 		"-i", inputPath,
 	)
 
+	// Track output stream indices per type (separate from input stream indices)
+	// -map uses global INPUT index, but -c:v:X/-c:a:X/-c:s:X use OUTPUT stream position
+	videoOutIdx := 0
+	audioOutIdx := 0
+
 	// Video options
 	if videoStream != nil && !p.config.Audio.AudioOnly {
 		args = append(args, "-map", fmt.Sprintf("0:%d", videoStream.Index))
 
 		if p.config.Video.Keyframes {
-			args = append(args, fmt.Sprintf("-c:v:%d", videoStream.Index), "copy", fmt.Sprintf("-bsf:v:%d", videoStream.Index), "noise=drop=not(key)")
+			args = append(args,
+				fmt.Sprintf("-c:v:%d", videoOutIdx), "copy",
+				fmt.Sprintf("-bsf:v:%d", videoOutIdx), "noise=drop=not(key)")
 		} else {
 			args = append(args,
-				fmt.Sprintf("-c:v:%d", videoStream.Index), "libsvtav1",
-				fmt.Sprintf("-preset:v:%d", videoStream.Index), p.config.Video.Preset,
-				fmt.Sprintf("-crf:v:%d", videoStream.Index), p.config.Video.CRF,
-				fmt.Sprintf("-pix_fmt:v:%d", videoStream.Index), "yuv420p10le",
-				fmt.Sprintf("-svtav1-params:v:%d", videoStream.Index), "tune=0:enable-overlays=1",
+				fmt.Sprintf("-c:v:%d", videoOutIdx), "libsvtav1",
+				fmt.Sprintf("-preset:v:%d", videoOutIdx), p.config.Video.Preset,
+				fmt.Sprintf("-crf:v:%d", videoOutIdx), p.config.Video.CRF,
+				fmt.Sprintf("-pix_fmt:v:%d", videoOutIdx), "yuv420p10le",
+				fmt.Sprintf("-svtav1-params:v:%d", videoOutIdx), "tune=0:enable-overlays=1",
 			)
 
 			// Build video filters
 			filters := p.buildVideoFilters(probe, videoStream)
 			if len(filters) > 0 {
-				args = append(args, fmt.Sprintf("-vf:v:%d", videoStream.Index), strings.Join(filters, ","))
+				args = append(args, fmt.Sprintf("-vf:v:%d", videoOutIdx), strings.Join(filters, ","))
 			}
 		}
+		videoOutIdx++
 	} else if albumArtStream != nil {
-		args = append(args, "-map", fmt.Sprintf("0:%d", albumArtStream.Index), fmt.Sprintf("-c:v:%d", albumArtStream.Index), "copy")
+		args = append(args,
+			"-map", fmt.Sprintf("0:%d", albumArtStream.Index),
+			fmt.Sprintf("-c:v:%d", videoOutIdx), "copy")
+		videoOutIdx++
 	}
 
 	// Audio options
 	if audioStream != nil {
 		args = append(args, "-map", fmt.Sprintf("0:%d", audioStream.Index))
-		args = append(args, p.buildAudioOptions(audioStream)...)
+		args = append(args, p.buildAudioOptions(audioOutIdx, audioStream.Channels, audioStream.BitRate, audioStream.SampleRate)...)
+		audioOutIdx++
 
 		// Silence detection for splitting
 		isSplit := p.config.Audio.AlwaysSplit || (videoStream == nil && p.config.Audio.SplitLongerThan > 0 && probe.Duration > p.config.Audio.SplitLongerThan)
@@ -237,52 +249,55 @@ func (p *FFmpegProcessor) buildVideoFilters(probe *FFProbeResult, stream *FFProb
 }
 
 // buildAudioOptions constructs audio encoding options
-func (p *FFmpegProcessor) buildAudioOptions(stream *FFProbeStream) []string {
+// outIdx is the output stream position (0 for first audio, 1 for second, etc.)
+func (p *FFmpegProcessor) buildAudioOptions(outIdx int, channels int, bitrate string, sampleRate string) []string {
 	var args []string
 
-	channels := stream.Channels
 	if channels == 0 {
 		channels = 2
 	}
 
-	bitrate := parseBitrate(stream.BitRate)
-	if bitrate == 0 {
-		bitrate = 256000
+	bitrateVal := parseBitrate(bitrate)
+	if bitrateVal == 0 {
+		bitrateVal = 256000
 	}
 
-	sampleRate := parseSampleRate(stream.SampleRate)
-	if sampleRate == 0 {
-		sampleRate = 44100
+	sampleRateVal := parseSampleRate(sampleRate)
+	if sampleRateVal == 0 {
+		sampleRateVal = 44100
 	}
 
 	// Channel config
 	if channels == 1 {
-		args = append(args, fmt.Sprintf("-ac:%d", stream.Index), "1")
+		args = append(args, fmt.Sprintf("-ac:%d", outIdx), "1")
 	} else {
-		args = append(args, fmt.Sprintf("-ac:%d", stream.Index), "2")
+		args = append(args, fmt.Sprintf("-ac:%d", outIdx), "2")
 	}
 
 	// Bitrate config
-	if bitrate >= 256000 {
-		args = append(args, fmt.Sprintf("-b:a:%d", stream.Index), "128k")
+	if bitrateVal >= 256000 {
+		args = append(args, fmt.Sprintf("-b:a:%d", outIdx), "128k")
 	} else {
-		args = append(args, fmt.Sprintf("-b:a:%d", stream.Index), "64k", fmt.Sprintf("-frame_duration:%d", stream.Index), "40", fmt.Sprintf("-apply_phase_inv:%d", stream.Index), "0")
+		args = append(args,
+			fmt.Sprintf("-b:a:%d", outIdx), "64k",
+			fmt.Sprintf("-frame_duration:%d", outIdx), "40",
+			fmt.Sprintf("-apply_phase_inv:%d", outIdx), "0")
 	}
 
 	// Sample rate config
 	var opusRate int
-	if sampleRate >= 44100 {
+	if sampleRateVal >= 44100 {
 		opusRate = 48000
-	} else if sampleRate >= 22050 {
+	} else if sampleRateVal >= 22050 {
 		opusRate = 24000
 	} else {
 		opusRate = 16000
 	}
 
 	args = append(args,
-		fmt.Sprintf("-c:a:%d", stream.Index), "libopus",
-		fmt.Sprintf("-ar:%d", stream.Index), strconv.Itoa(opusRate),
-		fmt.Sprintf("-af:%d", stream.Index), "loudnorm=i=-18:tp=-3:lra=17",
+		fmt.Sprintf("-c:a:%d", outIdx), "libopus",
+		fmt.Sprintf("-ar:%d", outIdx), strconv.Itoa(opusRate),
+		fmt.Sprintf("-af:%d", outIdx), "loudnorm=i=-18:tp=-3:lra=17",
 	)
 
 	return args
@@ -309,26 +324,32 @@ func (p *FFmpegProcessor) buildSubtitleOptions(subtitleStreams []FFProbeStream) 
 		"dvd_subtitle": true, "dvdsub": true, "pgssub": true,
 		"hdmv_pgs_subtitle": true, "xsub": true, "dvb_subtitle": true, "dvbsub": true,
 	}
+	// MKV-compatible subtitle codecs that can be copied directly
 	mkvTextSubs := map[string]bool{"subrip": true, "srt": true, "ass": true, "ssa": true, "webvtt": true}
 	mkvImageSubs := map[string]bool{"pgssub": true, "hdmv_pgs_subtitle": true, "dvd_subtitle": true, "vobsub": true}
 
+	// Track output subtitle stream index (separate from input stream index)
+	outSubIdx := 0
+
 	for _, stream := range subtitleStreams {
 		codec := strings.ToLower(stream.CodecName)
-		idx := stream.Index
+		inIdx := stream.Index
 
 		if mkvTextSubs[codec] || mkvImageSubs[codec] {
 			// Already in MKV-compatible format, copy as-is
-			args = append(args, "-map", fmt.Sprintf("0:%d", idx), fmt.Sprintf("-c:s:%d", idx), "copy")
+			args = append(args, "-map", fmt.Sprintf("0:%d", inIdx), fmt.Sprintf("-c:s:%d", outSubIdx), "copy")
 		} else if textSubs[codec] {
 			// Convert text subtitles to SRT
-			args = append(args, "-map", fmt.Sprintf("0:%d", idx), fmt.Sprintf("-c:s:%d", idx), "srt")
+			args = append(args, "-map", fmt.Sprintf("0:%d", inIdx), fmt.Sprintf("-c:s:%d", outSubIdx), "srt")
 		} else if imageSubs[codec] {
 			// Convert image subtitles to PGS
-			args = append(args, "-map", fmt.Sprintf("0:%d", idx), fmt.Sprintf("-c:s:%d", idx), "pgssub")
+			args = append(args, "-map", fmt.Sprintf("0:%d", inIdx), fmt.Sprintf("-c:s:%d", outSubIdx), "pgssub")
 		} else {
 			// Unknown codec - log warning and skip
-			slog.Warn("Unknown subtitle codec, skipping", "codec", codec, "index", idx)
+			slog.Warn("Unknown subtitle codec, skipping", "codec", codec, "index", inIdx)
+			continue // Don't increment outSubIdx for skipped streams
 		}
+		outSubIdx++
 	}
 
 	return args

@@ -362,9 +362,8 @@ func TestBuildVideoFilters(t *testing.T) {
 func TestBuildAudioOptions(t *testing.T) {
 	cfg := &models.ProcessorConfig{}
 	p := NewFFmpegProcessor(cfg)
-	stream := &FFProbeStream{CodecName: "aac", Channels: 2, Index: 0}
 
-	opts := p.buildAudioOptions(stream)
+	opts := p.buildAudioOptions(0, 2, "256000", "44100")
 	if len(opts) == 0 {
 		t.Errorf("expected audio options")
 	}
@@ -591,11 +590,11 @@ func TestBuildSubtitleOptions_MultipleStreams(t *testing.T) {
 
 	// Mix of different subtitle types
 	streams := []FFProbeStream{
-		{CodecName: "subrip", Index: 0},   // copy (mkvTextSubs)
-		{CodecName: "ass", Index: 1},      // copy (mkvTextSubs)
-		{CodecName: "pgssub", Index: 2},   // copy (mkvImageSubs)
-		{CodecName: "mov_text", Index: 3}, // convert to srt (textSubs only)
-		{CodecName: "dvdsub", Index: 4},   // convert to pgs (imageSubs only)
+		{CodecName: "subrip", Index: 0},   // copy (mkvTextSubs) -> -c:s:0 copy
+		{CodecName: "ass", Index: 1},      // copy (mkvTextSubs) -> -c:s:1 copy
+		{CodecName: "pgssub", Index: 2},   // copy (mkvImageSubs) -> -c:s:2 copy
+		{CodecName: "mov_text", Index: 3}, // convert to srt (textSubs only) -> -c:s:3 srt
+		{CodecName: "dvdsub", Index: 4},   // convert to pgs (imageSubs only) -> -c:s:4 pgssub
 		{CodecName: "unknown", Index: 5},  // skip
 	}
 
@@ -609,6 +608,7 @@ func TestBuildSubtitleOptions_MultipleStreams(t *testing.T) {
 	}
 
 	// Verify structure: each stream should have -map, index, -c:s:X, codec
+	// Note: output subtitle indices are sequential (0,1,2,3,4) not global indices
 	expectedMaps := []string{"0:0", "0:1", "0:2", "0:3", "0:4"}
 	expectedCodecs := []string{"-c:s:0", "copy", "-c:s:1", "copy", "-c:s:2", "copy", "-c:s:3", "srt", "-c:s:4", "pgssub"}
 
@@ -678,15 +678,25 @@ func TestBuildSubtitleOptions_DifferentIndices(t *testing.T) {
 	opts := p.buildSubtitleOptions(streams)
 
 	// Each stream produces 4 args: -map, 0:X, -c:s, codec
+	// -map uses global input index, -c:s:X uses sequential output index
 	expectedMaps := []string{"0:5", "0:10", "0:15"}
-	for i, expMap := range expectedMaps {
+	expectedCodecIndices := []string{"-c:s:0", "-c:s:1", "-c:s:2"}
+	expectedCodecs := []string{"copy", "copy", "copy"}
+
+	for i := range expectedMaps {
 		baseIdx := i * 4
-		if baseIdx+1 < len(opts) {
+		if baseIdx+3 < len(opts) {
 			if opts[baseIdx] != "-map" {
 				t.Errorf("stream %d: expected -map, got %s", i, opts[baseIdx])
 			}
-			if opts[baseIdx+1] != expMap {
-				t.Errorf("stream %d: expected map %q, got %q", i, expMap, opts[baseIdx+1])
+			if opts[baseIdx+1] != expectedMaps[i] {
+				t.Errorf("stream %d: expected map %q, got %q", i, expectedMaps[i], opts[baseIdx+1])
+			}
+			if opts[baseIdx+2] != expectedCodecIndices[i] {
+				t.Errorf("stream %d: expected codec index %q, got %q", i, expectedCodecIndices[i], opts[baseIdx+2])
+			}
+			if opts[baseIdx+3] != expectedCodecs[i] {
+				t.Errorf("stream %d: expected codec %q, got %q", i, expectedCodecs[i], opts[baseIdx+3])
 			}
 		}
 	}
