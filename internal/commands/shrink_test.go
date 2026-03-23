@@ -11,7 +11,7 @@ import (
 	"github.com/alecthomas/kong"
 	"github.com/chapmanjacobd/shrink/internal/models"
 	"github.com/chapmanjacobd/shrink/internal/testutils"
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite"
 )
 
 func runShrinkCmd(dbPath, tempDir string, args []string) error {
@@ -278,7 +278,7 @@ func TestShrinkMultiPartArchive(t *testing.T) {
 
 	// Create database
 	dbPath := filepath.Join(tempDir, "test.db")
-	db, _ := sql.Open("sqlite3", dbPath)
+	db, _ := sql.Open("sqlite", dbPath)
 	db.Exec(`CREATE TABLE media (
 		path TEXT PRIMARY KEY,
 		size INTEGER,
@@ -353,7 +353,7 @@ func TestShrinkBrokenArchive(t *testing.T) {
 
 	// Create database
 	dbPath := filepath.Join(tempDir, "test.db")
-	db, err := sql.Open("sqlite3", dbPath)
+	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		t.Fatalf("failed to open db: %v", err)
 	}
@@ -412,7 +412,7 @@ func TestShrinkArchiveKeep(t *testing.T) {
 
 	// Create database
 	dbPath := filepath.Join(tempDir, "test.db")
-	db, err := sql.Open("sqlite3", dbPath)
+	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		t.Fatalf("failed to open db: %v", err)
 	}

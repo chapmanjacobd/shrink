@@ -6,14 +6,14 @@ import (
 	"path/filepath"
 	"testing"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite"
 )
 
 func TestDatabaseLifecycle(t *testing.T) {
 	tempDir := t.TempDir()
 	dbPath := filepath.Join(tempDir, "test.db")
 
-	db, err := sql.Open("sqlite3", dbPath)
+	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		t.Fatalf("Open failed: %v", err)
 	}
@@ -70,7 +70,7 @@ func TestResolveDatabasePath(t *testing.T) {
 }
 
 func TestPopulateMediaType(t *testing.T) {
-	db, _ := sql.Open("sqlite3", ":memory:")
+	db, _ := sql.Open("sqlite", ":memory:")
 	defer db.Close()
 	InitDB(db)
 

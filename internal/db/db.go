@@ -8,12 +8,12 @@ import (
 	"strings"
 
 	"github.com/chapmanjacobd/shrink/internal/utils"
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite"
 )
 
 // Connect connects to a SQLite database without initializing it
 func Connect(dbPath string) (*sql.DB, error) {
-	db, err := sql.Open("sqlite3", dbPath)
+	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		return nil, err
 	}
@@ -271,7 +271,7 @@ func getTableColumns(db *sql.DB, tableName string) (map[string]bool, error) {
 
 // DatabaseExists checks if a database file exists and is valid
 func DatabaseExists(path string) bool {
-	db, err := sql.Open("sqlite3", path)
+	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		return false
 	}
