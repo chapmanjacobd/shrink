@@ -349,7 +349,7 @@ func (m *ShrinkMetrics) PrintProgress() {
 			// Reserve 1 line for "...and X more" if needed
 			maxRunningLines-1)
 
-		for i := 0; i < filesToShow; i++ {
+		for i := range filesToShow {
 			rf := m.runningFiles[i]
 			displayPath := utils.TruncateMiddle(rf.Path, utils.GetTerminalWidth()-3)
 			sb.WriteString("  " + displayPath + clearSeq + "\n")

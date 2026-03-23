@@ -212,7 +212,7 @@ func (e *Engine) processMedia(ctx context.Context, media []models.ShrinkMedia) {
 			defer release()
 
 			// Record that the file is actually running now
-			cat := original.Category
+			cat := original.DisplayCategory()
 			path := original.Path
 			e.metrics.RecordRunning(cat, path)
 			defer e.metrics.RecordStopped(cat, path)
