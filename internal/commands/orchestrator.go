@@ -344,7 +344,11 @@ func (e *Engine) handleProcessingError(m models.ShrinkMedia, result models.Proce
 		}
 	}
 	e.metrics.RecordFailure(m.DisplayCategory(), elapsed)
-	if e.cfg.Common.MoveBroken != "" {
+
+	if e.cfg.Common.DeleteUnplayable {
+		db.MarkDeleted(e.sqlDBs, m.Path)
+		os.Remove(m.Path)
+	} else if e.cfg.Common.MoveBroken != "" {
 		e.ui.MoveToBroken(m.Path, result.PartFiles)
 	}
 	return result
@@ -353,11 +357,16 @@ func (e *Engine) handleProcessingError(m models.ShrinkMedia, result models.Proce
 // handleUnsuccessfulProcessing handles processing that succeeded but produced no valid output.
 func (e *Engine) handleUnsuccessfulProcessing(m models.ShrinkMedia, elapsed float64) models.ProcessResult {
 	// Processing succeeded but produced no valid output (e.g. invalid file)
+	e.metrics.RecordFailure(m.DisplayCategory(), elapsed)
+
 	if e.cfg.Common.DeleteUnplayable {
 		db.MarkDeleted(e.sqlDBs, m.Path)
 		os.Remove(m.Path)
+	} else if e.cfg.Common.MoveBroken != "" {
+		// handleUnsuccessfulProcessing doesn't have PartFiles, but we can call it with nil
+		e.ui.MoveToBroken(m.Path, nil)
 	}
-	e.metrics.RecordFailure(m.DisplayCategory(), elapsed)
+
 	return models.ProcessResult{SourcePath: m.Path, Success: false}
 }
 

@@ -124,14 +124,11 @@ func (p *FFmpegProcessor) Process(ctx context.Context, m *models.ShrinkMedia, cf
 			slog.Info("Unsupported format, keeping original", "path", m.Path)
 			return models.ProcessResult{SourcePath: m.Path, Success: true, Outputs: []models.ProcessOutputFile{{Path: m.Path, Size: m.Size}}}
 		} else if isFileErr {
-			// File error (corrupt, missing, etc.) - remove transcode attempt and move to broken
+			// File error (corrupt, missing, etc.) - remove transcode attempt
 			os.Remove(outputPath)
 			return models.ProcessResult{SourcePath: m.Path, Success: false, Error: fmt.Errorf("file error: %w", err), Output: string(output)}
 		}
 
-		if p.config.Common.DeleteUnplayable {
-			return models.ProcessResult{SourcePath: m.Path, Success: false, Error: err, Output: string(output)}
-		}
 		return models.ProcessResult{SourcePath: m.Path, Error: err, Output: string(output)}
 	}
 
