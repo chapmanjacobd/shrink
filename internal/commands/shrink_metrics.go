@@ -365,19 +365,18 @@ func (m *ShrinkMetrics) PrintProgress() {
 	output := sb.String()
 	lineCount := strings.Count(output, "\n")
 
-	// Move cursor up to the initial line of our progress display
-	// \x1b[F moves cursor to beginning of previous line (combines CR and up)
+	// Clear old progress area first (if any)
 	if m.linesPrinted > 0 {
-		// Move up by (linesPrinted - 1) to get back to first line of progress
-		// Then one more \x1b[F to get to the line before that (where we want to overwrite)
-		fmt.Printf("\033[%dF", m.linesPrinted) // Move up N lines to beginning
+		fmt.Printf("\033[%dF", m.linesPrinted) // Move up to first line of old progress
+		for i := 0; i < m.linesPrinted; i++ {
+			fmt.Printf("%s\n", clearSeq) // Clear each line moving down
+		}
+		fmt.Printf("\033[%dF", m.linesPrinted) // Move back up to where we started
 	}
-	fmt.Print(output) // Print progress
-	// Clear remaining lines from old progress (in case new progress is shorter)
-	for i := lineCount; i < m.linesPrinted; i++ {
-		fmt.Printf("%s\n", clearSeq) // Clear line and move down
-	}
-	fmt.Print(clearSeq) // Clear the last line too
+
+	// Print new progress
+	fmt.Print(output)
+
 	// Track lines printed for next iteration
 	m.linesPrinted = lineCount
 }
