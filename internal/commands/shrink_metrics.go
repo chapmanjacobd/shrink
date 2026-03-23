@@ -482,13 +482,13 @@ func (m *ShrinkMetrics) LogSummary() {
 
 	utils.PrintTable(headers, rows)
 	fmt.Println(strings.Repeat("=", 78))
-	fmt.Printf("Total duration: %s\n", duration.String())
+	fmt.Printf("Total duration: %s\n", utils.FormatDuration(duration.Seconds()))
 	fmt.Println()
 
 	// Also log for verbose mode
 	// This can safely call slog.Info because we no longer hold the lock
 	slog.Info("Processing complete",
-		"duration", duration.String(),
+		"duration", utils.FormatDuration(duration.Seconds()),
 		"processed", totalProcessed,
 		"success", totalSuccess,
 		"failed", totalFailed,

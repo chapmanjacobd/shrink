@@ -86,13 +86,19 @@ func TestMoveToBrokenMountPoint(t *testing.T) {
 	mountPoint, _ := utils.GetMountPoint(absPath)
 	relPath, _ := filepath.Rel(mountPoint, absPath)
 
+	// Use a target directory that is likely writable (within the same path as tempDir)
+	// If we use ":/tmp/shrink-test-broken", it should be writable on most Linux systems.
+	// If mountPoint is "/", target is "/tmp/shrink-test-broken"
+	// If mountPoint is "/tmp", target is "/tmp/tmp/shrink-test-broken"
+	targetDir := "tmp/shrink-test-broken-" + filepath.Base(tempDir)
 	cmd := &ShrinkCmd{}
-	cmd.MoveBroken = ":/broken_dir"
+	cmd.MoveBroken = ":/" + targetDir
 
 	// Mocking MoveToBroken call
 	cmd.MoveToBroken(absPath, nil)
+	defer os.RemoveAll(filepath.Join(mountPoint, targetDir))
 
-	expectedDest := filepath.Join(mountPoint, "broken_dir", relPath)
+	expectedDest := filepath.Join(mountPoint, targetDir, relPath)
 	if _, err := os.Stat(expectedDest); os.IsNotExist(err) {
 		t.Errorf("expected broken file to be moved to %s", expectedDest)
 	}
