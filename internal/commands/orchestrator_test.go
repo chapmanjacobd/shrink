@@ -1,6 +1,8 @@
 package commands
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/chapmanjacobd/shrink/internal/models"
@@ -37,5 +39,71 @@ func TestGetTimeout(t *testing.T) {
 	timeout = engine.getTimeout(m)
 	if timeout.Minutes() != 10 {
 		t.Errorf("expected 10m timeout, got %v", timeout.Minutes())
+	}
+}
+
+type mockUI struct {
+	movedTo       []string
+	movedToBroken []string
+}
+
+func (m *mockUI) Confirm() bool { return true }
+func (m *mockUI) MoveTo(path string) { m.movedTo = append(m.movedTo, path) }
+func (m *mockUI) MoveToBroken(path string, parts []string) { m.movedToBroken = append(m.movedToBroken, path) }
+
+func TestFinalizeFileSwapKeepOriginal(t *testing.T) {
+	// Create a temp file
+	tmpDir := t.TempDir()
+	originalPath := filepath.Join(tmpDir, "original.mp4")
+	if err := os.WriteFile(originalPath, []byte("data"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	e := &Engine{} // mock engine
+	m := models.ShrinkMedia{Path: originalPath}
+	result := models.ProcessResult{
+		Success: true,
+		Outputs: []models.ProcessOutputFile{
+			{Path: originalPath, Size: 4},
+		},
+	}
+
+	// This should NOT delete the original file
+	e.finalizeFileSwap(m, result, true)
+
+	if _, err := os.Stat(originalPath); os.IsNotExist(err) {
+		t.Errorf("original file was deleted but it was in the outputs")
+	}
+}
+
+func TestFinalizeFileSwapDeleteOriginal(t *testing.T) {
+	// Create a temp file
+	tmpDir := t.TempDir()
+	originalPath := filepath.Join(tmpDir, "original.mp4")
+	newPath := filepath.Join(tmpDir, "new.mp4")
+	if err := os.WriteFile(originalPath, []byte("original data"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(newPath, []byte("new data"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	e := &Engine{} // mock engine
+	m := models.ShrinkMedia{Path: originalPath}
+	result := models.ProcessResult{
+		Success: true,
+		Outputs: []models.ProcessOutputFile{
+			{Path: newPath, Size: 8},
+		},
+	}
+
+	// This SHOULD delete the original file
+	e.finalizeFileSwap(m, result, true)
+
+	if _, err := os.Stat(originalPath); err == nil {
+		t.Errorf("original file was NOT deleted but it was NOT in the outputs")
+	}
+	if _, err := os.Stat(newPath); err != nil {
+		t.Errorf("new file was deleted but it was in the outputs: %v", err)
 	}
 }

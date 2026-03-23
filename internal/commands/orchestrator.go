@@ -429,15 +429,26 @@ func (e *Engine) finalizeFileSwap(m models.ShrinkMedia, result models.ProcessRes
 		// Keep new files, delete original and any part files
 		// Also delete any intermediate source files (like .ocr.pdf) if different from result.SourcePath
 		if m.Path != "" {
-			db.MarkDeleted(e.sqlDBs, m.Path)
-			os.Remove(m.Path)
+			// Check if m.Path is one of the outputs we are keeping
+			isOutput := false
+			for _, out := range result.Outputs {
+				if pathsEqual(out.Path, m.Path) {
+					isOutput = true
+					break
+				}
+			}
+
+			if !isOutput {
+				db.MarkDeleted(e.sqlDBs, m.Path)
+				os.Remove(m.Path)
+			}
 		}
 
 		// If result.SourcePath was changed (e.g. by OCR) and it's not in the outputs, delete it too
-		if result.SourcePath != "" && result.SourcePath != m.Path {
+		if result.SourcePath != "" && !pathsEqual(result.SourcePath, m.Path) {
 			foundInOutputs := false
 			for _, out := range result.Outputs {
-				if out.Path == result.SourcePath {
+				if pathsEqual(out.Path, result.SourcePath) {
 					foundInOutputs = true
 					break
 				}
@@ -459,12 +470,12 @@ func (e *Engine) finalizeFileSwap(m models.ShrinkMedia, result models.ProcessRes
 	} else {
 		// Delete new files, keep original
 		for _, out := range result.Outputs {
-			if out.Path != m.Path && out.Path != result.SourcePath {
+			if !pathsEqual(out.Path, m.Path) && !pathsEqual(out.Path, result.SourcePath) {
 				os.RemoveAll(out.Path)
 			}
 		}
 		// If an intermediate source was created (e.g. OCR), delete it too
-		if result.SourcePath != "" && result.SourcePath != m.Path {
+		if result.SourcePath != "" && !pathsEqual(result.SourcePath, m.Path) {
 			os.Remove(result.SourcePath)
 		}
 	}
@@ -479,9 +490,9 @@ func (e *Engine) updateMetadata(m models.ShrinkMedia, result models.ProcessResul
 		// We use updateDatabase when the original is replaced by a single output
 		// to preserve metadata like play_count, etc.
 		// Except for archives, where we want to keep the archive record as deleted.
-		if len(result.Outputs) == 1 && out.Path != m.Path && m.Category != "Archived" {
+		if len(result.Outputs) == 1 && !pathsEqual(out.Path, m.Path) && m.Category != "Archived" {
 			db.UpdateMedia(e.sqlDBs, m.Path, out.Path, out.Size, m.Duration)
-		} else if out.Path != m.Path {
+		} else if !pathsEqual(out.Path, m.Path) {
 			db.AddMediaEntry(e.sqlDBs, out.Path, out.Size, m.Duration)
 		} else {
 			db.MarkShrinked(e.sqlDBs, out.Path)

@@ -108,17 +108,21 @@ func MoveFile(src, dst string) error {
 		return nil
 	}
 
+	// Ensure destination directory exists and retry rename
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	err = os.Rename(src, dst)
+	if err == nil {
+		return nil
+	}
+
 	// If rename fails (e.g. cross-filesystem), try copying
 	in, err := os.Open(src)
 	if err != nil {
 		return err
 	}
 	defer in.Close()
-
-	// Ensure destination directory exists
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		return err
-	}
 
 	out, err := os.Create(dst)
 	if err != nil {
