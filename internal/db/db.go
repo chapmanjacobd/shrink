@@ -2,6 +2,7 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"path/filepath"
@@ -188,6 +189,13 @@ func populateMediaType(db *sql.DB) error {
 		return nil
 	}
 
+	// Use IMMEDIATE transaction to acquire write lock upfront
+	tx, err := BeginImmediate(db)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback() // Rollback if commit fails or on error
+
 	// Build extension lists from utils
 	videoExts := buildExtensionList(utils.VideoExtensionMap)
 	audioExts := buildExtensionList(utils.AudioExtensionMap)
@@ -197,7 +205,7 @@ func populateMediaType(db *sql.DB) error {
 
 	// Update media_type based on file extension
 	if videoExts != "" {
-		_, err = db.Exec(`
+		_, err = tx.Exec(`
 			UPDATE media SET media_type = 'video'
 			WHERE (media_type IS NULL OR media_type = '')
 			AND LOWER(SUBSTR(path, INSTR(path, '.') + 1)) IN (` + videoExts + `)
@@ -208,7 +216,7 @@ func populateMediaType(db *sql.DB) error {
 	}
 
 	if audioExts != "" {
-		_, err = db.Exec(`
+		_, err = tx.Exec(`
 			UPDATE media SET media_type = 'audio'
 			WHERE (media_type IS NULL OR media_type = '')
 			AND LOWER(SUBSTR(path, INSTR(path, '.') + 1)) IN (` + audioExts + `)
@@ -219,7 +227,7 @@ func populateMediaType(db *sql.DB) error {
 	}
 
 	// Audiobook extensions (m4b, aa, aax) - subset of audio
-	_, err = db.Exec(`
+	_, err = tx.Exec(`
 		UPDATE media SET media_type = 'audiobook'
 		WHERE (media_type IS NULL OR media_type = '')
 		AND LOWER(SUBSTR(path, INSTR(path, '.') + 1)) IN ('m4b', 'aa', 'aax')
@@ -229,7 +237,7 @@ func populateMediaType(db *sql.DB) error {
 	}
 
 	if imageExts != "" {
-		_, err = db.Exec(`
+		_, err = tx.Exec(`
 			UPDATE media SET media_type = 'image'
 			WHERE (media_type IS NULL OR media_type = '')
 			AND LOWER(SUBSTR(path, INSTR(path, '.') + 1)) IN (` + imageExts + `)
@@ -240,7 +248,7 @@ func populateMediaType(db *sql.DB) error {
 	}
 
 	if textExts != "" {
-		_, err = db.Exec(`
+		_, err = tx.Exec(`
 			UPDATE media SET media_type = 'text'
 			WHERE (media_type IS NULL OR media_type = '')
 			AND LOWER(SUBSTR(path, INSTR(path, '.') + 1)) IN (` + textExts + `)
@@ -251,7 +259,7 @@ func populateMediaType(db *sql.DB) error {
 	}
 
 	if archiveExts != "" {
-		_, err = db.Exec(`
+		_, err = tx.Exec(`
 			UPDATE media SET media_type = 'archive'
 			WHERE (media_type IS NULL OR media_type = '')
 			AND LOWER(SUBSTR(path, INSTR(path, '.') + 1)) IN (` + archiveExts + `)
@@ -261,7 +269,7 @@ func populateMediaType(db *sql.DB) error {
 		}
 	}
 
-	return nil
+	return tx.Commit()
 }
 
 // buildExtensionList converts a map of extensions to a SQL-ready comma-separated string
@@ -317,4 +325,15 @@ func ResolveDatabasePath(path string) (string, error) {
 		return "", fmt.Errorf("failed to resolve database path: %w", err)
 	}
 	return abs, nil
+}
+
+// BeginImmediate starts a new transaction with IMMEDIATE mode.
+// This acquires a write lock immediately, respecting the busy_timeout.
+// Use this instead of db.Begin() to avoid SQLITE_BUSY errors from
+// deferred lock upgrades.
+func BeginImmediate(db *sql.DB) (*sql.Tx, error) {
+	return db.BeginTx(context.Background(), &sql.TxOptions{
+		Isolation: sql.LevelWriteCommitted,
+		ReadOnly:  false,
+	})
 }

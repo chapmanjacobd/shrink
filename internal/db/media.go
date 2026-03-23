@@ -154,16 +154,32 @@ func BulkMarkOptimizedExtensions(databases []*sql.DB) {
 	optimizedExtensions := []string{".av1.mkv", ".opus", ".mka", ".avif", ".oga", ".ogg"}
 
 	for _, sqlDB := range databases {
+		// Use IMMEDIATE transaction to acquire write lock upfront
+		tx, err := BeginImmediate(sqlDB)
+		if err != nil {
+			slog.Warn("Failed to start transaction for bulk mark", "error", err)
+			continue
+		}
+
 		for _, ext := range optimizedExtensions {
 			// Use LIKE with LOWER to handle case-insensitive matching
-			_, err := sqlDB.Exec(
+			_, err := tx.Exec(
 				"UPDATE media SET is_shrinked = 1 WHERE LOWER(path) LIKE ? AND COALESCE(time_deleted, 0) = 0",
 				"%"+ext,
 			)
 			if err != nil {
 				slog.Warn("Failed to bulk mark optimized extensions", "extension", ext, "error", err)
+				tx.Rollback()
+				goto NextDB
 			}
 		}
+
+		if err := tx.Commit(); err != nil {
+			slog.Warn("Failed to commit transaction for bulk mark", "error", err)
+			tx.Rollback()
+		}
+
+	NextDB:
 	}
 }
 
