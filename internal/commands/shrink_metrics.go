@@ -218,36 +218,6 @@ func (m *ShrinkMetrics) PrintProgress() {
 	var sb strings.Builder
 	clearSeq := utils.GetClearLineSequence()
 
-	// Calculate how many running files we can display
-	// Reserve space for: headers (1) + data rows per type (variable) + totals (1) + running files section
-	// Minimum space needed for table: ~10 lines (headers + some rows + totals)
-	terminalHeight := utils.GetTerminalHeight()
-	minTableLines := 10
-	maxRunningLines := terminalHeight - minTableLines
-
-	// Show running files only if there's enough space
-	if maxRunningLines > 2 && len(m.runningFiles) > 0 {
-		// Current running files section
-		sb.WriteString("Currently processing:" + clearSeq + "\n")
-
-		// Determine how many files to show
-		filesToShow := min(len(m.runningFiles),
-			// Reserve 1 line for "...and X more" if needed
-			maxRunningLines-1)
-
-		for i := 0; i < filesToShow; i++ {
-			rf := m.runningFiles[i]
-			displayPath := utils.TruncateMiddle(rf.Path, utils.GetTerminalWidth()-3)
-			sb.WriteString("  " + displayPath + clearSeq + "\n")
-		}
-
-		if len(m.runningFiles) > filesToShow {
-			remaining := len(m.runningFiles) - filesToShow
-			sb.WriteString("  ...and " + strconv.Itoa(remaining) + " more" + clearSeq + "\n")
-		}
-		sb.WriteString(clearSeq + "\n")
-	}
-
 	// Calculate totals
 	var totalSuccess, totalFailed, totalSkipped, totalQueued, totalRunning int
 	var totalSavings int64
@@ -360,6 +330,35 @@ func (m *ShrinkMetrics) PrintProgress() {
 	tableLines := strings.Split(strings.TrimSuffix(tableOutput, "\n"), "\n")
 	for _, line := range tableLines {
 		sb.WriteString(line + clearSeq + "\n")
+	}
+
+	// Calculate how many running files we can display
+	// Reserve space for: table lines + running files section
+	terminalHeight := utils.GetTerminalHeight()
+	tableLineCount := len(tableLines)
+	maxRunningLines := terminalHeight - tableLineCount - 2 // -2 for spacing
+
+	// Show running files only if there's enough space
+	if maxRunningLines > 2 && len(m.runningFiles) > 0 {
+		sb.WriteString(clearSeq + "\n")
+		// Current running files section
+		sb.WriteString("Currently processing:" + clearSeq + "\n")
+
+		// Determine how many files to show
+		filesToShow := min(len(m.runningFiles),
+			// Reserve 1 line for "...and X more" if needed
+			maxRunningLines-1)
+
+		for i := 0; i < filesToShow; i++ {
+			rf := m.runningFiles[i]
+			displayPath := utils.TruncateMiddle(rf.Path, utils.GetTerminalWidth()-3)
+			sb.WriteString("  " + displayPath + clearSeq + "\n")
+		}
+
+		if len(m.runningFiles) > filesToShow {
+			remaining := len(m.runningFiles) - filesToShow
+			sb.WriteString("  ...and " + strconv.Itoa(remaining) + " more" + clearSeq + "\n")
+		}
 	}
 
 	output := sb.String()
