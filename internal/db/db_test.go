@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	_ "modernc.org/sqlite"
+	_ "github.com/mattn/go-sqlite3"
 )
 
 func TestDatabaseLifecycle(t *testing.T) {

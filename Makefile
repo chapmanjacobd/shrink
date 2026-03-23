@@ -60,13 +60,13 @@ deps-update:
 	go mod tidy
 
 build:
-	go build -o shrink ./cmd/shrink
+	CGO_ENABLED=1 go build -tags fts5 -o shrink ./cmd/shrink
 
 test:
-	gotestsum --format pkgname-and-test-fails -- ./...
+	CGO_ENABLED=1 gotestsum --format pkgname-and-test-fails -- -tags fts5 ./...
 
 cover:
-	gotestsum --format pkgname-and-test-fails -- ./... -coverprofile=coverage.out
+	CGO_ENABLED=1 gotestsum --format pkgname-and-test-fails -- -tags fts5 ./... -coverprofile=coverage.out
 	go tool cover -func=coverage.out | awk '{n=split($$NF,a,"%%"); if (a[1] < 85) print $$0}' | sort -k3 -n
 
 fmt:
@@ -77,8 +77,8 @@ fmt:
 	go fix ./...
 
 lint:
-	-staticcheck ./...
-	go vet ./...
+	-staticcheck -tags fts5 ./...
+	go vet -tags fts5 ./...
 
 install:
-	go install ./cmd/shrink
+	CGO_ENABLED=1 go install -tags fts5 ./cmd/shrink

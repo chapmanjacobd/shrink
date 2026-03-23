@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/chapmanjacobd/shrink/internal/utils"
-	_ "modernc.org/sqlite"
+	_ "github.com/mattn/go-sqlite3"
 )
 
 // Connect connects to a SQLite database without initializing it
@@ -28,7 +28,7 @@ func Connect(dbPath string) (*sql.DB, error) {
 		dsn = "file::memory:?cache=shared&_busy_timeout=30000"
 	}
 
-	db, err := sql.Open("sqlite", dsn)
+	db, err := sql.Open("sqlite3", dsn)
 	if err != nil {
 		return nil, err
 	}

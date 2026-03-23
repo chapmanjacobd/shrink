@@ -12,7 +12,7 @@ import (
 	"github.com/chapmanjacobd/shrink/internal/models"
 	"github.com/chapmanjacobd/shrink/internal/testutils"
 	"github.com/chapmanjacobd/shrink/internal/utils"
-	_ "modernc.org/sqlite"
+	_ "github.com/mattn/go-sqlite3"
 )
 
 func runShrinkCmd(dbPath, tempDir string, args []string) error {

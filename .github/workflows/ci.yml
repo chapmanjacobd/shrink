@@ -24,6 +24,8 @@ jobs:
     defaults:
       run:
         shell: bash
+    env:
+      CGO_ENABLED: 1
     steps:
       - uses: actions/checkout@v6
         with:
@@ -53,7 +55,7 @@ jobs:
         run: |
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
             # Windows often has issues with parallel tests and file locking on SQLite DBs
-            gotestsum --format github-actions -- ./... -parallel 1
+            CGO_ENABLED=1 gotestsum --format github-actions -- -tags fts5 ./... -parallel 1
             make all
           else
             make all
@@ -62,13 +64,14 @@ jobs:
       - name: Build release binary
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
+          mkdir -p dist
           if [ "${{ matrix.os }}" = "macos-latest" ]; then
-            GOOS=darwin GOARCH=amd64 go build -o dist/shrink-${{ matrix.os }}-amd64 ./cmd/shrink
-            GOOS=darwin GOARCH=arm64 go build -o dist/shrink-${{ matrix.os }}-arm64 ./cmd/shrink
+            CGO_ENABLED=1 GOOS=darwin GOARCH=amd64 go build -tags fts5 -o dist/shrink-${{ matrix.os }}-amd64 ./cmd/shrink
+            CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 go build -tags fts5 -o dist/shrink-${{ matrix.os }}-arm64 ./cmd/shrink
           elif [ "${{ matrix.os }}" = "windows-latest" ]; then
-            GOOS=windows GOARCH=amd64 go build -o dist/shrink-windows-amd64.exe ./cmd/shrink
+            CGO_ENABLED=1 GOOS=windows GOARCH=amd64 go build -tags fts5 -o dist/shrink-windows-amd64.exe ./cmd/shrink
           else
-            GOOS=linux GOARCH=amd64 go build -o dist/shrink-linux-amd64 ./cmd/shrink
+            CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -tags fts5 -o dist/shrink-linux-amd64 ./cmd/shrink
           fi
 
       - name: Create GitHub Release

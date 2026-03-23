@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	_ "modernc.org/sqlite"
+	_ "github.com/mattn/go-sqlite3"
 )
 
 // TestFile represents a file used in natural language testing scenarios
@@ -46,7 +46,7 @@ func RunScenario(t *testing.T, s Scenario, runCmd func(dbPath, tempDir string, a
 
 	// 2. Setup SQLite db
 	dbPath := filepath.Join(tempDir, "test.db")
-	db, err := sql.Open("sqlite", dbPath)
+	db, err := sql.Open("sqlite3", dbPath)
 	if err != nil {
 		t.Fatalf("failed to open db: %v", err)
 	}
@@ -93,7 +93,7 @@ func RunScenario(t *testing.T, s Scenario, runCmd func(dbPath, tempDir string, a
 	}
 
 	// 5. Re-open DB for Assertions
-	db, err = sql.Open("sqlite", dbPath)
+	db, err = sql.Open("sqlite3", dbPath)
 	if err != nil {
 		t.Fatalf("failed to re-open db: %v", err)
 	}
