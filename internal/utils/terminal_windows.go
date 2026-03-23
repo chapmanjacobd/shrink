@@ -93,9 +93,7 @@ var terminalSize TerminalSize
 
 // GetTerminalWidth returns the current terminal width
 func GetTerminalWidth() int {
-	terminalSize.initOnce.Do(func() {
-		terminalSize.updateSize()
-	})
+	terminalSize.updateSize()
 	terminalSize.mu.RLock()
 	defer terminalSize.mu.RUnlock()
 	return terminalSize.width
@@ -103,9 +101,7 @@ func GetTerminalWidth() int {
 
 // GetTerminalHeight returns the current terminal height
 func GetTerminalHeight() int {
-	terminalSize.initOnce.Do(func() {
-		terminalSize.updateSize()
-	})
+	terminalSize.updateSize()
 	terminalSize.mu.RLock()
 	defer terminalSize.mu.RUnlock()
 	return terminalSize.height

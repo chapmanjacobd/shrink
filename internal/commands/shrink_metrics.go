@@ -214,6 +214,9 @@ func (m *ShrinkMetrics) PrintProgress() {
 	}
 	m.lastPrintTime = now
 
+	terminalHeight := utils.GetTerminalHeight()
+	terminalWidth := utils.GetTerminalWidth()
+
 	// Build the progress output
 	var sb strings.Builder
 	clearSeq := utils.GetClearLineSequence()
@@ -248,7 +251,7 @@ func (m *ShrinkMetrics) PrintProgress() {
 	var sortedTypes []mediaTypeStats
 
 	// Check if we should collapse categories (if too many entries for terminal)
-	collapse := len(m.types) > (utils.GetTerminalHeight() + 8)
+	collapse := len(m.types) > (terminalHeight - 12)
 
 	if collapse {
 		collapsed := make(map[string]*MediaTypeStats)
@@ -289,7 +292,19 @@ func (m *ShrinkMetrics) PrintProgress() {
 		return a.name < b.name
 	})
 
-	for _, mt := range sortedTypes {
+	// Cap the number of media types to show in the table
+	maxTableRows := max(
+		// Reserve room for headers, total, and currently processing
+		terminalHeight-10, 1)
+
+	var displayedTypes []mediaTypeStats
+	if len(sortedTypes) > maxTableRows {
+		displayedTypes = sortedTypes[:maxTableRows-1]
+	} else {
+		displayedTypes = sortedTypes
+	}
+
+	for _, mt := range displayedTypes {
 		if mt.queue == 0 && mt.stats.Running == 0 {
 			continue
 		}
@@ -307,6 +322,10 @@ func (m *ShrinkMetrics) PrintProgress() {
 			utils.FormatSize(mt.stats.SpaceSaved()),
 			speed,
 		})
+	}
+
+	if len(sortedTypes) > maxTableRows {
+		rows = append(rows, []string{"...", "...", "...", "...", "...", "...", "...", "..."})
 	}
 
 	// Print totals
@@ -334,7 +353,6 @@ func (m *ShrinkMetrics) PrintProgress() {
 
 	// Calculate how many running files we can display
 	// Reserve space for: table lines + running files section
-	terminalHeight := utils.GetTerminalHeight()
 	tableLineCount := len(tableLines)
 	maxRunningLines := terminalHeight - tableLineCount - 2 // -2 for spacing
 
@@ -351,7 +369,7 @@ func (m *ShrinkMetrics) PrintProgress() {
 
 		for i := range filesToShow {
 			rf := m.runningFiles[i]
-			displayPath := utils.TruncateMiddle(rf.Path, utils.GetTerminalWidth()-3)
+			displayPath := utils.TruncateMiddle(rf.Path, terminalWidth-3)
 			sb.WriteString("  " + displayPath + clearSeq + "\n")
 		}
 
@@ -366,18 +384,15 @@ func (m *ShrinkMetrics) PrintProgress() {
 
 	// Clear old progress area first (if any)
 	if m.linesPrinted > 0 {
-		fmt.Printf("\033[%dF", m.linesPrinted) // Move up to first line of old progress
-		for i := 0; i < m.linesPrinted; i++ {
-			fmt.Printf("%s\n", clearSeq) // Clear each line moving down
-		}
-		fmt.Printf("\033[%dF", m.linesPrinted) // Move back up to where we started
+		// Move up and clear from cursor to end of screen
+		fmt.Printf("\033[%dF\033[J", min(m.linesPrinted, terminalHeight-1))
 	}
 
 	// Print new progress
 	fmt.Print(output)
 
-	// Track lines printed for next iteration
-	m.linesPrinted = lineCount
+	// Track lines printed for next iteration (cap at terminalHeight-1)
+	m.linesPrinted = min(lineCount, terminalHeight-1)
 }
 
 // ClearProgress erases the currently printed progress block from the screen
@@ -393,15 +408,9 @@ func (m *ShrinkMetrics) ClearProgress() {
 		return
 	}
 
-	// Move cursor up to the initial line of our progress display
-	fmt.Printf("\033[%dF", m.linesPrinted)
-	// Clear each line moving down
-	clearSeq := utils.GetClearLineSequence()
-	for i := 0; i < m.linesPrinted; i++ {
-		fmt.Printf("%s\n", clearSeq)
-	}
-	// Move back up to where we started clearing
-	fmt.Printf("\033[%dF", m.linesPrinted)
+	terminalHeight := utils.GetTerminalHeight()
+	// Move up and clear from cursor to end of screen
+	fmt.Printf("\033[%dF\033[J", min(m.linesPrinted, terminalHeight-1))
 
 	m.linesPrinted = 0
 }

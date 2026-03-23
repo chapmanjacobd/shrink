@@ -27,7 +27,7 @@ func TestInterruptionPreservesOriginal(t *testing.T) {
 		binDir := filepath.Join(tmpDir, "bin")
 		os.MkdirAll(binDir, 0o755)
 		os.WriteFile(filepath.Join(binDir, "ocrmypdf"), []byte("#!/bin/sh\nexit 1"), 0o755)
-		
+
 		oldPath := os.Getenv("PATH")
 		os.Setenv("PATH", binDir+":"+oldPath)
 		defer os.Setenv("PATH", oldPath)
@@ -36,15 +36,15 @@ func TestInterruptionPreservesOriginal(t *testing.T) {
 		cfg := &models.ProcessorConfig{
 			Text: models.TextConfig{ForceOCR: true},
 		}
-		
+
 		// This will call runOCR which we want to NOT delete the original if it fails
 		// But runOCR actually handles its own failure and returns ""
 		res := p.runOCR(pdfPath, cfg)
-		
+
 		if res != "" {
 			t.Errorf("expected empty result on OCR failure")
 		}
-		
+
 		if _, err := os.Stat(pdfPath); os.IsNotExist(err) {
 			t.Errorf("original pdf was deleted on OCR failure")
 		}
@@ -59,7 +59,7 @@ func TestInterruptionPreservesOriginal(t *testing.T) {
 		binDir := filepath.Join(tmpDir, "bin-convert")
 		os.MkdirAll(binDir, 0o755)
 		os.WriteFile(filepath.Join(binDir, "ebook-convert"), []byte("#!/bin/sh\nsleep 10"), 0o755)
-		
+
 		oldPath := os.Getenv("PATH")
 		os.Setenv("PATH", binDir+":"+oldPath)
 		defer os.Setenv("PATH", oldPath)
@@ -70,7 +70,7 @@ func TestInterruptionPreservesOriginal(t *testing.T) {
 
 		cfg := &models.ProcessorConfig{}
 		res := p.Process(ctx, &models.ShrinkMedia{Path: epubPath}, cfg, nil)
-		
+
 		if res.Error == nil {
 			t.Errorf("expected error on interruption")
 		}
@@ -96,7 +96,7 @@ func TestInterruptionPreservesOriginal(t *testing.T) {
 		os.MkdirAll(binDir, 0o755)
 		os.WriteFile(filepath.Join(binDir, "lsar"), []byte("#!/bin/sh\necho '{\"lsarContents\":[]}'"), 0o755)
 		os.WriteFile(filepath.Join(binDir, "unar"), []byte("#!/bin/sh\nsleep 10"), 0o755)
-		
+
 		oldPath := os.Getenv("PATH")
 		os.Setenv("PATH", binDir+":"+oldPath)
 		defer os.Setenv("PATH", oldPath)
@@ -107,7 +107,7 @@ func TestInterruptionPreservesOriginal(t *testing.T) {
 
 		cfg := &models.ProcessorConfig{}
 		res := p.Process(ctx, &models.ShrinkMedia{Path: zipPath, Ext: ".zip"}, cfg, nil)
-		
+
 		if res.Error == nil {
 			t.Errorf("expected error on interruption")
 		}
