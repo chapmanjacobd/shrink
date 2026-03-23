@@ -96,10 +96,10 @@ func (p *TextProcessor) processText(ctx context.Context, m *models.ShrinkMedia, 
 
 	// Step 4: Process images inside ebook (convert to AVIF)
 	imageFiles := p.findImages(outputDir)
-	p.processEbookImages(ctx, imageFiles, cfg)
+	converted := p.processEbookImages(ctx, imageFiles, cfg)
 
 	// Step 5: Update references in HTML files
-	p.updateImageReferences(outputDir)
+	p.updateImageReferences(outputDir, converted)
 
 	// Step 6: Return result
 	outputSize := utils.FolderSize(outputDir)
@@ -183,7 +183,6 @@ func (p *TextProcessor) runOCR(path string, cfg *models.ProcessorConfig) string 
 	}
 
 	if _, err := os.Stat(outputPath); err == nil {
-		os.Remove(path)
 		return outputPath
 	}
 
@@ -292,17 +291,24 @@ func (p *TextProcessor) findImages(dir string) []string {
 	return images
 }
 
-// processEbookImages converts images to AVIF
-func (p *TextProcessor) processEbookImages(ctx context.Context, images []string, cfg *models.ProcessorConfig) {
+// processEbookImages converts images to AVIF and returns map of successfully converted files
+func (p *TextProcessor) processEbookImages(ctx context.Context, images []string, cfg *models.ProcessorConfig) map[string]string {
+	converted := make(map[string]string)
 	imCmd := getImageMagickCommand()
 	if imCmd == "" {
 		slog.Warn("ImageMagick not available, skipping ebook image conversion")
-		return
+		return converted
 	}
 	for _, img := range images {
-		ext := strings.ToLower(filepath.Ext(img))
+		// Respect context cancellation
+		if ctx.Err() != nil {
+			return converted
+		}
+
+		ext := filepath.Ext(img)
+		extLower := strings.ToLower(ext)
 		// Skip formats that shouldn't be converted to AVIF
-		if !shouldConvertToAVIF(ext) {
+		if !shouldConvertToAVIF(extLower) {
 			continue
 		}
 
@@ -316,50 +322,68 @@ func (p *TextProcessor) processEbookImages(ctx context.Context, images []string,
 		cmd := exec.CommandContext(ctx, imCmd, args...)
 		if err := cmd.Run(); err != nil {
 			slog.Warn("Failed to convert ebook image", "path", img, "error", err)
+			// Clean up partial transcode if original still exists
+			if _, statErr := os.Stat(img); statErr == nil {
+				os.Remove(outputPath)
+			}
 			continue
 		}
 
 		// Replace if smaller
 		if info, err := os.Stat(outputPath); err == nil {
-			if info.Size() > 0 {
-				os.Remove(img)
+			if oldInfo, oldErr := os.Stat(img); oldErr == nil {
+				if info.Size() > 0 && info.Size() < oldInfo.Size() {
+					os.Remove(img)
+					converted[filepath.Base(img)] = filepath.Base(outputPath)
+				} else {
+					os.Remove(outputPath)
+				}
 			} else {
+				// If we can't stat original, something is very wrong, cleanup new file
 				os.Remove(outputPath)
 			}
 		}
 	}
+	return converted
 }
 
 // updateImageReferences updates HTML files to reference new AVIF files
-func (p *TextProcessor) updateImageReferences(dir string) {
+func (p *TextProcessor) updateImageReferences(dir string, converted map[string]string) {
+	if len(converted) == 0 {
+		return
+	}
+
 	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil
 		}
 		ext := strings.ToLower(filepath.Ext(path))
 		if ext == ".html" || ext == ".xhtml" || ext == ".htm" {
-			p.updateReferencesInFile(path)
+			p.updateReferencesInFile(path, converted)
 		}
 		return nil
 	})
 }
 
 // updateReferencesInFile updates image references in a single HTML file
-func (p *TextProcessor) updateReferencesInFile(path string) {
+func (p *TextProcessor) updateReferencesInFile(path string, converted map[string]string) {
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return
 	}
 
 	text := string(content)
-	// Replace all image extensions that we convert to AVIF
-	for ext := range utils.ImageExtensionMap {
-		if shouldConvertToAVIF(ext) {
-			text = strings.ReplaceAll(text, ext, ".avif")
+	modified := false
+	for oldName, newName := range converted {
+		if strings.Contains(text, oldName) {
+			text = strings.ReplaceAll(text, oldName, newName)
+			modified = true
 		}
 	}
 
-	os.WriteFile(path, []byte(text), 0o644)
+	if modified {
+		os.WriteFile(path, []byte(text), 0o644)
+	}
 }
 
 // folderExists checks if a folder exists

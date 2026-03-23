@@ -208,17 +208,6 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *models.Shri
 		return nil
 	})
 
-	// Delete multi-part archive files after successful extraction
-	for _, partFile := range partFiles {
-		if !filepath.IsAbs(partFile) {
-			partFile = filepath.Join(filepath.Dir(m.Path), partFile)
-		}
-		if !pathsEqual(partFile, m.Path) {
-			os.Remove(partFile)
-			slog.Debug("Deleted multi-part archive part", "path", partFile)
-		}
-	}
-
 	return models.ProcessResult{
 		SourcePath: m.Path,
 		Outputs:    []models.ProcessOutputFile{{Path: outputDir, Size: utils.FolderSize(outputDir)}},

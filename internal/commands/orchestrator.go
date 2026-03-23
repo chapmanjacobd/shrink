@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -283,7 +284,7 @@ func (e *Engine) processSingle(ctx context.Context, m models.ShrinkMedia) models
 
 	// Handle unsuccessful processing (e.g., invalid output)
 	if !result.Success {
-		return e.handleUnsuccessfulProcessing(m, elapsedSeconds)
+		return e.handleUnsuccessfulProcessing(m, result, elapsedSeconds)
 	}
 
 	// Calculate new size and compare with original
@@ -348,23 +349,55 @@ func (e *Engine) handleProcessingError(m models.ShrinkMedia, result models.Proce
 	if e.cfg.Common.DeleteUnplayable {
 		db.MarkDeleted(e.sqlDBs, m.Path)
 		os.Remove(m.Path)
+		if result.SourcePath != "" && result.SourcePath != m.Path {
+			os.Remove(result.SourcePath)
+		}
 	} else if e.cfg.Common.MoveBroken != "" {
 		e.ui.MoveToBroken(m.Path, result.PartFiles)
 	}
+
+	// Clean up any partial outputs and intermediate source files
+	for _, out := range result.Outputs {
+		if out.Path != m.Path && out.Path != result.SourcePath {
+			os.RemoveAll(out.Path)
+		}
+	}
+	if result.SourcePath != "" && result.SourcePath != m.Path {
+		// Only remove intermediate source if we're not deleting unplayable (already handled)
+		if !e.cfg.Common.DeleteUnplayable {
+			os.Remove(result.SourcePath)
+		}
+	}
+
 	return result
 }
 
 // handleUnsuccessfulProcessing handles processing that succeeded but produced no valid output.
-func (e *Engine) handleUnsuccessfulProcessing(m models.ShrinkMedia, elapsed float64) models.ProcessResult {
+func (e *Engine) handleUnsuccessfulProcessing(m models.ShrinkMedia, result models.ProcessResult, elapsed float64) models.ProcessResult {
 	// Processing succeeded but produced no valid output (e.g. invalid file)
 	e.metrics.RecordFailure(m.DisplayCategory(), elapsed)
 
 	if e.cfg.Common.DeleteUnplayable {
 		db.MarkDeleted(e.sqlDBs, m.Path)
 		os.Remove(m.Path)
+		if result.SourcePath != "" && result.SourcePath != m.Path {
+			os.Remove(result.SourcePath)
+		}
 	} else if e.cfg.Common.MoveBroken != "" {
 		// handleUnsuccessfulProcessing doesn't have PartFiles, but we can call it with nil
 		e.ui.MoveToBroken(m.Path, nil)
+	}
+
+	// Clean up any partial outputs and intermediate source files
+	for _, out := range result.Outputs {
+		if out.Path != m.Path && out.Path != result.SourcePath {
+			os.RemoveAll(out.Path)
+		}
+	}
+	if result.SourcePath != "" && result.SourcePath != m.Path {
+		if !e.cfg.Common.DeleteUnplayable {
+			os.Remove(result.SourcePath)
+		}
 	}
 
 	return models.ProcessResult{SourcePath: m.Path, Success: false}
@@ -390,26 +423,46 @@ func (e *Engine) finalizeSuccessfulProcessing(m *models.ShrinkMedia, result mode
 // finalizeFileSwap handles the actual file replacement or cleanup.
 func (e *Engine) finalizeFileSwap(m models.ShrinkMedia, result models.ProcessResult, keepNewFiles bool) {
 	if keepNewFiles {
-		// Keep new files, delete original
+		// Keep new files, delete original and any part files
+		// Also delete any intermediate source files (like .ocr.pdf) if different from result.SourcePath
 		if m.Path != "" {
+			db.MarkDeleted(e.sqlDBs, m.Path)
+			os.Remove(m.Path)
+		}
+
+		// If result.SourcePath was changed (e.g. by OCR) and it's not in the outputs, delete it too
+		if result.SourcePath != "" && result.SourcePath != m.Path {
 			foundInOutputs := false
 			for _, out := range result.Outputs {
-				if out.Path == m.Path {
+				if out.Path == result.SourcePath {
 					foundInOutputs = true
 					break
 				}
 			}
 			if !foundInOutputs {
-				db.MarkDeleted(e.sqlDBs, m.Path)
-				os.Remove(m.Path)
+				os.Remove(result.SourcePath)
+			}
+		}
+
+		// Delete part files for archives
+		for _, partFile := range result.PartFiles {
+			if !filepath.IsAbs(partFile) {
+				partFile = filepath.Join(filepath.Dir(m.Path), partFile)
+			}
+			if !pathsEqual(partFile, m.Path) && !pathsEqual(partFile, result.SourcePath) {
+				os.Remove(partFile)
 			}
 		}
 	} else {
 		// Delete new files, keep original
 		for _, out := range result.Outputs {
-			if out.Path != m.Path {
-				os.RemoveAll(out.Path) // RemoveAll because it might be a directory (TextProcessor/ArchiveProcessor)
+			if out.Path != m.Path && out.Path != result.SourcePath {
+				os.RemoveAll(out.Path)
 			}
+		}
+		// If an intermediate source was created (e.g. OCR), delete it too
+		if result.SourcePath != "" && result.SourcePath != m.Path {
+			os.Remove(result.SourcePath)
 		}
 	}
 }
