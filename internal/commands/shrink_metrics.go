@@ -424,7 +424,7 @@ func (m *ShrinkMetrics) LogSummary() {
 	duration := time.Since(m.started)
 
 	// Calculate totals
-	var totalProcessed, totalSuccess, totalFailed int
+	var totalProcessed, totalSuccess, totalFailed, totalSkipped int
 	var totalSavings int64
 	var totalDuration int64
 	var totalTime float64
@@ -433,6 +433,7 @@ func (m *ShrinkMetrics) LogSummary() {
 		totalProcessed += stats.Processed
 		totalSuccess += stats.Success
 		totalFailed += stats.Failed
+		totalSkipped += stats.Skipped
 		totalSavings += stats.SpaceSaved()
 		totalTime += stats.TotalTime
 		totalDuration += stats.TotalDuration
@@ -487,7 +488,7 @@ func (m *ShrinkMetrics) LogSummary() {
 		"TOTAL",
 		strconv.Itoa(totalSuccess),
 		strconv.Itoa(totalFailed),
-		strconv.Itoa(totalProcessed - totalSuccess - totalFailed),
+		strconv.Itoa(totalSkipped),
 		utils.FormatSize(totalSavings),
 		overallSpeed,
 	})

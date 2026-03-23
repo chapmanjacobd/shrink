@@ -175,8 +175,8 @@ func (e *Engine) processMedia(ctx context.Context, media []models.ShrinkMedia) {
 			go func(q chan models.ShrinkMedia) {
 				defer wg.Done()
 				for m := range q {
-					// Skip if stopAll already set
-					if stopAll.Load() {
+					// Skip if stopAll or context canceled
+					if stopAll.Load() || ctx.Err() != nil {
 						continue
 					}
 
@@ -204,7 +204,7 @@ func (e *Engine) processMedia(ctx context.Context, media []models.ShrinkMedia) {
 		go func(targetCat string, q chan models.ShrinkMedia) {
 			defer wg.Done()
 			for i := range media {
-				if stopAll.Load() {
+				if stopAll.Load() || ctx.Err() != nil {
 					break
 				}
 				m := &media[i]

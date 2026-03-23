@@ -286,45 +286,73 @@ func ParsePercentOrBytes(s string) float64 {
 var SQLiteExtensions = []string{".sqlite", ".sqlite3", ".db", ".db3", ".s3db", ".sl3"}
 
 var AudioExtensions = []string{
-	"mka", "opus", "oga", "ogg", "mp3", "mpga", "m2a", "m4a", "m4r", "caf", "m4b", "flac", "wav", "pcm", "aif", "aiff", "wma", "aac", "aa3", "ac3", "ape", "dsf", "dff",
+	"aa3", "aac", "ac3", "aif", "aiff", "ape", "caf", "dff", "dsf", "flac",
+	"m2a", "m4a", "m4b", "m4r", "mka", "mp3", "mpga", "oga", "ogg", "opus",
+	"pcm", "wav", "wma",
 }
 
 var VideoExtensions = []string{
-	"str", "aa", "aax", "acm", "adf", "adp", "asf", "dtk", "ads", "ss2", "adx", "aea", "afc", "aix", "al", "apl", "avifs", "gif", "gifv",
-	"mac", "aptx", "aptxhd", "aqt", "ast", "obu", "avi", "avr", "avs", "avs2", "avs3", "bfstm", "bcstm", "binka",
-	"bit", "bmv", "brstm", "cdg", "cdxl", "xl", "c2", "302", "daud", "str", "adp", "dav", "dss", "dts", "dtshd", "dv",
-	"dif", "divx", "cdata", "eac3", "paf", "fap", "flm", "flv", "fsb", "fwse", "g722", "722", "tco", "rco", "heics",
-	"g723_1", "g729", "genh", "gsm", "h261", "h26l", "h264", "264", "avc", "mts", "m2ts", "hca", "hevc", "h265", "265", "idf",
-	"ifv", "cgi", "ipu", "sf", "ircam", "ivr", "kux", "669", "abc", "amf", "ams", "dbm", "dmf", "dsm", "far", "it", "mdl",
-	"med", "mod", "mt2", "mtm", "okt", "psm", "ptm", "s3m", "stm", "ult", "umx", "xm", "itgz", "itr", "itz",
-	"mdgz", "mdr", "mdz", "s3gz", "s3r", "s3z", "xmgz", "xmr", "xmz", "669", "amf", "ams", "dbm", "digi", "dmf",
-	"dsm", "dtm", "far", "gdm", "ice", "imf", "it", "j2b", "m15", "mdl", "med", "mmcmp", "mms", "mo3", "mod", "mptm",
-	"mt2", "mtm", "nst", "okt", "ogm", "ogv", "plm", "ppm", "psm", "pt36", "ptm", "s3m", "sfx", "sfx2", "st26", "stk", "stm",
-	"stp", "ult", "umx", "wow", "xm", "xpk", "flv", "dat", "lvf", "m4v", "mkv", "ts", "tp", "mk3d", "webm", "mca", "mcc",
-	"mjpg", "mjpeg", "mpg", "mpeg", "mpo", "j2k", "mlp", "mods", "moflex", "mov", "mp4", "3g2", "3gp2", "3gp", "3gpp", "3g2", "mj2", "psp",
-	"ism", "ismv", "isma", "f4v", "mp2", "mpa", "mpc", "mjpg", "mpl2", "msf", "mtaf", "ul", "musx", "mvi", "mxg",
-	"v", "nist", "sph", "nut", "obu", "oma", "omg", "pjs", "pvf", "yuv", "cif", "qcif", "rgb", "rt", "rsd", "rmvb", "rm",
-	"rsd", "rso", "sw", "sb", "sami", "sbc", "msbc", "sbg", "scc", "sdr2", "sds", "sdx", "ser", "sga", "shn", "vb", "son", "imx",
-	"sln", "mjpg", "stl", "sup", "svag", "svs", "tak", "thd", "tta", "ans", "art", "asc", "diz", "ice", "vt", "ty", "ty+", "uw", "ub",
-	"v210", "yuv10", "vag", "vc1", "rcv", "vob", "viv", "vpk", "vqf", "vql", "vqe", "wmv", "wsd", "xmv", "xvag", "yop", "y4m",
+	"264", "265", "302", "3g2", "3gp", "3gp2", "3gpp", "669", "722", "aa",
+	"aax", "abc", "acm", "adf", "adp", "ads", "adx", "aea", "afc", "aix",
+	"al", "amf", "ams", "ans", "apl", "aptx", "aptxhd", "aqt", "art", "asc",
+	"asf", "ast", "avc", "avi", "avifs", "avr", "avs", "avs2", "avs3", "bcstm",
+	"bfstm", "binka", "bit", "bmv", "brstm", "c2", "cdata", "cdg", "cdxl", "cgi",
+	"cif", "dat", "daud", "dav", "dbm", "dif", "digi", "divx", "diz", "dmf",
+	"dsm", "dss", "dtk", "dtm", "dts", "dtshd", "dv", "eac3", "f4v", "fap",
+	"far", "flm", "flv", "fsb", "fwse", "g722", "g723_1", "g729", "gdm", "genh",
+	"gif", "gifv", "gsm", "h261", "h264", "h265", "h26l", "hca", "heics", "hevc",
+	"ice", "idf", "ifv", "imf", "imx", "ipu", "ircam", "ism", "isma", "ismv",
+	"it", "itgz", "itr", "itz", "ivr", "j2b", "j2k", "kux", "lvf", "m15",
+	"m2ts", "m4v", "mac", "mca", "mcc", "mdgz", "mdl", "mdr", "mdz", "med",
+	"mj2", "mjpeg", "mjpg", "mk3d", "mkv", "mlp", "mmcmp", "mms", "mo3", "mod",
+	"mods", "moflex", "mov", "mp2", "mp4", "mpa", "mpc", "mpeg", "mpg", "mpl2",
+	"mpo", "mptm", "msbc", "msf", "mt2", "mtaf", "mtm", "mts", "musx", "mvi",
+	"mxg", "nist", "nst", "nut", "obu", "ogm", "ogv", "okt", "oma", "omg",
+	"paf", "pjs", "plm", "ppm", "psm", "psp", "pt36", "ptm", "pvf", "qcif",
+	"rco", "rcv", "rgb", "rt", "rsd", "rmvb", "rm", "rsd", "rso", "rt", "s3gz", "s3m",
+	"s3r", "s3z", "sami", "sb", "sbc", "sbg", "scc", "sdr2", "sds", "sdx",
+	"ser", "sf", "sfx", "sfx2", "sga", "shn", "sln", "son", "sph", "ss2",
+	"st26", "stk", "stl", "stm", "stp", "str", "sup", "svag", "svs", "sw",
+	"tak", "tco", "thd", "tp", "ts", "tta", "ty", "ty+", "ub", "ul",
+	"ult", "umx", "uw", "v", "v210", "vag", "vc1", "rcv", "vob", "viv",
+	"vpk", "vqe", "vqf", "vql", "vt", "webm", "wmv", "wow", "wsd", "xl",
+	"xm", "xmgz", "xmr", "xmv", "xmz", "xpk", "xvag", "y4m", "yop", "yuv",
+	"yuv10",
 }
 
 var ImageExtensions = []string{
-	"aai", "ai", "ait", "avs", "bpg", "png", "arq", "arw", "cr2", "cs1", "dcp", "dng", "eps", "epsf", "ps", "erf", "exv", "fff",
-	"gpr", "hdp", "wdp", "jxr", "iiq", "insp", "jpeg", "jpg", "jpe", "mef", "mie", "mos", "mrw", "nef", "nrw", "orf",
-	"ori", "pef", "psd", "psb", "psdt", "raf", "raw", "rw2", "rwl", "sr2", "srw", "thm", "tiff", "tif", "x3f", "flif",
-	"icc", "icm", "avif", "heic", "heif", "hif", "jp2", "jpf", "jpm", "jpx", "j2c", "jpc", "3fr", "btf", "dcr", "k25",
-	"kdc", "miff", "mif", "rwz", "srf", "xcf", "bpg", "doc", "dot", "fla", "fpx", "max", "ppt", "pps", "pot", "vsd", "xls",
-	"xlt", "pict", "pct", "360", "dvb", "f4a", "f4b", "f4p", "lrv", "bmp", "bmp2", "bmp3", "jng", "mng", "emf", "wmf",
-	"m4p", "qt", "mqv", "qtif", "qti", "qif", "cr3", "crm", "jxl", "crw", "ciff", "ind", "indd", "indt",
-	"nksc", "vrd", "xmp", "la", "ofr", "pac", "riff", "rif", "webp", "wv", "djvu", "djv", "dvr-ms",
-	"insv", "inx", "swf", "exif", "eip", "pspimage", "fax", "farbfeld", "fits", "fl32", "jbig",
-	"pbm", "pfm", "pgm", "phm", "pnm", "ppm", "ptif", "qoi", "tga",
+	"360", "3fr", "aai", "ai", "ait", "arq", "arw", "avif", "avs", "bmp",
+	"bmp2", "bmp3", "bpg", "btf", "ciff", "cr2", "cr3", "crm", "crw", "cs1",
+	"dcp", "dcr", "dng", "dvb", "dvr-ms", "eip", "emf", "eps", "epsf", "erf",
+	"exif", "exv", "f4a", "f4b", "f4p", "farbfeld", "fax", "fff", "fits", "fl32",
+	"fla", "flif", "fpx", "gpr", "hdp", "heic", "heif", "hif", "icc", "icm",
+	"iiq", "insp", "insv", "inx", "j2c", "jbig", "jng", "jp2", "jpc", "jpe",
+	"jpeg", "jpf", "jpg", "jpm", "jpx", "jxl", "jxr", "k25", "kdc", "la",
+	"lrv", "m4p", "max", "mef", "mie", "mif", "miff", "mng", "mos", "mqv",
+	"mrw", "nef", "nksc", "nrw", "ofr", "orf", "ori", "pac", "pbm", "pct",
+	"pef", "pfm", "pgm", "phm", "pict", "png", "pnm", "ppm", "ps", "psb",
+	"psd", "psdt", "pspimage", "ptif", "qif", "qoi", "qt", "qti", "qtif", "raf",
+	"raw", "rif", "riff", "rw2", "rwl", "rwz", "sr2", "srf", "srw", "swf",
+	"tga", "thm", "tif", "tiff", "vrd", "wdp", "webp", "wmf", "x3f", "xcf",
+	"xmp",
 }
 
 var TextExtensions = []string{
-	"epub", "mobi", "pdf", "azw", "azw3", "fb2", "djvu",
-	"azw4", "cbc", "chm", "docx", "fbz", "htmlz", "lit", "lrf", "odt",
+	"azw", "azw3", "azw4", "cbc", "chm", "djv", "djvu", "doc", "docx", "dot",
+	"epub", "fb2", "fbz", "htmlz", "ind", "indd", "indt", "lit", "lrf", "md",
+	"mobi", "odt", "pdb", "pdf", "pml", "pot", "pps", "ppt", "prc", "rb",
+	"rtf", "snb", "tcr", "txtz", "vsd", "xls", "xlt",
+}
+
+var ArchiveExtensions = []string{
+	"0", "0001", "001", "01", "1", "7z", "Z", "ace", "alz", "alzip",
+	"arc", "arj", "b5i", "b6i", "bin", "br", "bz2", "cab", "cb7", "cba",
+	"cbr", "cbt", "cbz", "ccd", "cdr", "cif", "cpio", "daa", "deb", "dmg",
+	"exe", "gi", "gz", "img", "iso", "lha", "lzh", "lzma", "lzo", "lzx",
+	"mdf", "msi", "nrg", "nsi", "nsis", "p01", "pak", "pdi", "r00", "r01",
+	"rar", "rpm", "sit", "sitx", "tar", "tar.bz2", "tar.gz", "tar.xz", "tar.zst", "taz",
+	"tbz2", "tgz", "toast", "txz", "tz", "tzst", "udf", "uif", "vcd", "wim",
+	"xar", "xz", "z", "z00", "z01", "zip", "zipx", "zoo", "zst", "zstd",
 }
 
 var (
@@ -357,14 +385,6 @@ func init() {
 		ArchiveExtensionMap["."+ext] = true
 		MediaExtensionMap["."+ext] = true
 	}
-}
-
-var SubtitleExtensions = []string{
-	"srt", "vtt", "mks", "ass", "ssa", "lrc", "idx", "sub",
-}
-
-var ArchiveExtensions = []string{
-	"7z", "arj", "arc", "adf", "br", "bz2", "gz", "iso", "lha", "lzh", "lzx", "pak", "rar", "sit", "tar", "tar.bz2", "tar.gz", "tar.xz", "tar.zst", "tbz2", "tgz", "txz", "tzst", "xz", "zoo", "zip", "zst", "zstd", "cbz", "cbr",
 }
 
 // UnreliableDurationFormats are formats known to have unreliable duration metadata
