@@ -119,60 +119,11 @@ func (e *Engine) analyzeMedia(media []models.ShrinkMedia) []models.ShrinkMedia {
 }
 
 // ============================================================================
-// Worker Pool
-// ============================================================================
-
-// WorkerPool manages concurrent execution using semaphores per media category.
-type WorkerPool struct {
-	sems map[string]chan struct{}
-}
-
-// NewWorkerPool initializes a worker pool with limits from EngineConfig.
-func NewWorkerPool(cfg EngineConfig) *WorkerPool {
-	return &WorkerPool{
-		sems: map[string]chan struct{}{
-			"Video":    make(chan struct{}, cfg.VideoThreads),
-			"Audio":    make(chan struct{}, cfg.AudioThreads),
-			"Image":    make(chan struct{}, cfg.ImageThreads),
-			"Text":     make(chan struct{}, cfg.TextThreads),
-			"Archived": make(chan struct{}, 1),
-		},
-	}
-}
-
-// Acquire blocks until a worker slot is available for the given category.
-func (wp *WorkerPool) Acquire(ctx context.Context, category string) (func(), error) {
-	// Normalize category name for case-insensitive lookup
-	var cat string
-	switch strings.ToLower(strings.TrimSpace(category)) {
-	case "video":
-		cat = "Video"
-	case "audio":
-		cat = "Audio"
-	case "image":
-		cat = "Image"
-	case "text":
-		cat = "Text"
-	default:
-		cat = "Archived"
-	}
-
-	sem := wp.sems[cat]
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case sem <- struct{}{}:
-		return func() { <-sem }, nil
-	}
-}
-
-// ============================================================================
 // Processing Orchestration
 // ============================================================================
 
 // processMedia manages the concurrent processing of media files.
 func (e *Engine) processMedia(ctx context.Context, media []models.ShrinkMedia) {
-	pool := NewWorkerPool(e.engCfg)
 	var wg sync.WaitGroup
 	done := make(chan struct{})
 
@@ -196,36 +147,77 @@ func (e *Engine) processMedia(ctx context.Context, media []models.ShrinkMedia) {
 		}
 	}()
 
-	for _, m := range media {
+	// Define queues and categories
+	categories := []string{"Video", "Audio", "Image", "Text", "Archived"}
+	queues := make(map[string]chan models.ShrinkMedia)
+	for _, cat := range categories {
+		queues[cat] = make(chan models.ShrinkMedia)
+	}
+
+	// Spawn workers for each category
+	for _, cat := range categories {
+		threads := 1
+		switch cat {
+		case "Video":
+			threads = e.engCfg.VideoThreads
+		case "Audio":
+			threads = e.engCfg.AudioThreads
+		case "Image":
+			threads = e.engCfg.ImageThreads
+		case "Text":
+			threads = e.engCfg.TextThreads
+		case "Archived":
+			threads = 1
+		}
+
+		for i := 0; i < threads; i++ {
+			wg.Add(1)
+			go func(q chan models.ShrinkMedia) {
+				defer wg.Done()
+				for m := range q {
+					// Skip if stopAll already set
+					if stopAll.Load() {
+						continue
+					}
+
+					// Record that the file is actually running now
+					displayCat := m.DisplayCategory()
+					path := m.Path
+					e.metrics.RecordRunning(displayCat, path)
+
+					result := e.processSingle(ctx, m)
+					e.metrics.RecordStopped(displayCat, path)
+
+					// Check for stop-all signal (environment error)
+					if result.StopAll {
+						stopAll.Store(true)
+						cancel()
+					}
+				}
+			}(queues[cat])
+		}
+	}
+
+	// Distribute tasks per category to avoid blocking
+	for _, cat := range categories {
 		wg.Add(1)
-		go func(original models.ShrinkMedia) {
+		go func(targetCat string, q chan models.ShrinkMedia) {
 			defer wg.Done()
-
-			// Skip if stopAll already set
-			if stopAll.Load() {
-				return
+			for i := range media {
+				if stopAll.Load() {
+					break
+				}
+				m := &media[i]
+				mCat := m.Category
+				if mCat == "" {
+					mCat = "Archived"
+				}
+				if mCat == targetCat {
+					q <- *m
+				}
 			}
-
-			release, err := pool.Acquire(ctx, original.Category)
-			if err != nil {
-				return
-			}
-			defer release()
-
-			// Record that the file is actually running now
-			cat := original.DisplayCategory()
-			path := original.Path
-			e.metrics.RecordRunning(cat, path)
-			defer e.metrics.RecordStopped(cat, path)
-
-			result := e.processSingle(ctx, original)
-
-			// Check for stop-all signal (environment error)
-			if result.StopAll {
-				stopAll.Store(true)
-				cancel()
-			}
-		}(m)
+			close(q)
+		}(cat, queues[cat])
 	}
 
 	wg.Wait()

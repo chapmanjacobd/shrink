@@ -74,6 +74,7 @@ func (c *ShrinkCmd) Run(ctx *kong.Context) error {
 
 	// Filter by available tools
 	filteredMedia := c.filterByTools(allMedia, registry, tools)
+	allMedia = nil // Free memory
 	slog.Info("Filtered media by tools",
 		"count", len(filteredMedia),
 		"ffmpeg", tools.FFmpeg,
@@ -100,6 +101,8 @@ func (c *ShrinkCmd) Run(ctx *kong.Context) error {
 
 	// Analyze and decide what to shrink
 	toShrink := engine.analyzeMedia(filteredMedia)
+	filteredMedia = nil // Free memory
+
 	if len(toShrink) == 0 {
 		fmt.Println("No files to shrink")
 		metrics.LogSummary()
@@ -117,6 +120,7 @@ func (c *ShrinkCmd) Run(ctx *kong.Context) error {
 		}
 	}
 	toShrink = deduped
+	seenPaths = nil // Free memory
 
 	// Apply continue-from filter
 	if c.ContinueFrom != "" {
@@ -145,9 +149,15 @@ func (c *ShrinkCmd) Run(ctx *kong.Context) error {
 
 	// Process with parallelism
 	engine.processMedia(runCtx, toShrink)
+	toShrink = nil // Free memory
 
 	// Final summary
 	metrics.LogSummary()
+
+	// Clear maps to free memory
+	c.unknownExtensions = nil
+	c.skippedByTool = nil
+
 	return nil
 }
 
