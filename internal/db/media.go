@@ -3,6 +3,7 @@ package db
 import (
 	"database/sql"
 	"log/slog"
+	"math"
 	"os"
 	"path/filepath"
 	"slices"
@@ -103,7 +104,7 @@ func UpdateMedia(databases []*sql.DB, oldPath, newPath string, newSize int64, du
 		if duration > 0 {
 			_, execErr = sqlDB.Exec(
 				"UPDATE media SET path = ?, size = ?, duration = ?, time_deleted = 0, is_shrinked = 1 WHERE path = ?",
-				newPath, newSize, duration, oldPath)
+				newPath, newSize, int64(math.Round(duration)), oldPath)
 		} else {
 			_, execErr = sqlDB.Exec(
 				"UPDATE media SET path = ?, size = ?, time_deleted = 0, is_shrinked = 1 WHERE path = ?",
@@ -126,7 +127,7 @@ func AddMediaEntry(databases []*sql.DB, path string, size int64, duration float6
 		if duration > 0 {
 			_, execErr = sqlDB.Exec(
 				"INSERT INTO media (path, size, duration, time_deleted, is_shrinked) VALUES (?, ?, ?, 0, 0)",
-				path, size, duration)
+				path, size, int64(math.Round(duration)))
 		} else {
 			_, execErr = sqlDB.Exec(
 				"INSERT INTO media (path, size, time_deleted, is_shrinked) VALUES (?, ?, 0, 0)",
