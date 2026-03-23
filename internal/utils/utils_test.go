@@ -138,6 +138,25 @@ func TestFileExists(t *testing.T) {
 	}
 }
 
+func TestGetMountPoint(t *testing.T) {
+	paths := []string{t.TempDir(), ".", "/", "/tmp"}
+	for _, p := range paths {
+		// Skip if directory doesn't exist (e.g. /tmp on some systems, though unlikely)
+		if _, err := os.Stat(p); os.IsNotExist(err) {
+			continue
+		}
+
+		mp, err := GetMountPoint(p)
+		if err != nil {
+			t.Errorf("failed to get mount point for %s: %v", p, err)
+			continue
+		}
+		if mp == "" {
+			t.Errorf("expected non-empty mount point for %s", p)
+		}
+	}
+}
+
 func TestFolderSize(t *testing.T) {
 	tempDir := t.TempDir()
 	os.WriteFile(filepath.Join(tempDir, "f1.txt"), make([]byte, 1000), 0o644)

@@ -16,6 +16,69 @@ func FileExists(path string) bool {
 	return err == nil
 }
 
+// GetMountPoint returns the mount point for a given path
+func GetMountPoint(path string) (string, error) {
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+
+	// For Windows, use VolumeName
+	if vol := filepath.VolumeName(absPath); vol != "" {
+		// On Windows, VolumeName returns "C:" or "\\server\share"
+		// Ensure it has a trailing separator for consistency
+		if !strings.HasSuffix(vol, string(filepath.Separator)) {
+			vol += string(filepath.Separator)
+		}
+		return vol, nil
+	}
+
+	info, err := os.Stat(absPath)
+	if err != nil {
+		return "", err
+	}
+
+	dev, ok := GetDeviceID(info)
+	if !ok {
+		// If we can't get device ID, just return root for Unix-like
+		return string(filepath.Separator), nil
+	}
+
+	dir := absPath
+	if !info.IsDir() {
+		dir = filepath.Dir(absPath)
+		info, err = os.Stat(dir)
+		if err != nil {
+			return "", err
+		}
+		if d, ok := GetDeviceID(info); ok {
+			dev = d
+		}
+	}
+
+	for {
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return dir, nil
+		}
+
+		parentInfo, err := os.Stat(parent)
+		if err != nil {
+			return "", err
+		}
+
+		if parentDev, ok := GetDeviceID(parentInfo); ok {
+			if parentDev != dev {
+				return dir, nil
+			}
+		} else {
+			return dir, nil
+		}
+
+		dir = parent
+	}
+}
+
 // FolderSize calculates the total size of a folder
 func FolderSize(path string) int64 {
 	var size int64

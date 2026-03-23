@@ -11,6 +11,7 @@ import (
 	"github.com/chapmanjacobd/shrink/internal/db"
 	"github.com/chapmanjacobd/shrink/internal/models"
 	"github.com/chapmanjacobd/shrink/internal/testutils"
+	"github.com/chapmanjacobd/shrink/internal/utils"
 	_ "modernc.org/sqlite"
 )
 
@@ -74,6 +75,62 @@ func runShrinkCmdDir(dirPath, tempDir string, args []string) error {
 
 	// We run it synchronously
 	return cmd.Run(ctx)
+}
+
+func TestMoveToBrokenMountPoint(t *testing.T) {
+	tempDir := t.TempDir()
+	sourceFile := filepath.Join(tempDir, "broken.avi")
+	os.WriteFile(sourceFile, []byte("broken"), 0o644)
+
+	absPath, _ := filepath.Abs(sourceFile)
+	mountPoint, _ := utils.GetMountPoint(absPath)
+	relPath, _ := filepath.Rel(mountPoint, absPath)
+
+	cmd := &ShrinkCmd{}
+	cmd.MoveBroken = ":/broken_dir"
+
+	// Mocking MoveToBroken call
+	cmd.MoveToBroken(absPath, nil)
+
+	expectedDest := filepath.Join(mountPoint, "broken_dir", relPath)
+	if _, err := os.Stat(expectedDest); os.IsNotExist(err) {
+		t.Errorf("expected broken file to be moved to %s", expectedDest)
+	}
+	if _, err := os.Stat(absPath); err == nil {
+		t.Errorf("expected original broken file to be removed")
+	}
+}
+
+func TestGetDestPath(t *testing.T) {
+	cmd := &ShrinkCmd{}
+
+	absPath, _ := filepath.Abs("shrink_test.go")
+	mountPoint, err := utils.GetMountPoint(absPath)
+	if err != nil {
+		t.Fatalf("failed to get mount point: %v", err)
+	}
+	relPath, err := filepath.Rel(mountPoint, absPath)
+	if err != nil {
+		t.Fatalf("failed to get relative path: %v", err)
+	}
+
+	target := ":/processed"
+	expected := filepath.Join(mountPoint, "processed", relPath)
+
+	dest, ok := cmd.getDestPath(absPath, target)
+	if !ok {
+		t.Errorf("expected ok=true")
+	}
+	if dest != expected {
+		t.Errorf("expected %s, got %s", expected, dest)
+	}
+
+	// Test fallback for non-mountpoint-relative target
+	target2 := "/tmp/moved"
+	_, ok = cmd.getDestPath(absPath, target2)
+	if ok {
+		t.Errorf("expected ok=false for non-mountpoint target")
+	}
 }
 
 func TestShrinkVideo(t *testing.T) {

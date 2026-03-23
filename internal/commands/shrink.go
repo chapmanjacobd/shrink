@@ -402,18 +402,36 @@ func (c *ShrinkCmd) ApplyContinueFrom(media []models.ShrinkMedia) []models.Shrin
 // File Operations
 // ============================================================================
 
+func (c *ShrinkCmd) getDestPath(path, target string) (string, bool) {
+	if !strings.HasPrefix(target, ":/") {
+		return "", false
+	}
+	mountPoint, err := utils.GetMountPoint(path)
+	if err != nil {
+		return "", false
+	}
+	relPath, err := filepath.Rel(mountPoint, path)
+	if err != nil {
+		return "", false
+	}
+	// Result: mountPoint + targetDir + relPath
+	return filepath.Join(mountPoint, target[2:], relPath), true
+}
+
 func (c *ShrinkCmd) MoveToBroken(path string, partFiles []string) {
 	if c.MoveBroken == "" || path == "" {
 		return
 	}
 
-	// Get the parent folder name for tidy organization
-	parentFolder := filepath.Base(filepath.Dir(path))
-	destDir := filepath.Join(c.MoveBroken, parentFolder)
+	dest, ok := c.getDestPath(path, c.MoveBroken)
+	if !ok {
+		// Get the parent folder name for tidy organization (original behavior)
+		parentFolder := filepath.Base(filepath.Dir(path))
+		dest = filepath.Join(c.MoveBroken, parentFolder, filepath.Base(path))
+	}
 
 	// Move the main file
 	if _, err := os.Stat(path); err == nil {
-		dest := filepath.Join(destDir, filepath.Base(path))
 		if err := utils.MoveFile(path, dest); err != nil {
 			slog.Warn("Failed to move broken file", "from", path, "to", dest, "error", err)
 		} else {
@@ -427,11 +445,15 @@ func (c *ShrinkCmd) MoveToBroken(path string, partFiles []string) {
 			partFile = filepath.Join(filepath.Dir(path), partFile)
 		}
 		if _, err := os.Stat(partFile); err == nil {
-			dest := filepath.Join(destDir, filepath.Base(partFile))
-			if err := utils.MoveFile(partFile, dest); err != nil {
-				slog.Warn("Failed to move broken archive part", "from", partFile, "to", dest, "error", err)
+			partDest, ok := c.getDestPath(partFile, c.MoveBroken)
+			if !ok {
+				parentFolder := filepath.Base(filepath.Dir(path))
+				partDest = filepath.Join(c.MoveBroken, parentFolder, filepath.Base(partFile))
+			}
+			if err := utils.MoveFile(partFile, partDest); err != nil {
+				slog.Warn("Failed to move broken archive part", "from", partFile, "to", partDest, "error", err)
 			} else {
-				slog.Info("Moved broken archive part", "from", partFile, "to", dest)
+				slog.Info("Moved broken archive part", "from", partFile, "to", partDest)
 			}
 		}
 	}
@@ -439,7 +461,10 @@ func (c *ShrinkCmd) MoveToBroken(path string, partFiles []string) {
 
 func (c *ShrinkCmd) MoveTo(path string) {
 	if c.Move != "" && path != "" {
-		dest := filepath.Join(c.Move, filepath.Base(path))
+		dest, ok := c.getDestPath(path, c.Move)
+		if !ok {
+			dest = filepath.Join(c.Move, filepath.Base(path))
+		}
 		if err := utils.MoveFile(path, dest); err != nil {
 			slog.Warn("Failed to move file", "from", path, "to", dest, "error", err)
 		}
