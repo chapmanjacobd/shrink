@@ -346,13 +346,16 @@ func (e *Engine) handleProcessingError(m models.ShrinkMedia, result models.Proce
 	}
 	e.metrics.RecordFailure(m.DisplayCategory(), elapsed)
 
-	if e.cfg.Common.DeleteUnplayable {
+	// Don't move or delete files if processing was interrupted by user or system signal
+	isInterrupted := result.Error == context.Canceled || strings.Contains(result.Error.Error(), "signal: killed")
+
+	if e.cfg.Common.DeleteUnplayable && !isInterrupted {
 		db.MarkDeleted(e.sqlDBs, m.Path)
 		os.Remove(m.Path)
 		if result.SourcePath != "" && result.SourcePath != m.Path {
 			os.Remove(result.SourcePath)
 		}
-	} else if e.cfg.Common.MoveBroken != "" {
+	} else if e.cfg.Common.MoveBroken != "" && !isInterrupted {
 		e.ui.MoveToBroken(m.Path, result.PartFiles)
 	}
 
