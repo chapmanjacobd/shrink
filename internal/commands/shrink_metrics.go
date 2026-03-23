@@ -221,6 +221,9 @@ func (m *ShrinkMetrics) PrintProgress() {
 	var sb strings.Builder
 	clearSeq := utils.GetClearLineSequence()
 
+	// Add a visual separator between logs and the progress table
+	sb.WriteString(strings.Repeat("▔▁", terminalWidth/2) + clearSeq + "\n")
+
 	// Calculate totals
 	var totalSuccess, totalFailed, totalSkipped, totalQueued, totalRunning int
 	var totalSavings int64

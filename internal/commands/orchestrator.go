@@ -341,14 +341,15 @@ func (e *Engine) handleProcessingError(m models.ShrinkMedia, result models.Proce
 	// Don't move or delete files if processing was interrupted by user or system signal
 	isInterrupted := result.Error == context.Canceled || strings.Contains(result.Error.Error(), "signal: killed")
 
-	if e.cfg.Common.DeleteUnplayable && !isInterrupted {
+	if e.cfg.Common.MoveBroken != "" && !isInterrupted {
+		e.ui.MoveToBroken(m.Path, result.PartFiles)
+		db.MarkDeleted(e.sqlDBs, m.Path)
+	} else if e.cfg.Common.DeleteUnplayable && !isInterrupted {
 		db.MarkDeleted(e.sqlDBs, m.Path)
 		os.Remove(m.Path)
 		if result.SourcePath != "" && result.SourcePath != m.Path {
 			os.Remove(result.SourcePath)
 		}
-	} else if e.cfg.Common.MoveBroken != "" && !isInterrupted {
-		e.ui.MoveToBroken(m.Path, result.PartFiles)
 	}
 
 	// Clean up any partial outputs and intermediate source files
@@ -372,15 +373,16 @@ func (e *Engine) handleUnsuccessfulProcessing(m models.ShrinkMedia, result model
 	// Processing succeeded but produced no valid output (e.g. invalid file)
 	e.metrics.RecordFailure(m.DisplayCategory(), elapsed)
 
-	if e.cfg.Common.DeleteUnplayable {
+	if e.cfg.Common.MoveBroken != "" {
+		// handleUnsuccessfulProcessing doesn't have PartFiles, but we can call it with nil
+		e.ui.MoveToBroken(m.Path, nil)
+		db.MarkDeleted(e.sqlDBs, m.Path)
+	} else if e.cfg.Common.DeleteUnplayable {
 		db.MarkDeleted(e.sqlDBs, m.Path)
 		os.Remove(m.Path)
 		if result.SourcePath != "" && result.SourcePath != m.Path {
 			os.Remove(result.SourcePath)
 		}
-	} else if e.cfg.Common.MoveBroken != "" {
-		// handleUnsuccessfulProcessing doesn't have PartFiles, but we can call it with nil
-		e.ui.MoveToBroken(m.Path, nil)
 	}
 
 	// Clean up any partial outputs and intermediate source files
@@ -402,11 +404,11 @@ func (e *Engine) handleUnsuccessfulProcessing(m models.ShrinkMedia, result model
 func (e *Engine) finalizeSuccessfulProcessing(m *models.ShrinkMedia, result models.ProcessResult,
 	originalAtime, originalMtime time.Time, elapsed float64,
 ) {
-	e.updateMetadata(*m, result)
 	e.preserveTimestamps(m, result, originalAtime, originalMtime)
 	for _, out := range result.Outputs {
 		e.ui.MoveTo(out.Path)
 	}
+	e.updateMetadata(*m, result)
 
 	var totalNewSize int64
 	for _, out := range result.Outputs {
