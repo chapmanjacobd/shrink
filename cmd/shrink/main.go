@@ -11,7 +11,7 @@ import (
 
 // CLI defines the command-line interface for shrink
 type CLI struct {
-	Shrink commands.ShrinkCmd `cmd:"" name:"shrink" help:"Shrink media to efficient formats (AV1/Opus/AVIF)"`
+	commands.ShrinkCmd `cmd:"" name:"shrink" help:"Shrink media to efficient formats (AV1/Opus/AVIF)"`
 }
 
 func main() {
