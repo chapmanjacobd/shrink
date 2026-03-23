@@ -82,10 +82,16 @@ func (s *MediaTypeStats) SpeedRatio() float64 {
 	return float64(s.TotalDuration) / s.TotalTime
 }
 
+// RunningFile tracks a file currently being processed
+type RunningFile struct {
+	MediaType string
+	Path      string
+}
+
 // ShrinkMetrics aggregates statistics across all media types
 type ShrinkMetrics struct {
 	types         map[string]*MediaTypeStats
-	currentFile   string
+	runningFiles  []RunningFile
 	mu            sync.RWMutex
 	started       time.Time
 	lastPrintTime time.Time
@@ -114,7 +120,6 @@ func (m *ShrinkMetrics) RecordStarted(mediaType string, path string) {
 
 	stats := m.getOrCreateType(mediaType)
 	stats.Total++
-	m.currentFile = path
 }
 
 // RecordSuccess records a successful processing
@@ -143,21 +148,33 @@ func (m *ShrinkMetrics) RecordFailure(mediaType string, processingTime float64) 
 }
 
 // RecordRunning records that a media item is starting to be processed
-func (m *ShrinkMetrics) RecordRunning(mediaType string) {
+func (m *ShrinkMetrics) RecordRunning(mediaType string, path string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	stats := m.getOrCreateType(mediaType)
 	stats.Running++
+	m.runningFiles = append(m.runningFiles, RunningFile{
+		MediaType: mediaType,
+		Path:      path,
+	})
 }
 
 // RecordStopped records that a media item has finished processing
-func (m *ShrinkMetrics) RecordStopped(mediaType string) {
+func (m *ShrinkMetrics) RecordStopped(mediaType string, path string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	stats := m.getOrCreateType(mediaType)
 	stats.Running--
+
+	// Remove the file from running files
+	for i, rf := range m.runningFiles {
+		if rf.MediaType == mediaType && rf.Path == path {
+			m.runningFiles = append(m.runningFiles[:i], m.runningFiles[i+1:]...)
+			break
+		}
+	}
 }
 
 // RecordSkipped records a skipped media item
@@ -199,15 +216,37 @@ func (m *ShrinkMetrics) PrintProgress() {
 
 	// Build the progress output
 	var sb strings.Builder
-
-	// Current file path (middle-truncated to full terminal width)
-	displayPath := m.currentFile
-	displayPath = utils.TruncateMiddle(displayPath, utils.GetTerminalWidth())
 	clearSeq := utils.GetClearLineSequence()
-	sb.WriteString("Starting to process file:" + clearSeq + "\n")
-	sb.WriteString(displayPath + clearSeq + "\n")
-	sb.WriteString(clearSeq + "\n")
-	sb.WriteString(clearSeq)
+
+	// Calculate how many running files we can display
+	// Reserve space for: headers (1) + data rows per type (variable) + totals (1) + running files section
+	// Minimum space needed for table: ~10 lines (headers + some rows + totals)
+	terminalHeight := utils.GetTerminalHeight()
+	minTableLines := 10
+	maxRunningLines := terminalHeight - minTableLines
+
+	// Show running files only if there's enough space
+	if maxRunningLines > 2 && len(m.runningFiles) > 0 {
+		// Current running files section
+		sb.WriteString("Currently processing:" + clearSeq + "\n")
+
+		// Determine how many files to show
+		filesToShow := min(len(m.runningFiles),
+			// Reserve 1 line for "...and X more" if needed
+			maxRunningLines-1)
+
+		for i := 0; i < filesToShow; i++ {
+			rf := m.runningFiles[i]
+			displayPath := utils.TruncateMiddle(rf.Path, utils.GetTerminalWidth()-3)
+			sb.WriteString("  " + displayPath + clearSeq + "\n")
+		}
+
+		if len(m.runningFiles) > filesToShow {
+			remaining := len(m.runningFiles) - filesToShow
+			sb.WriteString("  ...and " + strconv.Itoa(remaining) + " more" + clearSeq + "\n")
+		}
+		sb.WriteString(clearSeq + "\n")
+	}
 
 	// Calculate totals
 	var totalSuccess, totalFailed, totalSkipped, totalQueued, totalRunning int
@@ -468,11 +507,4 @@ func (m *ShrinkMetrics) GetAllStats() map[string]*MediaTypeStats {
 	copy := make(map[string]*MediaTypeStats, len(m.types))
 	maps.Copy(copy, m.types)
 	return copy
-}
-
-// SetCurrentFile sets the currently processing file
-func (m *ShrinkMetrics) SetCurrentFile(path string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.currentFile = path
 }
