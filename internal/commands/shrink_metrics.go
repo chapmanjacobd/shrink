@@ -355,7 +355,12 @@ func (m *ShrinkMetrics) PrintProgress() {
 		overallSpeed,
 	})
 
-	sb.WriteString(utils.PrintTableToString(headers, rows))
+	tableOutput := utils.PrintTableToString(headers, rows)
+	// Add clearSeq to each line of the table
+	tableLines := strings.Split(strings.TrimSuffix(tableOutput, "\n"), "\n")
+	for _, line := range tableLines {
+		sb.WriteString(line + clearSeq + "\n")
+	}
 
 	output := sb.String()
 	lineCount := strings.Count(output, "\n")
