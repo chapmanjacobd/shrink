@@ -42,20 +42,11 @@ func TestGetTimeout(t *testing.T) {
 	}
 }
 
-type mockUI struct {
-	movedTo       []string
-	movedToBroken []string
-}
-
-func (m *mockUI) Confirm() bool { return true }
-func (m *mockUI) MoveTo(path string) { m.movedTo = append(m.movedTo, path) }
-func (m *mockUI) MoveToBroken(path string, parts []string) { m.movedToBroken = append(m.movedToBroken, path) }
-
 func TestFinalizeFileSwapKeepOriginal(t *testing.T) {
 	// Create a temp file
 	tmpDir := t.TempDir()
 	originalPath := filepath.Join(tmpDir, "original.mp4")
-	if err := os.WriteFile(originalPath, []byte("data"), 0644); err != nil {
+	if err := os.WriteFile(originalPath, []byte("data"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -81,10 +72,10 @@ func TestFinalizeFileSwapDeleteOriginal(t *testing.T) {
 	tmpDir := t.TempDir()
 	originalPath := filepath.Join(tmpDir, "original.mp4")
 	newPath := filepath.Join(tmpDir, "new.mp4")
-	if err := os.WriteFile(originalPath, []byte("original data"), 0644); err != nil {
+	if err := os.WriteFile(originalPath, []byte("original data"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(newPath, []byte("new data"), 0644); err != nil {
+	if err := os.WriteFile(newPath, []byte("new data"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
