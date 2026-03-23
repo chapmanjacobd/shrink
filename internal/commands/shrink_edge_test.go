@@ -1,12 +1,13 @@
 package commands
 
 import (
-	"database/sql"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/chapmanjacobd/shrink/internal/db"
 )
 
 func TestEdgeCases(t *testing.T) {
@@ -182,7 +183,7 @@ func TestFileDisappears(t *testing.T) {
 	// Create a file and then delete it right before running?
 	// No, just provide a non-existent file in the DB.
 	dbPath := filepath.Join(tempDir, "test.db")
-	db, _ := sql.Open("sqlite", dbPath)
+	db, _ := db.Connect(dbPath)
 	db.Exec(`CREATE TABLE media (path TEXT PRIMARY KEY, size INTEGER, media_type TEXT, time_deleted INTEGER DEFAULT 0)`)
 	db.Exec(`INSERT INTO media (path, size, media_type) VALUES (?, ?, ?)`,
 		filepath.Join(tempDir, "ghost.avi"), 1000, "video")

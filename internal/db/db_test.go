@@ -1,7 +1,6 @@
 package db
 
 import (
-	"database/sql"
 	"os"
 	"path/filepath"
 	"testing"
@@ -13,7 +12,7 @@ func TestDatabaseLifecycle(t *testing.T) {
 	tempDir := t.TempDir()
 	dbPath := filepath.Join(tempDir, "test.db")
 
-	db, err := sql.Open("sqlite", dbPath)
+	db, err := Connect(dbPath)
 	if err != nil {
 		t.Fatalf("Open failed: %v", err)
 	}
@@ -70,7 +69,7 @@ func TestResolveDatabasePath(t *testing.T) {
 }
 
 func TestPopulateMediaType(t *testing.T) {
-	db, _ := sql.Open("sqlite", ":memory:")
+	db, _ := Connect(":memory:")
 	defer db.Close()
 	InitDB(db)
 

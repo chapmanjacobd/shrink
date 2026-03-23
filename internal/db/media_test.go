@@ -12,7 +12,7 @@ import (
 func setupTestDB(t *testing.T) (*sql.DB, string) {
 	tempDir := t.TempDir()
 	dbPath := filepath.Join(tempDir, "media.db")
-	db, err := sql.Open("sqlite", dbPath)
+	db, err := Connect(dbPath)
 	if err != nil {
 		t.Fatalf("Failed to open DB: %v", err)
 	}

@@ -13,9 +13,40 @@ import (
 
 // Connect connects to a SQLite database without initializing it
 func Connect(dbPath string) (*sql.DB, error) {
-	db, err := sql.Open("sqlite", dbPath)
+	// Add busy timeout to connection string to handle concurrent writes
+	dsn := dbPath
+	if dbPath != ":memory:" {
+		// Use URI format if not already or append if it has query parameters
+		if !strings.Contains(dbPath, "?") {
+			dsn = dbPath + "?_busy_timeout=30000"
+		} else {
+			dsn = dbPath + "&_busy_timeout=30000"
+		}
+	} else {
+		// For in-memory, we use shared cache and busy timeout
+		dsn = "file::memory:?cache=shared&_busy_timeout=30000"
+	}
+
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
+	}
+
+	// Apply tuning PRAGMAs
+	tuning := []string{
+		"PRAGMA journal_mode=WAL",
+		"PRAGMA synchronous=NORMAL",
+		"PRAGMA cache_size=-256000",
+		"PRAGMA temp_store=MEMORY",
+		"PRAGMA foreign_keys=ON",
+		"PRAGMA mmap_size=2147483648",
+	}
+
+	for _, pragma := range tuning {
+		if _, err := db.Exec(pragma); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("failed to apply %s: %w", pragma, err)
+		}
 	}
 
 	// Test connection
@@ -271,12 +302,12 @@ func getTableColumns(db *sql.DB, tableName string) (map[string]bool, error) {
 
 // DatabaseExists checks if a database file exists and is valid
 func DatabaseExists(path string) bool {
-	db, err := sql.Open("sqlite", path)
+	db, err := Connect(path)
 	if err != nil {
 		return false
 	}
 	defer db.Close()
-	return db.Ping() == nil
+	return true
 }
 
 // ResolveDatabasePath resolves a database path to an absolute path
