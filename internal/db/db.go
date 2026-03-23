@@ -33,6 +33,12 @@ func Connect(dbPath string) (*sql.DB, error) {
 		return nil, err
 	}
 
+	// Limit to one connection to avoid SQLITE_BUSY during concurrent writes.
+	// Since we use WAL mode, multiple readers can still coexist with one writer,
+	// but sql.DB's connection pool can still cause issues if it tries to open
+	// multiple write connections.
+	db.SetMaxOpenConns(1)
+
 	// Apply tuning PRAGMAs
 	tuning := []string{
 		"PRAGMA journal_mode=WAL",
