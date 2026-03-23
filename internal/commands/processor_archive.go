@@ -181,6 +181,10 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *models.Shri
 				}
 			}
 		} else if utils.ArchiveExtensionMap[ext] {
+			if isSecondaryPart(path) {
+				slog.Debug("Skipping nested secondary archive part", "path", path)
+				return nil
+			}
 			nestedMedia := &models.ShrinkMedia{Path: path, Size: info.Size(), Ext: ext, MediaType: "archive"}
 			res := p.ExtractAndProcess(ctx, nestedMedia, cfg, imageProc, ffmpegProc, registry)
 			if res.Error != nil {
@@ -220,6 +224,12 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *models.Shri
 // Returns: futureSize, processingTime, hasProcessableContent, totalArchiveSize
 func (p *ArchiveProcessor) EstimateSizeForArchive(m *models.ShrinkMedia, cfg *models.ProcessorConfig) (int64, int, bool, int64) {
 	if !p.unarInstalled {
+		return 0, 0, false, 0
+	}
+
+	// Skip secondary parts of multi-part archives to avoid double processing
+	if isSecondaryPart(m.Path) {
+		slog.Debug("Skipping secondary archive part", "path", m.Path)
 		return 0, 0, false, 0
 	}
 
@@ -439,6 +449,78 @@ func isBrokenSequence(mainPath string, partFiles []string) bool {
 			}
 		}
 	}
+	return false
+}
+
+// isSecondaryPart returns true if the path is a part of a multi-part archive
+// but NOT the primary entry point (e.g. .z01 is secondary if .zip exists)
+func isSecondaryPart(path string) bool {
+	ext := strings.ToLower(filepath.Ext(path))
+	dir := filepath.Dir(path)
+	base := filepath.Base(path)
+	nameWithoutExt := strings.TrimSuffix(base, filepath.Ext(base))
+
+	// Zip: .z01, .z02... are secondary if .zip exists
+	if len(ext) >= 3 && ext[1] == 'z' {
+		if _, err := strconv.Atoi(ext[2:]); err == nil {
+			// It's a .zNN file. Check if .zip exists
+			if _, err := os.Stat(filepath.Join(dir, nameWithoutExt+".zip")); err == nil {
+				return true
+			}
+			// If .zip doesn't exist, .z01 is the primary entry point for unar
+			if ext != ".z01" {
+				return true // .z02+ are always secondary
+			}
+		}
+	}
+
+	// RAR: .part2.rar, .part3.rar... or .r01, .r02...
+	if strings.HasSuffix(ext, ".rar") {
+		if strings.Contains(nameWithoutExt, ".part") {
+			idx := strings.LastIndex(nameWithoutExt, ".part")
+			partNum := nameWithoutExt[idx+5:]
+			if n, err := strconv.Atoi(partNum); err == nil {
+				if n > 1 {
+					return true // .part2+ are secondary
+				}
+				// .part1.rar is secondary if .rar exists
+				if _, err := os.Stat(filepath.Join(dir, nameWithoutExt[:idx]+".rar")); err == nil {
+					return true
+				}
+			}
+		}
+	} else if len(ext) >= 3 && ext[1] == 'r' {
+		if n, err := strconv.Atoi(ext[2:]); err == nil {
+			// .r00, .r01...
+			// Check if .rar exists
+			if _, err := os.Stat(filepath.Join(dir, nameWithoutExt+".rar")); err == nil {
+				return true
+			}
+			if n > 0 {
+				return true // .r01+ are secondary if .rar doesn't exist but .r00 does
+			}
+		}
+	}
+
+	// 7z / Generic: .002, .003... are secondary if .001 exists
+	if len(ext) >= 3 {
+		if n, err := strconv.Atoi(ext[1:]); err == nil {
+			if n > 1 {
+				// Check if .001 or .000 or .0 exists
+				prefixes := []string{".001", ".000", ".0", ".1"}
+				for _, p := range prefixes {
+					if p == ext {
+						continue
+					}
+					if _, err := os.Stat(filepath.Join(dir, nameWithoutExt+p)); err == nil {
+						return true
+					}
+				}
+				return true // Higher numbers are generally secondary
+			}
+		}
+	}
+
 	return false
 }
 
