@@ -304,18 +304,28 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *models.Shri
 	}
 }
 
+// ArchiveEstimateResult holds the result of archive size estimation
+type ArchiveEstimateResult struct {
+	FutureSize       int64
+	ProcessingTime   int
+	HasProcessable   bool
+	TotalArchiveSize int64
+	IsBroken         bool
+}
+
 // EstimateSizeForArchive estimates size using compressed size and inspects archive contents
-// Returns: futureSize, processingTime, hasProcessableContent, totalArchiveSize, isBroken
-func (p *ArchiveProcessor) EstimateSizeForArchive(m *models.ShrinkMedia, cfg *models.ProcessorConfig) (int64, int, bool, int64, bool) {
+func (p *ArchiveProcessor) EstimateSizeForArchive(m *models.ShrinkMedia, cfg *models.ProcessorConfig) ArchiveEstimateResult {
+	result := ArchiveEstimateResult{}
+
 	slog.Debug("EstimateSizeForArchive starting", "path", m.Path)
 	if !p.unarInstalled {
-		return 0, 0, false, 0, false
+		return result
 	}
 
 	// Skip secondary parts of multi-part archives to avoid double processing
 	if isSecondaryPart(m.Path) {
 		slog.Debug("Skipping secondary archive part", "path", m.Path)
-		return 0, 0, false, 0, false
+		return result
 	}
 
 	// Get archive contents and check for multi-part volumes
@@ -323,7 +333,7 @@ func (p *ArchiveProcessor) EstimateSizeForArchive(m *models.ShrinkMedia, cfg *mo
 	slog.Info("lsar returned", "path", m.Path, "count", len(contents), "lsarFailed", lsarFailed)
 
 	// Check for multi-part archives and verify all parts exist
-	totalArchiveSize := m.Size
+	result.TotalArchiveSize = m.Size
 	slog.Debug("Calling getPartFiles", "path", m.Path)
 	partFiles := p.getPartFiles(m.Path)
 	slog.Debug("getPartFiles returned", "path", m.Path, "parts", len(partFiles))
@@ -331,37 +341,38 @@ func (p *ArchiveProcessor) EstimateSizeForArchive(m *models.ShrinkMedia, cfg *mo
 	// Check for missing parts in sequence for known multi-part types
 	if isBrokenSequence(m.Path, partFiles) {
 		slog.Info("Broken sequence detected for archive", "path", m.Path)
-		return 0, 0, false, 0, true
+		result.IsBroken = true
+		return result
 	}
 
 	// Sum up sizes
 	if len(partFiles) > 0 {
-		totalArchiveSize = 0
+		result.TotalArchiveSize = 0
 		if info, err := os.Stat(m.Path); err == nil {
-			totalArchiveSize += info.Size()
+			result.TotalArchiveSize += info.Size()
 		}
 		for _, partFile := range partFiles {
 			if info, err := os.Stat(partFile); err == nil {
-				totalArchiveSize += info.Size()
+				result.TotalArchiveSize += info.Size()
 			} else {
 				// Missing part file - archive is broken
-				return 0, 0, false, 0, true
+				result.IsBroken = true
+				return result
 			}
 		}
 	}
 
 	// If lsar failed (empty contents due to error or missing parts), archive is broken
 	if lsarFailed {
-		return 0, 0, false, 0, true
+		result.IsBroken = true
+		return result
 	}
 
 	if len(contents) == 0 {
 		// Archive has no contents but lsar didn't fail - just no processable content
-		return 0, 0, false, m.Size, false
+		result.TotalArchiveSize = m.Size
+		return result
 	}
-	var totalFutureSize int64
-	var totalProcessingTime int
-	hasProcessableContent := false
 
 	for _, content := range contents {
 		ext := content.Ext
@@ -382,7 +393,7 @@ func (p *ArchiveProcessor) EstimateSizeForArchive(m *models.ShrinkMedia, cfg *mo
 			duration := float64(content.CompressedSize) / float64(cfg.Common.SourceVideoBitrate) * 8
 			futureSize = int64(duration * float64(cfg.Video.TargetVideoBitrate) / 8)
 			processingTime = int(math.Ceil(duration / cfg.Video.TranscodingVideoRate))
-			totalArchiveSize += content.Size
+			result.TotalArchiveSize += content.Size
 			slog.Info("Nested archive estimation", "path", content.Path, "futureSize", futureSize, "archiveFileSize", content.Size)
 		}
 
@@ -424,34 +435,37 @@ func (p *ArchiveProcessor) EstimateSizeForArchive(m *models.ShrinkMedia, cfg *mo
 		}
 
 		if isProcessable {
-			hasProcessableContent = true
-			totalFutureSize += futureSize
-			totalProcessingTime += processingTime
+			result.HasProcessable = true
+			result.FutureSize += futureSize
+			result.ProcessingTime += processingTime
 		}
 	}
 
-	slog.Debug("EstimateSizeForArchive complete", "path", m.Path, "futureSize", totalFutureSize, "processable", hasProcessableContent)
-	return totalFutureSize, totalProcessingTime, hasProcessableContent, totalArchiveSize, false
+	slog.Debug("EstimateSizeForArchive complete", "path", m.Path, "futureSize", result.FutureSize, "processable", result.HasProcessable)
+	return result
 }
 
 func (p *ArchiveProcessor) EstimateSize(m *models.ShrinkMedia, cfg *models.ProcessorConfig) models.ProcessableInfo {
 	slog.Debug("EstimateSize starting", "path", m.Path)
-	futureSize, processingTime, hasProcessable, totalArchiveSize, isBroken := p.EstimateSizeForArchive(m, cfg)
+	est := p.EstimateSizeForArchive(m, cfg)
+
 	var partFiles []string
-	if !hasProcessable {
-		if totalArchiveSize == 0 {
-			slog.Debug("Archive has no processable content and size=0, checking parts", "path", m.Path)
-			partFiles = p.getPartFiles(m.Path)
-			slog.Debug("getPartFiles (broken check) returned", "path", m.Path, "parts", len(partFiles))
-		}
+	if !est.HasProcessable && est.TotalArchiveSize == 0 {
+		slog.Debug("Archive has no processable content and size=0, checking parts", "path", m.Path)
+		partFiles = p.getPartFiles(m.Path)
+		slog.Debug("getPartFiles (broken check) returned", "path", m.Path, "parts", len(partFiles))
+	} else if est.IsBroken {
+		// Also get part files for broken archives
+		partFiles = p.getPartFiles(m.Path)
 	}
-	slog.Debug("EstimateSize complete", "path", m.Path, "processable", hasProcessable, "broken", isBroken)
+
+	slog.Debug("EstimateSize complete", "path", m.Path, "processable", est.HasProcessable, "broken", est.IsBroken)
 	return models.ProcessableInfo{
-		FutureSize:     futureSize,
-		ProcessingTime: processingTime,
-		IsProcessable:  hasProcessable,
-		ActualSize:     totalArchiveSize,
-		IsBroken:       isBroken,
+		FutureSize:     est.FutureSize,
+		ProcessingTime: est.ProcessingTime,
+		IsProcessable:  est.HasProcessable,
+		ActualSize:     est.TotalArchiveSize,
+		IsBroken:       est.IsBroken,
 		PartFiles:      partFiles,
 	}
 }

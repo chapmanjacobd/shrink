@@ -353,8 +353,8 @@ var ImageExtensions = []string{
 
 var TextExtensions = []string{
 	"azw", "azw3", "azw4", "cbc", "chm", "djv", "djvu", "doc", "docx", "dot",
-	"epub", "fb2", "fbz", "htmlz", "ind", "indd", "indt", "lit", "lrf", "md",
-	"mobi", "odt", "pdb", "pdf", "pml", "pot", "pps", "ppt", "prc", "rb",
+	"epub", "fb2", "fbz", "htmlz", "ind", "indt", "lit", "lrf", "md",
+	"mobi", "odt", "pdb", "pdf", "pml", "pot", "pps", "prc", "rb",
 	"rtf", "snb", "tcr", "txtz", "vsd", "xls", "xlt",
 }
 
