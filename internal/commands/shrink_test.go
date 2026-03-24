@@ -189,6 +189,8 @@ func TestShrinkArchive(t *testing.T) {
 		},
 		ExpectDBState: []testutils.ExpectedDBRecord{
 			{Path: "test_archive_simple.zip", TimeDeleted: 1},
+			{Path: "test_archive_simple.zip.extracted/tiny.av1.mkv", TimeDeleted: 0, IsShrinked: 1},
+			{Path: "test_archive_simple.zip.extracted/tiny.avif", TimeDeleted: 0, IsShrinked: 1},
 		},
 	}
 
@@ -241,6 +243,8 @@ func TestShrinkArchiveRelative(t *testing.T) {
 		},
 		ExpectDBState: []testutils.ExpectedDBRecord{
 			{Path: "test_archive_relative.zip", TimeDeleted: 1},
+			{Path: "test_archive_relative.zip.extracted/1/tiny.av1.mkv", TimeDeleted: 0, IsShrinked: 1},
+			{Path: "test_archive_relative.zip.extracted/tiny.mka", TimeDeleted: 0, IsShrinked: 1},
 		},
 	}
 
@@ -274,6 +278,8 @@ func TestShrinkArchiveInArchive(t *testing.T) {
 		},
 		ExpectDBState: []testutils.ExpectedDBRecord{
 			{Path: "test_archive_nested.zip", TimeDeleted: 1},
+			{Path: "test_archive_nested.zip.extracted/tiny.avi.zip.extracted/tiny.av1.mkv", TimeDeleted: 0, IsShrinked: 1},
+			{Path: "test_archive_nested.zip.extracted/tiny.wav.zip.extracted/tiny.mka", TimeDeleted: 0, IsShrinked: 1},
 		},
 	}
 
@@ -307,6 +313,7 @@ func TestShrinkArchiveNestedMultiPart(t *testing.T) {
 		},
 		ExpectDBState: []testutils.ExpectedDBRecord{
 			{Path: "test_archive_nested_multi.zip", TimeDeleted: 1},
+			{Path: "test_archive_nested_multi.zip.extracted/temp_multi.zip.extracted/tiny.av1.mkv", TimeDeleted: 0, IsShrinked: 1},
 		},
 	}
 
@@ -583,6 +590,7 @@ func TestShrinkArchiveDoubleNestedNoSavings(t *testing.T) {
 		},
 		ExpectDBState: []testutils.ExpectedDBRecord{
 			{Path: "test_archive_double_nested_optimized.zip", TimeDeleted: 1},
+			{Path: "test_archive_double_nested_optimized.zip.extracted/inner_optimized.zip.extracted/tiny.avif", TimeDeleted: 0, IsShrinked: 1},
 		},
 	}
 

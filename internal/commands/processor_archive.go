@@ -196,7 +196,9 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *models.Shri
 	// Flatten any wrapper folders that might have been created
 	flattenWrapperFolders(outputDir)
 
-	// Find and process all media recursively
+	// Find and process all media recursively, collecting output files
+	var outputFiles []models.ProcessOutputFile
+
 	filepath.Walk(outputDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() {
 			return nil
@@ -216,14 +218,25 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *models.Shri
 					}
 					if totalSize < fileSize {
 						os.Remove(path)
+						// Add processed outputs
+						outputFiles = append(outputFiles, res.Outputs...)
 					} else {
+						// Keep original, delete outputs
 						for _, out := range res.Outputs {
 							if !pathsEqual(out.Path, path) {
 								os.Remove(out.Path)
 							}
 						}
+						// Add original as output
+						outputFiles = append(outputFiles, models.ProcessOutputFile{Path: path, Size: fileSize})
 					}
+				} else {
+					// Processing didn't produce outputs, keep original
+					outputFiles = append(outputFiles, models.ProcessOutputFile{Path: path, Size: fileSize})
 				}
+			} else {
+				// Shouldn't shrink, keep as-is
+				outputFiles = append(outputFiles, models.ProcessOutputFile{Path: path, Size: fileSize})
 			}
 		} else if utils.VideoExtensionMap[ext] || utils.AudioExtensionMap[ext] {
 			category := "Video"
@@ -254,6 +267,8 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *models.Shri
 					// Only keep if smaller
 					if totalSize < fileSize {
 						os.Remove(path)
+						// Add processed outputs
+						outputFiles = append(outputFiles, res.Outputs...)
 					} else {
 						// Delete transcode and keep original
 						for _, out := range res.Outputs {
@@ -261,8 +276,16 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *models.Shri
 								os.Remove(out.Path)
 							}
 						}
+						// Add original as output
+						outputFiles = append(outputFiles, models.ProcessOutputFile{Path: path, Size: fileSize})
 					}
+				} else {
+					// Processing didn't produce outputs, keep original
+					outputFiles = append(outputFiles, models.ProcessOutputFile{Path: path, Size: fileSize})
 				}
+			} else {
+				// Shouldn't shrink, keep as-is
+				outputFiles = append(outputFiles, models.ProcessOutputFile{Path: path, Size: fileSize})
 			}
 		} else if utils.ArchiveExtensionMap[ext] {
 			if isSecondaryPart(path) {
@@ -289,16 +312,21 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *models.Shri
 						os.Remove(partFile)
 					}
 				}
+				// Add nested archive outputs (extracted files from nested archive)
+				outputFiles = append(outputFiles, res.Outputs...)
 				// The extracted contents have already been processed recursively
 				// and the decision to keep original or processed files was made
 			}
+		} else {
+			// Unknown or unsupported file type, still track it
+			outputFiles = append(outputFiles, models.ProcessOutputFile{Path: path, Size: fileSize})
 		}
 		return nil
 	})
 
 	return models.ProcessResult{
 		SourcePath: m.Path,
-		Outputs:    []models.ProcessOutputFile{{Path: outputDir, Size: utils.FolderSize(outputDir)}},
+		Outputs:    outputFiles,
 		PartFiles:  partFiles,
 		Success:    true,
 	}
@@ -704,8 +732,8 @@ func (p *ArchiveProcessor) getPartFilesImpl(path string) []string {
 	if lsar != "" {
 		slog.Debug("Calling lsar for XADVolumes", "path", path)
 
-		// Add timeout to prevent hanging
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		// Add timeout to prevent hanging - use 60 seconds for large archives
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
 
 		lsarCmd := exec.CommandContext(ctx, lsar, "-json", path)
@@ -969,8 +997,8 @@ func (p *ArchiveProcessor) lsarWithStatus(path string) ([]models.ShrinkMedia, bo
 		return nil, true
 	}
 
-	// Add timeout to prevent hanging
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	// Add timeout to prevent hanging - use 60 seconds for large archives
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
 	// Use memory monitoring if configured
