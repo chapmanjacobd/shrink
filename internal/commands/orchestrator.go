@@ -511,7 +511,7 @@ func (e *Engine) updateMetadata(m models.ShrinkMedia, result models.ProcessResul
 		if len(result.Outputs) == 1 && !pathsEqual(out.Path, m.Path) && m.Category != "Archived" {
 			db.UpdateMedia(e.sqlDBs, m.Path, out.Path, out.Size, m.Duration)
 		} else if !pathsEqual(out.Path, m.Path) {
-			db.AddMediaEntry(e.sqlDBs, out.Path, out.Size, m.Duration)
+			db.AddMediaEntry(e.sqlDBs, out.Path, out.Size, m.Duration, db.ShrinkStatusSuccess)
 		} else {
 			db.MarkSuccess(e.sqlDBs, out.Path)
 		}

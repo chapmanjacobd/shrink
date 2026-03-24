@@ -48,7 +48,7 @@ func TestMediaLifecycle(t *testing.T) {
 	_ = dbPath
 
 	// 1. AddMediaEntry
-	AddMediaEntry([]*sql.DB{db}, "test.mp4", 1000, 10.0)
+	AddMediaEntry([]*sql.DB{db}, "test.mp4", 1000, 10.0, ShrinkStatusNotProcessed)
 
 	// 2. LoadMediaFromDB
 	records, err := LoadMediaFromDB(db, false, false, false, false, false)

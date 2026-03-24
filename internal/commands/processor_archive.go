@@ -198,9 +198,17 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *models.Shri
 
 	// Find and process all media recursively, collecting output files
 	var outputFiles []models.ProcessOutputFile
+	processedDirs := make(map[string]bool)
 
 	filepath.Walk(outputDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() {
+		if err != nil {
+			return nil
+		}
+		absPath, _ := filepath.Abs(path)
+		if info.IsDir() {
+			if processedDirs[absPath] {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		ext := strings.ToLower(filepath.Ext(path))
@@ -302,6 +310,11 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *models.Shri
 				}
 			}
 			if res.Success {
+				// Skip the output directory of the nested archive in the current walk
+				nestedOutputDir := filepath.Join(filepath.Dir(path), filepath.Base(path)+".extracted")
+				absNestedOutputDir, _ := filepath.Abs(nestedOutputDir)
+				processedDirs[absNestedOutputDir] = true
+
 				// Get part files for multi-part archives BEFORE deleting the main file
 				nestedPartFiles := p.getPartFiles(path)
 				// Delete the nested archive file and all its part files after extraction
@@ -398,7 +411,6 @@ func (p *ArchiveProcessor) EstimateSizeForArchive(m *models.ShrinkMedia, cfg *mo
 
 	if len(contents) == 0 {
 		// Archive has no contents but lsar didn't fail - just no processable content
-		result.TotalArchiveSize = m.Size
 		return result
 	}
 
@@ -415,13 +427,16 @@ func (p *ArchiveProcessor) EstimateSizeForArchive(m *models.ShrinkMedia, cfg *mo
 		// We don't extract during estimation to avoid temp space issues
 		// The actual contents will be analyzed during extraction
 		if ext != "" && utils.ArchiveExtensionMap[ext] {
+			if isSecondaryPart(content.Path) {
+				slog.Debug("Skipping nested secondary archive part during estimation", "path", content.Path)
+				continue
+			}
 			slog.Info("Found nested archive", "path", content.Path, "compressedSize", content.CompressedSize)
 			isProcessable = true
 			// Estimate based on compressed size (assume video content for simplicity)
 			duration := float64(content.CompressedSize) / float64(cfg.Common.SourceVideoBitrate) * 8
 			futureSize = int64(duration * float64(cfg.Video.TargetVideoBitrate) / 8)
 			processingTime = int(math.Ceil(duration / cfg.Video.TranscodingVideoRate))
-			result.TotalArchiveSize += content.Size
 			slog.Info("Nested archive estimation", "path", content.Path, "futureSize", futureSize, "archiveFileSize", content.Size)
 		}
 

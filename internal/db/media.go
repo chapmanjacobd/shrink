@@ -114,8 +114,8 @@ func UpdateMedia(databases []*sql.DB, oldPath, newPath string, newSize int64, du
 	}
 }
 
-// AddMediaEntry adds a new media entry to the database
-func AddMediaEntry(databases []*sql.DB, path string, size int64, duration float64) {
+// AddMediaEntry adds a new media entry to the database with a specific status
+func AddMediaEntry(databases []*sql.DB, path string, size int64, duration float64, status int) {
 	for _, sqlDB := range databases {
 		_, err := sqlDB.Exec("DELETE FROM media WHERE path = ?", path)
 		if err != nil {
@@ -124,12 +124,12 @@ func AddMediaEntry(databases []*sql.DB, path string, size int64, duration float6
 		var execErr error
 		if duration > 0 {
 			_, execErr = sqlDB.Exec(
-				"INSERT INTO media (path, size, duration, time_deleted, is_shrinked) VALUES (?, ?, ?, 0, 0)",
-				path, size, int64(math.Round(duration)))
+				"INSERT INTO media (path, size, duration, time_deleted, is_shrinked) VALUES (?, ?, ?, 0, ?)",
+				path, size, int64(math.Round(duration)), status)
 		} else {
 			_, execErr = sqlDB.Exec(
-				"INSERT INTO media (path, size, time_deleted, is_shrinked) VALUES (?, ?, 0, 0)",
-				path, size)
+				"INSERT INTO media (path, size, time_deleted, is_shrinked) VALUES (?, ?, 0, ?)",
+				path, size, status)
 		}
 		if execErr != nil {
 			slog.Warn("Failed to add database entry", "path", path, "error", execErr)

@@ -399,6 +399,18 @@ func init() {
 		ArchiveExtensionMap["."+ext] = true
 		MediaExtensionMap["."+ext] = true
 	}
+	// Add common multi-part extensions
+	for i := range 100 {
+		zExt := fmt.Sprintf(".z%02d", i)
+		ArchiveExtensionMap[zExt] = true
+		MediaExtensionMap[zExt] = true
+		rExt := fmt.Sprintf(".r%02d", i)
+		ArchiveExtensionMap[rExt] = true
+		MediaExtensionMap[rExt] = true
+		nExt := fmt.Sprintf(".%03d", i)
+		ArchiveExtensionMap[nExt] = true
+		MediaExtensionMap[nExt] = true
+	}
 }
 
 // UnreliableDurationFormats are formats known to have unreliable duration metadata
