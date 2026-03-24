@@ -7,6 +7,16 @@ import (
 	"unsafe"
 )
 
+// GetTotalRAM returns the total physical memory in bytes.
+func GetTotalRAM() int64 {
+	var mem windows.MemoryStatusEx
+	mem.Length = uint32(unsafe.Sizeof(mem))
+	if err := windows.GlobalMemoryStatusEx(&mem); err == nil {
+		return int64(mem.TotalPhys)
+	}
+	return 0
+}
+
 var (
 	kernel32                  = windows.NewLazySystemDLL("kernel32.dll")
 	procOpenProcess           = kernel32.NewProc("OpenProcess")

@@ -1,4 +1,4 @@
-//go:build linux || darwin
+//go:build linux
 
 package utils
 
@@ -10,6 +10,20 @@ import (
 
 	"golang.org/x/sys/unix"
 )
+
+// GetTotalRAM returns the total physical memory in bytes.
+func GetTotalRAM() int64 {
+	var si unix.Sysinfo_t
+	if err := unix.Sysinfo(&si); err == nil {
+		// si.Unit is the size of a memory unit in bytes (since Linux 2.4.9)
+		unit := int64(si.Unit)
+		if unit == 0 {
+			unit = 1
+		}
+		return int64(si.Totalram) * unit
+	}
+	return 0
+}
 
 // killProcessGroupImpl kills a process and all its children on Unix systems.
 func killProcessGroupImpl(pid int) {
@@ -64,11 +78,6 @@ func getProcessRSS(pid int) int64 {
 	// Fallback to /proc/[pid]/status (Linux)
 	if status, err := readStatusVmRSS(pid); err == nil {
 		return status
-	}
-
-	// macOS: use sysctl
-	if rss, err := getProcessRSSDarwin(pid); err == nil {
-		return rss
 	}
 
 	return 0

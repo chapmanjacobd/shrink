@@ -116,7 +116,7 @@ type ParallelFlags struct {
 }
 
 type MemoryFlags struct {
-	MemoryLimit         string `default:"" help:"Maximum memory usage per process (e.g., 4G, 512M). Empty = no limit" env:"SHRINK_MEMORY_LIMIT"`
+	MemoryLimit         string `default:"" help:"Maximum memory usage per process (e.g., 4G, 512M). Default: min(12GB, RAM - 2GB). Set to 0 for no limit" env:"SHRINK_MEMORY_LIMIT"`
 	MemoryCheckInterval int    `default:"500" help:"Memory check interval in milliseconds" env:"SHRINK_MEMORY_CHECK_INTERVAL"`
 }
 
@@ -166,6 +166,25 @@ func (c *Config) BuildProcessorConfig() *models.ProcessorConfig {
 }
 
 func (c *Config) buildCommonConfig() models.CommonConfig {
+	limit := utils.ParseSize(c.MemoryLimit)
+	if limit == 0 && c.MemoryLimit == "" {
+		total := utils.GetTotalRAM()
+		maxLimit := int64(12 * 1024 * 1024 * 1024)
+		if total > 0 {
+			// default: min(12GB, Total RAM - 2GB)
+			limit = total - (2 * 1024 * 1024 * 1024)
+			if limit > maxLimit {
+				limit = maxLimit
+			}
+			if limit < 0 {
+				limit = 0
+			}
+		} else {
+			// RAM couldn't be determined, default to 12GB
+			limit = maxLimit
+		}
+	}
+
 	return models.CommonConfig{
 		SourceAudioBitrate:  utils.ParseBitrate(c.SourceAudioBitrate),
 		SourceVideoBitrate:  utils.ParseBitrate(c.SourceVideoBitrate),
@@ -179,7 +198,7 @@ func (c *Config) buildCommonConfig() models.CommonConfig {
 		IncludeTimecode:     c.IncludeTimecode,
 		MaxWidthBuffer:      c.MaxWidthBuffer,
 		MaxHeightBuffer:     c.MaxHeightBuffer,
-		MemoryLimit:         utils.ParseSize(c.MemoryLimit),
+		MemoryLimit:         limit,
 		MemoryCheckInterval: c.MemoryCheckInterval,
 	}
 }
