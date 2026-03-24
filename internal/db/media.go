@@ -13,6 +13,21 @@ import (
 	"github.com/chapmanjacobd/shrink/internal/utils"
 )
 
+// ShrinkStatus codes for tracking processing outcomes
+// 0 = not processed, 1 = success, >1 = various failure/skip states
+const (
+	ShrinkStatusNotProcessed   = 0 // File has not been processed yet
+	ShrinkStatusSuccess        = 1 // Successfully processed and saved space
+	ShrinkStatusTooLarge       = 2 // Transcoded file was larger than original (kept original)
+	ShrinkStatusUnplayable     = 3 // File was unplayable/corrupt
+	ShrinkStatusUnsupported    = 4 // Unsupported format/codec
+	ShrinkStatusError          = 5 // Processing error (file-specific, not environment)
+	ShrinkStatusSkipped        = 6 // Skipped (no savings, already optimized, etc.)
+	ShrinkStatusBroken         = 7 // File is broken (moved to broken directory)
+	ShrinkStatusInterrupted    = 8 // Interrupted by user (Ctrl-C, SIGTERM) - should NOT persist
+	ShrinkStatusEnvironmentErr = 9 // Environment error (OOM, hardware failure) - should NOT persist
+)
+
 // MediaRecord represents a row in the media table
 type MediaRecord struct {
 	Path           string
@@ -24,6 +39,7 @@ type MediaRecord struct {
 	Duration       float64
 	VideoCount     int
 	AudioCount     int
+	IsShrinked     int // Status code: 0=not processed, 1=success, >1=various states
 }
 
 // LoadMediaFromDB loads all processable media from a database
@@ -85,12 +101,12 @@ func UpdateMedia(databases []*sql.DB, oldPath, newPath string, newSize int64, du
 		var execErr error
 		if duration > 0 {
 			_, execErr = sqlDB.Exec(
-				"UPDATE media SET path = ?, size = ?, duration = ?, time_deleted = 0, is_shrinked = 1 WHERE path = ?",
-				newPath, newSize, int64(math.Round(duration)), oldPath)
+				"UPDATE media SET path = ?, size = ?, duration = ?, time_deleted = 0, is_shrinked = ? WHERE path = ?",
+				newPath, newSize, int64(math.Round(duration)), ShrinkStatusSuccess, oldPath)
 		} else {
 			_, execErr = sqlDB.Exec(
-				"UPDATE media SET path = ?, size = ?, time_deleted = 0, is_shrinked = 1 WHERE path = ?",
-				newPath, newSize, oldPath)
+				"UPDATE media SET path = ?, size = ?, time_deleted = 0, is_shrinked = ? WHERE path = ?",
+				newPath, newSize, ShrinkStatusSuccess, oldPath)
 		}
 		if execErr != nil {
 			slog.Warn("Failed to update database entry", "oldPath", oldPath, "newPath", newPath, "error", execErr)
@@ -121,15 +137,56 @@ func AddMediaEntry(databases []*sql.DB, path string, size int64, duration float6
 	}
 }
 
-// MarkShrinked marks a file as shrinked in the database
-func MarkShrinked(databases []*sql.DB, path string) {
+// MarkShrinked marks a file as shrinked in the database with the given status code
+func MarkShrinked(databases []*sql.DB, path string, status int) {
+	if status <= 0 {
+		status = ShrinkStatusSuccess
+	}
 	for _, sqlDB := range databases {
-		_, err := sqlDB.Exec("UPDATE media SET is_shrinked = 1 WHERE path = ?", path)
+		_, err := sqlDB.Exec("UPDATE media SET is_shrinked = ? WHERE path = ?", status, path)
 		if err != nil {
-			slog.Warn("Failed to mark file as shrinked in database", "path", path, "error", err)
+			slog.Warn("Failed to mark file status in database", "path", path, "status", status, "error", err)
 		}
 	}
 }
+
+// MarkSuccess marks a file as successfully processed
+func MarkSuccess(databases []*sql.DB, path string) {
+	MarkShrinked(databases, path, ShrinkStatusSuccess)
+}
+
+// MarkTooLarge marks a file as processed but result was larger than original
+func MarkTooLarge(databases []*sql.DB, path string) {
+	MarkShrinked(databases, path, ShrinkStatusTooLarge)
+}
+
+// MarkUnplayable marks a file as unplayable/corrupt
+func MarkUnplayable(databases []*sql.DB, path string) {
+	MarkShrinked(databases, path, ShrinkStatusUnplayable)
+}
+
+// MarkUnsupported marks a file as having unsupported format/codec
+func MarkUnsupported(databases []*sql.DB, path string) {
+	MarkShrinked(databases, path, ShrinkStatusUnsupported)
+}
+
+// MarkProcessingError marks a file as having a processing error
+func MarkProcessingError(databases []*sql.DB, path string) {
+	MarkShrinked(databases, path, ShrinkStatusError)
+}
+
+// MarkSkipped marks a file as skipped (no savings, already optimized, etc.)
+func MarkSkipped(databases []*sql.DB, path string) {
+	MarkShrinked(databases, path, ShrinkStatusSkipped)
+}
+
+// MarkBroken marks a file as broken (moved to broken directory)
+func MarkBroken(databases []*sql.DB, path string) {
+	MarkShrinked(databases, path, ShrinkStatusBroken)
+}
+
+// Note: Interrupted (Ctrl-C, SIGTERM) and EnvironmentErr statuses are NOT persisted
+// These indicate the process should be retried on next run
 
 // BulkMarkOptimizedExtensions marks files with already-optimized extensions as shrinked
 func BulkMarkOptimizedExtensions(databases []*sql.DB) {
@@ -144,8 +201,8 @@ func BulkMarkOptimizedExtensions(databases []*sql.DB) {
 		for _, ext := range utils.OptimizedExtensions {
 			// Use LIKE with LOWER to handle case-insensitive matching
 			_, err := tx.Exec(
-				"UPDATE media SET is_shrinked = 1 WHERE LOWER(path) LIKE ? AND COALESCE(time_deleted, 0) = 0",
-				"%"+ext,
+				"UPDATE media SET is_shrinked = ? WHERE LOWER(path) LIKE ? AND COALESCE(time_deleted, 0) = 0",
+				ShrinkStatusSkipped, "%"+ext,
 			)
 			if err != nil {
 				slog.Warn("Failed to bulk mark optimized extensions", "extension", ext, "error", err)

@@ -257,8 +257,8 @@ func (c *ShrinkCmd) filterByTools(media []models.ShrinkMedia, registry *MediaReg
 
 		// Skip if already optimized
 		if utils.IsOptimized(m.Ext) {
-			// Mark as shrinked in all DBs if it came from a DB
-			db.MarkShrinked(c.sqlDBs, m.Path)
+			// Mark as skipped in all DBs if it came from a DB (file still exists)
+			db.MarkSkipped(c.sqlDBs, m.Path)
 			continue
 		}
 

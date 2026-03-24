@@ -248,8 +248,8 @@ func (e *Engine) processSingle(ctx context.Context, m models.ShrinkMedia) models
 	// Capture original timestamps before processing
 	originalAtime, originalMtime, err := e.captureTimestamps(m.Path)
 	if err != nil {
-		// File doesn't exist - mark as skipped (deleted)
-		slog.Info("File not found, marking as skipped", "path", m.Path)
+		// File doesn't exist - mark as deleted (no status code needed)
+		slog.Info("File not found, marking as deleted", "path", m.Path)
 		e.metrics.RecordSkipped(m.DisplayCategory())
 		db.MarkDeleted(e.sqlDBs, m.Path)
 		return models.ProcessResult{SourcePath: m.Path, Error: err}
@@ -298,10 +298,8 @@ func (e *Engine) processSingle(ctx context.Context, m models.ShrinkMedia) models
 
 	if keepNewFiles {
 		e.finalizeSuccessfulProcessing(&m, result, originalAtime, originalMtime, elapsedSeconds)
-	} else {
-		db.MarkShrinked(e.sqlDBs, m.Path)
-		e.metrics.RecordSuccess(m.DisplayCategory(), m.Size, m.Size, elapsedSeconds, int64(m.Duration))
 	}
+	// Note: If keepNewFiles is false, finalizeFileSwap already marked as TooLarge
 
 	return result
 }
@@ -312,7 +310,8 @@ func (e *Engine) handleBrokenArchive(m models.ShrinkMedia) models.ProcessResult 
 	if e.cfg.Common.MoveBroken != "" {
 		e.ui.MoveToBroken(m.Path, m.PartFiles)
 	}
-	db.MarkDeleted(e.sqlDBs, m.Path)
+	// Mark as broken (don't mark as deleted - file is moved, not deleted)
+	db.MarkBroken(e.sqlDBs, m.Path)
 	e.metrics.RecordFailure(m.DisplayCategory(), 0)
 	return models.ProcessResult{SourcePath: m.Path, Success: false}
 }
@@ -331,8 +330,10 @@ func (e *Engine) handleProcessingError(m models.ShrinkMedia, result models.Proce
 	// Log the error (including timeouts and cancellations for visibility)
 	if result.Error == context.Canceled {
 		slog.Warn("Processing canceled by user", "path", m.Path)
+		// Don't mark as shrinked - allow retry on next run
 	} else if result.Error == context.DeadlineExceeded {
 		slog.Error("Processing timed out", "path", m.Path)
+		// Don't mark as shrinked - allow retry on next run
 	} else {
 		if result.Output != "" {
 			slog.Error("Processing failed", "path", m.Path, "error", result.Error, "output", result.Output)
@@ -344,15 +345,28 @@ func (e *Engine) handleProcessingError(m models.ShrinkMedia, result models.Proce
 
 	// Don't move or delete files if processing was interrupted by user or system signal
 	isInterrupted := result.Error == context.Canceled || strings.Contains(result.Error.Error(), "signal: killed")
+	
+	// Check for memory limit exceeded (environment error)
+	isEnvironmentErr := result.StopAll || strings.Contains(result.Error.Error(), "exceeded memory limit")
 
-	if e.cfg.Common.MoveBroken != "" && !isInterrupted {
-		e.ui.MoveToBroken(m.Path, result.PartFiles)
-		db.MarkDeleted(e.sqlDBs, m.Path)
-	} else if e.cfg.Common.DeleteUnplayable && !isInterrupted {
-		db.MarkDeleted(e.sqlDBs, m.Path)
-		os.Remove(m.Path)
-		if result.SourcePath != "" && result.SourcePath != m.Path {
-			os.Remove(result.SourcePath)
+	if isInterrupted || isEnvironmentErr {
+		// Don't mark file status - allow retry on next run
+		slog.Debug("Skipping database update due to interrupt/environment error", "path", m.Path)
+	} else {
+		// Mark as processing error or broken based on context
+		if e.cfg.Common.MoveBroken != "" {
+			e.ui.MoveToBroken(m.Path, result.PartFiles)
+			db.MarkBroken(e.sqlDBs, m.Path)
+		} else if e.cfg.Common.DeleteUnplayable {
+			db.MarkDeleted(e.sqlDBs, m.Path)
+			db.MarkUnplayable(e.sqlDBs, m.Path)
+			os.Remove(m.Path)
+			if result.SourcePath != "" && result.SourcePath != m.Path {
+				os.Remove(result.SourcePath)
+			}
+		} else {
+			// Just mark as error without moving/deleting
+			db.MarkProcessingError(e.sqlDBs, m.Path)
 		}
 	}
 
@@ -364,7 +378,7 @@ func (e *Engine) handleProcessingError(m models.ShrinkMedia, result models.Proce
 	}
 	if result.SourcePath != "" && result.SourcePath != m.Path {
 		// Only remove intermediate source if we're not deleting unplayable (already handled)
-		if !e.cfg.Common.DeleteUnplayable {
+		if !e.cfg.Common.DeleteUnplayable && !isInterrupted && !isEnvironmentErr {
 			os.Remove(result.SourcePath)
 		}
 	}
@@ -380,13 +394,17 @@ func (e *Engine) handleUnsuccessfulProcessing(m models.ShrinkMedia, result model
 	if e.cfg.Common.MoveBroken != "" {
 		// handleUnsuccessfulProcessing doesn't have PartFiles, but we can call it with nil
 		e.ui.MoveToBroken(m.Path, nil)
-		db.MarkDeleted(e.sqlDBs, m.Path)
+		db.MarkBroken(e.sqlDBs, m.Path)
 	} else if e.cfg.Common.DeleteUnplayable {
 		db.MarkDeleted(e.sqlDBs, m.Path)
+		db.MarkUnplayable(e.sqlDBs, m.Path)
 		os.Remove(m.Path)
 		if result.SourcePath != "" && result.SourcePath != m.Path {
 			os.Remove(result.SourcePath)
 		}
+	} else {
+		// Mark as error without moving/deleting
+		db.MarkProcessingError(e.sqlDBs, m.Path)
 	}
 
 	// Clean up any partial outputs and intermediate source files
@@ -466,7 +484,9 @@ func (e *Engine) finalizeFileSwap(m models.ShrinkMedia, result models.ProcessRes
 			}
 		}
 	} else {
-		// Delete new files, keep original
+		// Delete new files, keep original - mark as too large (don't mark deleted)
+		db.MarkTooLarge(e.sqlDBs, m.Path)
+		
 		for _, out := range result.Outputs {
 			if !pathsEqual(out.Path, m.Path) && !pathsEqual(out.Path, result.SourcePath) {
 				os.RemoveAll(out.Path)
@@ -493,7 +513,7 @@ func (e *Engine) updateMetadata(m models.ShrinkMedia, result models.ProcessResul
 		} else if !pathsEqual(out.Path, m.Path) {
 			db.AddMediaEntry(e.sqlDBs, out.Path, out.Size, m.Duration)
 		} else {
-			db.MarkShrinked(e.sqlDBs, out.Path)
+			db.MarkSuccess(e.sqlDBs, out.Path)
 		}
 	}
 }
