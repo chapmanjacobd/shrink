@@ -47,10 +47,7 @@ func (p *FFmpegProcessor) Process(ctx context.Context, m *models.ShrinkMedia, cf
 	// Handle animated images (GIF/webp with audio)
 	if m.Ext == ".gif" || m.Ext == ".webp" {
 		isAnimation := p.isAnimationFromProbe(probe)
-		if isAnimation == nil {
-			return models.ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("could not determine animation status")}
-		}
-		if !*isAnimation {
+		if !isAnimation {
 			// Process as static image
 			m.Category = "Image"
 			processor := registry.GetProcessor(m)

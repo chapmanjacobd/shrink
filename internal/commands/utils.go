@@ -41,19 +41,11 @@ func (c *ShrinkCmd) scanDirectory(dirPath string) ([]models.ShrinkMedia, error) 
 }
 
 func (c *ShrinkCmd) createMediaEntry(path string, info os.FileInfo, ext string) models.ShrinkMedia {
-	m := models.ShrinkMedia{
+	return models.ShrinkMedia{
 		Path: path,
 		Size: info.Size(),
 		Ext:  ext,
 	}
-
-	if utils.VideoExtensionMap[ext] {
-		m.VideoCount = 1
-	}
-	if utils.AudioExtensionMap[ext] {
-		m.AudioCount = 1
-	}
-	return m
 }
 
 func (c *ShrinkCmd) enrichMetadata(m *models.ShrinkMedia) {

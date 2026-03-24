@@ -18,10 +18,5 @@ package db
 //
 // For more information, see README.md
 
-// FtsEnabled is false when fts5 tag is not used (but this build is not supported)
-const FtsEnabled = false
-
-// _fts5BuildTagRequired triggers a compile error when fts5 tag is missing.
-// The undefined identifier below causes: "undefined: _fts5BuildTagRequired"
-// See: https://github.com/chapmanjacobd/shrink#installation
+// FTS5 support is required. Build with: go build -tags fts5
 var _ = _fts5BuildTagRequired

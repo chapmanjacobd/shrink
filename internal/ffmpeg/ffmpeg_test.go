@@ -280,7 +280,7 @@ func TestIsAnimationFromProbe(t *testing.T) {
 	processor := NewFFmpegProcessor(cfg)
 	probe, _ := ProbeMedia("test.gif")
 	isAnim := processor.isAnimationFromProbe(probe)
-	if isAnim == nil || !*isAnim {
+	if !isAnim {
 		t.Errorf("expected animation to be true")
 	}
 }

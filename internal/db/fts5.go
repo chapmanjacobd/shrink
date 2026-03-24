@@ -2,10 +2,9 @@
 
 package db
 
-// FtsEnabled is true when fts5 tag is used
-const FtsEnabled = true
-
-// _fts5BuildTagRequired is defined here to satisfy the check in build_tags.go
-const _fts5BuildTagRequired = true
-
-var _ = _fts5BuildTagRequired
+// _fts5BuildTagRequired is defined when fts5 tag is present.
+// When building without the fts5 tag, build_tags.go references this
+// undefined identifier, causing a compile error.
+//
+//lint:ignore U1000 This variable is intentionally used via build tag magic
+var _fts5BuildTagRequired bool

@@ -119,14 +119,12 @@ func GetImageDimensions(path string) (int, int, error) {
 	return 0, 0, fmt.Errorf("no video stream found")
 }
 
-func (p *FFmpegProcessor) isAnimationFromProbe(probe *FFProbeResult) *bool {
+func (p *FFmpegProcessor) isAnimationFromProbe(probe *FFProbeResult) bool {
 	if probe == nil {
-		result := false
-		return &result
+		return false
 	}
 	if len(probe.AudioStreams) > 0 {
-		result := true
-		return &result
+		return true
 	}
 
 	ffprobe := utils.GetCommandPath("ffprobe")
@@ -147,13 +145,11 @@ func (p *FFmpegProcessor) isAnimationFromProbe(probe *FFProbeResult) *bool {
 			}
 		}
 		if frames > 1 {
-			result := true
-			return &result
+			return true
 		}
 	}
 
-	result := false
-	return &result
+	return false
 }
 
 func (p *FFmpegProcessor) countFrames(path string) int {
