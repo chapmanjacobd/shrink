@@ -25,8 +25,7 @@ func NewTextProcessor() *TextProcessor {
 }
 
 func (p *TextProcessor) CanProcess(m *models.ShrinkMedia) bool {
-	mt := strings.ToLower(m.MediaType)
-	return mt == "text" || strings.HasPrefix(mt, "text/") || utils.TextExtensionMap[m.Ext]
+	return utils.TextExtensionMap[m.Ext]
 }
 
 func (p *TextProcessor) EstimateSize(m *models.ShrinkMedia, cfg *models.ProcessorConfig) models.ProcessableInfo {
@@ -308,7 +307,7 @@ func (p *TextProcessor) processEbookImages(ctx context.Context, images []string,
 		ext := filepath.Ext(img)
 		extLower := strings.ToLower(ext)
 		// Skip formats that shouldn't be converted to AVIF
-		if !shouldConvertToAVIF(extLower) {
+		if !utils.ImageExtensionMap[extLower] || utils.IsOptimized(extLower) {
 			continue
 		}
 

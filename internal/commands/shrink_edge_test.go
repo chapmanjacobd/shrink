@@ -167,7 +167,7 @@ func TestScanDirectory(t *testing.T) {
 
 	// Should skip .git
 	cmd := &ShrinkCmd{
-		unknownExtensions: make(map[string]int64),
+		unknownExtensions: make(map[string]UnknownExt),
 	}
 	media, _ := cmd.scanDirectory(tempDir)
 	for _, m := range media {

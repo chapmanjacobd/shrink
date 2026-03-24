@@ -30,7 +30,7 @@ func TestShouldShrink(t *testing.T) {
 }
 
 func TestProcessorRegistry(t *testing.T) {
-	registry := NewProcessorRegistry(nil)
+	registry := NewProcessorRegistry(nil, false, false, false, false)
 
 	m := &models.ShrinkMedia{Category: "Video", MediaType: "video/mp4", Ext: ".mp4", VideoCount: 1}
 	p := registry.GetProcessor(m)

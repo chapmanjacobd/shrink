@@ -3,7 +3,6 @@ package commands
 import (
 	"context"
 	"math"
-	"strings"
 
 	"github.com/chapmanjacobd/shrink/internal/ffmpeg"
 	"github.com/chapmanjacobd/shrink/internal/models"
@@ -24,9 +23,7 @@ func NewAudioProcessor(ffmpeg *ffmpeg.FFmpegProcessor) *AudioProcessor {
 }
 
 func (p *AudioProcessor) CanProcess(m *models.ShrinkMedia) bool {
-	mt := strings.ToLower(m.MediaType)
-	return mt == "audio" || mt == "audiobook" || strings.HasPrefix(mt, "audio/") || strings.Contains(mt, " audio") ||
-		((utils.AudioExtensionMap[m.Ext] || utils.VideoExtensionMap[m.Ext]) && m.VideoCount == 0 && m.AudioCount >= 1)
+	return utils.AudioExtensionMap[m.Ext]
 }
 
 func (p *AudioProcessor) EstimateSize(m *models.ShrinkMedia, cfg *models.ProcessorConfig) models.ProcessableInfo {

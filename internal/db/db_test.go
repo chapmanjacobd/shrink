@@ -68,31 +68,6 @@ func TestResolveDatabasePath(t *testing.T) {
 	}
 }
 
-func TestPopulateMediaType(t *testing.T) {
-	db, _ := Connect(":memory:")
-	defer db.Close()
-	InitDB(db)
-
-	// Insert file without media_type
-	db.Exec("INSERT INTO media (path, size) VALUES ('test.mp4', 1000)")
-
-	// Run migrate/populate
-	populateMediaType(db)
-
-	var mediaType string
-	db.QueryRow("SELECT media_type FROM media WHERE path = 'test.mp4'").Scan(&mediaType)
-	if mediaType != "video" {
-		t.Errorf("expected video, got %s", mediaType)
-	}
-}
-
-func TestBuildExtensionList(t *testing.T) {
-	list := buildExtensionList(map[string]bool{".mp4": true})
-	if list != "'mp4'" {
-		t.Errorf("got %s", list)
-	}
-}
-
 func TestMigrationToInteger(t *testing.T) {
 	tempDir := t.TempDir()
 	dbPath := filepath.Join(tempDir, "migration.db")

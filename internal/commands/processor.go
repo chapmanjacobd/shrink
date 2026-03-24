@@ -3,7 +3,6 @@ package commands
 import (
 	"github.com/chapmanjacobd/shrink/internal/ffmpeg"
 	"github.com/chapmanjacobd/shrink/internal/models"
-	"github.com/chapmanjacobd/shrink/internal/utils"
 )
 
 // ============================================================================
@@ -35,16 +34,29 @@ type MediaRegistry struct {
 	processors []models.MediaProcessor
 }
 
-// NewProcessorRegistry creates a new registry with all available processors
-func NewProcessorRegistry(ffmpeg *ffmpeg.FFmpegProcessor) *MediaRegistry {
+// NewProcessorRegistry creates a new registry with available processors based on flags
+func NewProcessorRegistry(ffmpeg *ffmpeg.FFmpegProcessor, videoOnly, audioOnly, imageOnly, textOnly bool) *MediaRegistry {
+	all := !videoOnly && !audioOnly && !imageOnly && !textOnly
+	var processors []models.MediaProcessor
+
+	if all || videoOnly {
+		processors = append(processors, NewVideoProcessor(ffmpeg))
+	}
+	if all || audioOnly {
+		processors = append(processors, NewAudioProcessor(ffmpeg))
+	}
+	if all || imageOnly {
+		processors = append(processors, NewImageProcessor())
+	}
+	if all || textOnly {
+		processors = append(processors, NewTextProcessor())
+	}
+
+	// Always add ArchiveProcessor as it might contain processable files of any requested type
+	processors = append(processors, NewArchiveProcessor(ffmpeg))
+
 	return &MediaRegistry{
-		processors: []models.MediaProcessor{
-			NewVideoProcessor(ffmpeg),
-			NewAudioProcessor(ffmpeg),
-			NewImageProcessor(),
-			NewTextProcessor(),
-			NewArchiveProcessor(ffmpeg),
-		},
+		processors: processors,
 	}
 }
 
@@ -61,22 +73,4 @@ func (r *MediaRegistry) GetProcessor(m *models.ShrinkMedia) models.MediaProcesso
 // GetAllProcessors returns all registered processors
 func (r *MediaRegistry) GetAllProcessors() []models.MediaProcessor {
 	return r.processors
-}
-
-// ============================================================================
-// Helper Utilities
-// ============================================================================
-
-// shouldConvertToAVIF returns true if the extension should be converted to AVIF
-func shouldConvertToAVIF(ext string) bool {
-	if !utils.ImageExtensionMap[ext] {
-		return false
-	}
-	// Skip vector formats and already-optimized formats
-	skipExts := map[string]bool{
-		".avif": true, // Already AVIF
-		".svg":  true, // Vector format
-		".svgz": true, // Compressed SVG
-	}
-	return !skipExts[ext]
 }

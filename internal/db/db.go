@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/chapmanjacobd/shrink/internal/utils"
 	_ "github.com/mattn/go-sqlite3"
 )
 
@@ -199,118 +198,7 @@ func MigrateDB(db *sql.DB) error {
 		}
 	}
 
-	// Populate media_type based on file extension if not already set
-	if err := populateMediaType(db); err != nil {
-		return fmt.Errorf("failed to populate media_type: %w", err)
-	}
-
 	return nil
-}
-
-// populateMediaType fills in NULL media_type values based on file extension
-func populateMediaType(db *sql.DB) error {
-	// Check if there are any rows with NULL or empty media_type
-	var count int
-	err := db.QueryRow(`SELECT COUNT(*) FROM media WHERE media_type IS NULL OR media_type = ''`).Scan(&count)
-	if err != nil {
-		return err
-	}
-	if count == 0 {
-		return nil
-	}
-
-	// Use IMMEDIATE transaction to acquire write lock upfront
-	tx, err := BeginImmediate(db)
-	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	defer tx.Rollback() // Rollback if commit fails or on error
-
-	// Build extension lists from utils
-	videoExts := buildExtensionList(utils.VideoExtensionMap)
-	audioExts := buildExtensionList(utils.AudioExtensionMap)
-	imageExts := buildExtensionList(utils.ImageExtensionMap)
-	textExts := buildExtensionList(utils.TextExtensionMap)
-	archiveExts := buildExtensionList(utils.ArchiveExtensionMap)
-
-	// Update media_type based on file extension
-	if videoExts != "" {
-		_, err = tx.Exec(`
-			UPDATE media SET media_type = 'video'
-			WHERE (media_type IS NULL OR media_type = '')
-			AND LOWER(SUBSTR(path, INSTR(path, '.') + 1)) IN (` + videoExts + `)
-		`)
-		if err != nil {
-			return err
-		}
-	}
-
-	if audioExts != "" {
-		_, err = tx.Exec(`
-			UPDATE media SET media_type = 'audio'
-			WHERE (media_type IS NULL OR media_type = '')
-			AND LOWER(SUBSTR(path, INSTR(path, '.') + 1)) IN (` + audioExts + `)
-		`)
-		if err != nil {
-			return err
-		}
-	}
-
-	// Audiobook extensions (m4b, aa, aax) - subset of audio
-	_, err = tx.Exec(`
-		UPDATE media SET media_type = 'audiobook'
-		WHERE (media_type IS NULL OR media_type = '')
-		AND LOWER(SUBSTR(path, INSTR(path, '.') + 1)) IN ('m4b', 'aa', 'aax')
-	`)
-	if err != nil {
-		return err
-	}
-
-	if imageExts != "" {
-		_, err = tx.Exec(`
-			UPDATE media SET media_type = 'image'
-			WHERE (media_type IS NULL OR media_type = '')
-			AND LOWER(SUBSTR(path, INSTR(path, '.') + 1)) IN (` + imageExts + `)
-		`)
-		if err != nil {
-			return err
-		}
-	}
-
-	if textExts != "" {
-		_, err = tx.Exec(`
-			UPDATE media SET media_type = 'text'
-			WHERE (media_type IS NULL OR media_type = '')
-			AND LOWER(SUBSTR(path, INSTR(path, '.') + 1)) IN (` + textExts + `)
-		`)
-		if err != nil {
-			return err
-		}
-	}
-
-	if archiveExts != "" {
-		_, err = tx.Exec(`
-			UPDATE media SET media_type = 'archive'
-			WHERE (media_type IS NULL OR media_type = '')
-			AND LOWER(SUBSTR(path, INSTR(path, '.') + 1)) IN (` + archiveExts + `)
-		`)
-		if err != nil {
-			return err
-		}
-	}
-
-	return tx.Commit()
-}
-
-// buildExtensionList converts a map of extensions to a SQL-ready comma-separated string
-func buildExtensionList(extMap map[string]bool) string {
-	var exts []string
-	for ext := range extMap {
-		// Remove leading dot for SQL comparison
-		cleanExt := strings.TrimPrefix(ext, ".")
-		exts = append(exts, "'"+cleanExt+"'")
-	}
-	return strings.Join(exts, ",")
 }
 
 // migrateToIntegerDuration converts the duration column to INTEGER

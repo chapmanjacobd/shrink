@@ -47,24 +47,6 @@ func LoadMediaFromDB(db *sql.DB, forceShrink bool, videoOnly, audioOnly, imageOn
 		query += " AND COALESCE(is_shrinked, 0) = 0"
 	}
 
-	// Filter by media type (prefilter in database)
-	var typeConditions []string
-	if videoOnly {
-		typeConditions = append(typeConditions, "media_type = 'video'")
-	}
-	if audioOnly {
-		typeConditions = append(typeConditions, "media_type = 'audio'", "media_type = 'audiobook'")
-	}
-	if imageOnly {
-		typeConditions = append(typeConditions, "media_type = 'image'")
-	}
-	if textOnly {
-		typeConditions = append(typeConditions, "media_type = 'text'")
-	}
-	if len(typeConditions) > 0 {
-		query += " AND (" + strings.Join(typeConditions, " OR ") + ")"
-	}
-
 	rows, err := db.Query(query)
 	if err != nil {
 		return nil, err
@@ -150,10 +132,7 @@ func MarkShrinked(databases []*sql.DB, path string) {
 }
 
 // BulkMarkOptimizedExtensions marks files with already-optimized extensions as shrinked
-// This includes: .av1.mkv, .opus, .mka, .avif, .oga, .ogg
 func BulkMarkOptimizedExtensions(databases []*sql.DB) {
-	optimizedExtensions := []string{".av1.mkv", ".opus", ".mka", ".avif", ".oga", ".ogg"}
-
 	for _, sqlDB := range databases {
 		// Use IMMEDIATE transaction to acquire write lock upfront
 		tx, err := BeginImmediate(sqlDB)
@@ -162,7 +141,7 @@ func BulkMarkOptimizedExtensions(databases []*sql.DB) {
 			continue
 		}
 
-		for _, ext := range optimizedExtensions {
+		for _, ext := range utils.OptimizedExtensions {
 			// Use LIKE with LOWER to handle case-insensitive matching
 			_, err := tx.Exec(
 				"UPDATE media SET is_shrinked = 1 WHERE LOWER(path) LIKE ? AND COALESCE(time_deleted, 0) = 0",

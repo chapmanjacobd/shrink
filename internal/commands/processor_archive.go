@@ -48,7 +48,7 @@ func extractLSARJSON(output []byte) []byte {
 }
 
 func (p *ArchiveProcessor) CanProcess(m *models.ShrinkMedia) bool {
-	return m.MediaType == "archive" || utils.ArchiveExtensionMap[m.Ext]
+	return utils.ArchiveExtensionMap[m.Ext]
 }
 
 // ExtractAndProcess extracts archive contents and processes media recursively
@@ -120,7 +120,7 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *models.Shri
 		ext := strings.ToLower(filepath.Ext(path))
 		fileSize := info.Size()
 
-		if shouldConvertToAVIF(ext) {
+		if utils.ImageExtensionMap[ext] && !utils.IsOptimized(ext) {
 			imgMedia := &models.ShrinkMedia{Path: path, Size: fileSize, Ext: ext, Category: "Image"}
 			info := imageProc.EstimateSize(imgMedia, cfg)
 			if imgMedia.ShouldShrink(info.FutureSize, cfg) {
@@ -288,7 +288,7 @@ func (p *ArchiveProcessor) EstimateSizeForArchive(m *models.ShrinkMedia, cfg *mo
 		// Nested archives - use compressed size for estimation
 		// We don't extract during estimation to avoid temp space issues
 		// The actual contents will be analyzed during extraction
-		if content.MediaType == "archive" {
+		if ext != "" && utils.ArchiveExtensionMap[ext] {
 			slog.Info("Found nested archive", "path", content.Path, "compressedSize", content.CompressedSize)
 			isProcessable = true
 			// Estimate based on compressed size (assume video content for simplicity)
@@ -300,7 +300,7 @@ func (p *ArchiveProcessor) EstimateSizeForArchive(m *models.ShrinkMedia, cfg *mo
 		}
 
 		// Video files
-		if !isProcessable && (content.MediaType == "video" || (ext != "" && utils.VideoExtensionMap[ext])) {
+		if !isProcessable && ext != "" && utils.VideoExtensionMap[ext] {
 			isProcessable = true
 			duration := content.Duration
 			if duration <= 0 {
@@ -311,7 +311,7 @@ func (p *ArchiveProcessor) EstimateSizeForArchive(m *models.ShrinkMedia, cfg *mo
 			processingTime = int(math.Ceil(duration / cfg.Video.TranscodingVideoRate))
 		}
 		// Audio files
-		if content.MediaType == "audio" || (ext != "" && utils.AudioExtensionMap[ext]) {
+		if !isProcessable && ext != "" && utils.AudioExtensionMap[ext] {
 			isProcessable = true
 			duration := content.Duration
 			if duration <= 0 {
@@ -321,15 +321,15 @@ func (p *ArchiveProcessor) EstimateSizeForArchive(m *models.ShrinkMedia, cfg *mo
 			processingTime = int(math.Ceil(duration / cfg.Audio.TranscodingAudioRate))
 		}
 		// Image files
-		if content.MediaType == "image" || (ext != "" && utils.ImageExtensionMap[ext]) {
-			if ext != ".avif" { // Skip existing AVIF
+		if !isProcessable && ext != "" && utils.ImageExtensionMap[ext] {
+			if !utils.IsOptimized(ext) { // Skip existing optimized formats
 				isProcessable = true
 				futureSize = cfg.Image.TargetImageSize
 				processingTime = int(cfg.Image.TranscodingImageTime)
 			}
 		}
 		// Text/Ebook files
-		if content.MediaType == "text" || (ext != "" && utils.TextExtensionMap[ext]) {
+		if !isProcessable && ext != "" && utils.TextExtensionMap[ext] {
 			isProcessable = true
 			// Rough estimate for ebooks (compressed text is small)
 			futureSize = cfg.Image.TargetImageSize * 50
@@ -706,35 +706,15 @@ func (p *ArchiveProcessor) lsarWithStatus(path string) ([]models.ShrinkMedia, bo
 	var media []models.ShrinkMedia
 	for _, f := range result.LsarContents {
 		ext := strings.ToLower(filepath.Ext(f.Filename))
-		mediaType := detectMediaTypeFromExt(ext)
 
 		media = append(media, models.ShrinkMedia{
 			Path:           f.Filename,
 			Size:           f.Size,
 			CompressedSize: f.CompressedSize,
-			MediaType:      mediaType,
 			Ext:            ext,
 		})
 	}
 	return media, lsarFailed
-}
-
-// detectMediaTypeFromExt determines media type from file extension
-func detectMediaTypeFromExt(ext string) string {
-	switch {
-	case utils.VideoExtensionMap[ext]:
-		return "video"
-	case utils.AudioExtensionMap[ext]:
-		return "audio"
-	case utils.ImageExtensionMap[ext]:
-		return "image"
-	case utils.TextExtensionMap[ext]:
-		return "text"
-	case utils.ArchiveExtensionMap[ext]:
-		return "archive"
-	default:
-		return ""
-	}
 }
 
 // flattenWrapperFolders moves files from single subfolders up to the parent directory

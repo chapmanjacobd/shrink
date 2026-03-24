@@ -3,7 +3,6 @@ package commands
 import (
 	"context"
 	"math"
-	"strings"
 
 	"github.com/chapmanjacobd/shrink/internal/ffmpeg"
 	"github.com/chapmanjacobd/shrink/internal/models"
@@ -24,9 +23,7 @@ func NewVideoProcessor(ffmpeg *ffmpeg.FFmpegProcessor) *VideoProcessor {
 }
 
 func (p *VideoProcessor) CanProcess(m *models.ShrinkMedia) bool {
-	mt := strings.ToLower(m.MediaType)
-	return mt == "video" || strings.HasPrefix(mt, "video/") || strings.Contains(mt, " video") ||
-		(utils.VideoExtensionMap[m.Ext] && m.VideoCount >= 1)
+	return utils.VideoExtensionMap[m.Ext]
 }
 
 func (p *VideoProcessor) EstimateSize(m *models.ShrinkMedia, cfg *models.ProcessorConfig) models.ProcessableInfo {

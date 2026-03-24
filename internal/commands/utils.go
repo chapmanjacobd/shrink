@@ -12,7 +12,7 @@ import (
 	"github.com/chapmanjacobd/shrink/internal/utils"
 )
 
-// scanDirectory scans a directory recursively for media files
+// scanDirectory scans a directory recursively for files
 func (c *ShrinkCmd) scanDirectory(dirPath string) ([]models.ShrinkMedia, error) {
 	var media []models.ShrinkMedia
 
@@ -22,19 +22,14 @@ func (c *ShrinkCmd) scanDirectory(dirPath string) ([]models.ShrinkMedia, error) 
 			return nil
 		}
 
-		if info.IsDir() || strings.HasPrefix(info.Name(), ".") {
+		if info.IsDir() {
+			if path != dirPath && strings.HasPrefix(info.Name(), ".") {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 
 		ext := strings.ToLower(filepath.Ext(path))
-		if !c.isMediaFile(path, info, ext) {
-			return nil
-		}
-
-		if !c.shouldProcessByFilter(ext) {
-			return nil
-		}
-
 		m := c.createMediaEntry(path, info, ext)
 		c.enrichMetadata(&m)
 
@@ -45,39 +40,11 @@ func (c *ShrinkCmd) scanDirectory(dirPath string) ([]models.ShrinkMedia, error) 
 	return media, err
 }
 
-func (c *ShrinkCmd) isMediaFile(path string, info os.FileInfo, ext string) bool {
-	isMedia := utils.MediaExtensionMap[ext] || utils.ArchiveExtensionMap[ext]
-	if !isMedia {
-		if ext != "" {
-			c.unknownExtensions[ext] += info.Size()
-		}
-		return false
-	}
-	return true
-}
-
-func (c *ShrinkCmd) shouldProcessByFilter(ext string) bool {
-	if c.VideoOnly && !utils.VideoExtensionMap[ext] {
-		return false
-	}
-	if c.AudioOnly && !utils.AudioExtensionMap[ext] {
-		return false
-	}
-	if c.ImageOnly && !utils.ImageExtensionMap[ext] {
-		return false
-	}
-	if c.TextOnly && !utils.TextExtensionMap[ext] {
-		return false
-	}
-	return true
-}
-
 func (c *ShrinkCmd) createMediaEntry(path string, info os.FileInfo, ext string) models.ShrinkMedia {
 	m := models.ShrinkMedia{
-		Path:      path,
-		Size:      info.Size(),
-		Ext:       ext,
-		MediaType: detectMediaTypeFromExt(ext),
+		Path: path,
+		Size: info.Size(),
+		Ext:  ext,
 	}
 
 	if utils.VideoExtensionMap[ext] {

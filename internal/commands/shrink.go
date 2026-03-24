@@ -20,9 +20,15 @@ import (
 	"github.com/chapmanjacobd/shrink/internal/utils"
 )
 
+// UnknownExt tracks the count and total size of files with an unknown extension
+type UnknownExt struct {
+	Count int
+	Size  int64
+}
+
 // ShrinkCmd is the main command for shrinking media files
 type ShrinkCmd struct {
-	unknownExtensions map[string]int64
+	unknownExtensions map[string]UnknownExt
 	skippedByTool     map[string]int64 // Tracks known extensions skipped due to missing tools (e.g., "ffmpeg: mkv")
 	sqlDBs            []*sql.DB
 	Databases         []string `arg:"" required:"" help:"SQLite database files or directories to scan"`
@@ -34,7 +40,7 @@ func (c *ShrinkCmd) Run(ctx *kong.Context) error {
 	models.SetupLogging(c.Verbose)
 	defer c.closeDatabases()
 
-	c.unknownExtensions = make(map[string]int64)
+	c.unknownExtensions = make(map[string]UnknownExt)
 	c.skippedByTool = make(map[string]int64)
 
 	// Build processor configuration
@@ -50,7 +56,7 @@ func (c *ShrinkCmd) Run(ctx *kong.Context) error {
 
 	// Initialize components
 	ffmpegProc := ffmpeg.NewFFmpegProcessor(cfg)
-	registry := NewProcessorRegistry(ffmpegProc)
+	registry := NewProcessorRegistry(ffmpegProc, c.VideoOnly, c.AudioOnly, c.ImageOnly, c.TextOnly)
 	metrics := NewShrinkMetrics()
 
 	// Wrap the default logger to coordinate with the progress bar
@@ -234,33 +240,56 @@ func (c *ShrinkCmd) loadAllMedia() ([]models.ShrinkMedia, error) {
 // Media Filtering and Analysis
 // ============================================================================
 
-// filterByTools filters media based on available tools
+// filterByTools filters media based on available tools and requested categories
 func (c *ShrinkCmd) filterByTools(media []models.ShrinkMedia, registry *MediaRegistry, tools InstalledTools) []models.ShrinkMedia {
 	filtered := make([]models.ShrinkMedia, 0, len(media))
 
 	for _, m := range media {
-		tool, canProcess := c.canProcessMedia(&m, registry, tools)
-		if canProcess {
-			filtered = append(filtered, m)
-		} else if tool != "" {
-			// Track known extensions skipped due to missing tools
+		// Ignore MediaType from DB, determine only by filterByTool
+		m.MediaType = ""
+
+		// Skip if already optimized
+		if utils.IsOptimized(m.Ext) {
+			// Mark as shrinked in all DBs if it came from a DB
+			db.MarkShrinked(c.sqlDBs, m.Path)
+			continue
+		}
+
+		p := registry.GetProcessor(&m)
+		if p == nil {
+			// If it's a known media/archive extension, it was filtered out by flags
+			if utils.MediaExtensionMap[m.Ext] || utils.ArchiveExtensionMap[m.Ext] {
+				continue
+			}
+
+			// Truly unknown extension
+			ext := m.Ext
+			if ext == "" {
+				ext = "no extension"
+			}
+			entry := c.unknownExtensions[ext]
+			entry.Count++
+			entry.Size += m.Size
+			c.unknownExtensions[ext] = entry
+			continue
+		}
+
+		// Set category and media type from processor
+		m.Category = p.Category()
+		m.MediaType = strings.ToLower(m.Category)
+
+		// Check if tool is available
+		tool := p.RequiredTool()
+		if !tools.IsAvailable(tool) {
 			key := fmt.Sprintf("%s: %s", tool, m.Ext)
 			c.skippedByTool[key] += m.Size
+			continue
 		}
+
+		filtered = append(filtered, m)
 	}
 
 	return filtered
-}
-
-// canProcessMedia checks if a media item can be processed with available tools
-// Returns the tool name and whether it can process the media
-func (c *ShrinkCmd) canProcessMedia(m *models.ShrinkMedia, registry *MediaRegistry, tools InstalledTools) (string, bool) {
-	p := registry.GetProcessor(m)
-	if p == nil {
-		return "", false
-	}
-	tool := p.RequiredTool()
-	return tool, tools.IsAvailable(tool)
 }
 
 func (c *ShrinkCmd) SortByEfficiency(media []models.ShrinkMedia) {
@@ -352,24 +381,27 @@ func (c *ShrinkCmd) PrintUnknownExtensions() {
 	}
 
 	fmt.Println("Unknown File Extensions Scanned")
-	headers := []string{"Extension", "Total Size"}
+	headers := []string{"Extension", "Count", "Total Size"}
 	var rows [][]string
 
 	// Sort by size descending
-	type extSize struct {
-		ext  string
-		size int64
+	type extEntry struct {
+		ext   string
+		count int
+		size  int64
 	}
-	var sorted []extSize
+	var sorted []extEntry
 
-	for ext, size := range c.unknownExtensions {
-		sorted = append(sorted, extSize{ext, size})
+	for ext, entry := range c.unknownExtensions {
+		sorted = append(sorted, extEntry{ext, entry.Count, entry.Size})
 	}
-	for ext, size := range c.skippedByTool {
-		sorted = append(sorted, extSize{ext, size})
+	// Note: skippedByTool only has size, no count readily available per file here,
+	// but for consistency we'll just show what we have.
+	for key, size := range c.skippedByTool {
+		sorted = append(sorted, extEntry{key, 0, size})
 	}
 
-	slices.SortFunc(sorted, func(a, b extSize) int {
+	slices.SortFunc(sorted, func(a, b extEntry) int {
 		if a.size > b.size {
 			return -1
 		} else if a.size < b.size {
@@ -379,7 +411,11 @@ func (c *ShrinkCmd) PrintUnknownExtensions() {
 	})
 
 	for _, es := range sorted {
-		rows = append(rows, []string{es.ext, utils.FormatSize(es.size)})
+		countStr := strconv.Itoa(es.count)
+		if es.count == 0 {
+			countStr = "-"
+		}
+		rows = append(rows, []string{es.ext, countStr, utils.FormatSize(es.size)})
 	}
 	utils.PrintTable(headers, rows)
 	fmt.Println()

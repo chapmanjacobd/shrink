@@ -283,6 +283,20 @@ func ParsePercentOrBytes(s string) float64 {
 	return n
 }
 
+var OptimizedExtensions = []string{".av1.mkv", ".opus", ".mka", ".avif", ".oga", ".ogg", ".svg", ".svgz"}
+
+// IsOptimized checks if a file extension is already optimized
+func IsOptimized(ext string) bool {
+	ext = strings.ToLower(ext)
+	// Check for composite extensions like .av1.mkv or simple ones like .opus
+	for _, opt := range OptimizedExtensions {
+		if strings.HasSuffix(ext, opt) {
+			return true
+		}
+	}
+	return false
+}
+
 var SQLiteExtensions = []string{".sqlite", ".sqlite3", ".db", ".db3", ".s3db", ".sl3"}
 
 var AudioExtensions = []string{
