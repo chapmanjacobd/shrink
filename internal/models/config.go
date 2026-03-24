@@ -77,7 +77,7 @@ type CommonConfig struct {
 	VerboseFFmpeg      bool
 	IncludeTimecode    bool
 	// Memory monitoring
-	MemoryLimit        int64 // Memory limit in bytes (0 = no limit)
+	MemoryLimit         int64 // Memory limit in bytes (0 = no limit)
 	MemoryCheckInterval int   // Memory check interval in milliseconds
 }
 

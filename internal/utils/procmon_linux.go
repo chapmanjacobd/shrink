@@ -115,8 +115,8 @@ func readStatusVmRSS(pid int) (int64, error) {
 		return 0, err
 	}
 
-	lines := strings.Split(string(data), "\n")
-	for _, line := range lines {
+	lines := strings.SplitSeq(string(data), "\n")
+	for line := range lines {
 		if strings.HasPrefix(line, "VmRSS:") {
 			fields := strings.Fields(line)
 			if len(fields) >= 2 {

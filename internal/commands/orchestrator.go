@@ -345,7 +345,7 @@ func (e *Engine) handleProcessingError(m models.ShrinkMedia, result models.Proce
 
 	// Don't move or delete files if processing was interrupted by user or system signal
 	isInterrupted := result.Error == context.Canceled || strings.Contains(result.Error.Error(), "signal: killed")
-	
+
 	// Check for memory limit exceeded (environment error)
 	isEnvironmentErr := result.StopAll || strings.Contains(result.Error.Error(), "exceeded memory limit")
 
@@ -486,7 +486,7 @@ func (e *Engine) finalizeFileSwap(m models.ShrinkMedia, result models.ProcessRes
 	} else {
 		// Delete new files, keep original - mark as too large (don't mark deleted)
 		db.MarkTooLarge(e.sqlDBs, m.Path)
-		
+
 		for _, out := range result.Outputs {
 			if !pathsEqual(out.Path, m.Path) && !pathsEqual(out.Path, result.SourcePath) {
 				os.RemoveAll(out.Path)

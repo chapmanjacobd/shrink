@@ -109,8 +109,8 @@ func (p *FFmpegProcessor) Process(ctx context.Context, m *models.ShrinkMedia, cf
 
 	if cfg.Common.MemoryLimit > 0 {
 		monCfg := utils.ProcessMonitorConfig{
-			MemoryLimit:    cfg.Common.MemoryLimit,
-			CheckInterval:  time.Duration(cfg.Common.MemoryCheckInterval) * time.Millisecond,
+			MemoryLimit:   cfg.Common.MemoryLimit,
+			CheckInterval: time.Duration(cfg.Common.MemoryCheckInterval) * time.Millisecond,
 		}
 
 		cmd := exec.CommandContext(ctx, ffmpeg, args...)

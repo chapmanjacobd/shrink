@@ -3,8 +3,9 @@
 package utils
 
 import (
-	"golang.org/x/sys/windows"
 	"unsafe"
+
+	"golang.org/x/sys/windows"
 )
 
 // GetTotalRAM returns the total physical memory in bytes.
@@ -18,12 +19,12 @@ func GetTotalRAM() int64 {
 }
 
 var (
-	kernel32                  = windows.NewLazySystemDLL("kernel32.dll")
-	procOpenProcess           = kernel32.NewProc("OpenProcess")
-	procCloseHandle           = kernel32.NewProc("CloseHandle")
-	procEnumProcesses         = kernel32.NewProc("K32EnumProcesses")
-	procGetProcessMemoryInfo  = kernel32.NewProc("K32GetProcessMemoryInfo")
-	psapi                     = windows.NewLazySystemDLL("psapi.dll")
+	kernel32                 = windows.NewLazySystemDLL("kernel32.dll")
+	procOpenProcess          = kernel32.NewProc("OpenProcess")
+	procCloseHandle          = kernel32.NewProc("CloseHandle")
+	procEnumProcesses        = kernel32.NewProc("K32EnumProcesses")
+	procGetProcessMemoryInfo = kernel32.NewProc("K32GetProcessMemoryInfo")
+	psapi                    = windows.NewLazySystemDLL("psapi.dll")
 )
 
 const (
@@ -33,16 +34,16 @@ const (
 
 // PROCESS_MEMORY_COUNTERS structure for GetProcessMemoryInfo
 type processMemoryCounters struct {
-	CB                     uint32
-	PageFaultCount         uint32
-	PeakWorkingSetSize     uintptr
-	WorkingSetSize         uintptr
-	QuotaPeakPagedPoolUsage  uintptr
-	QuotaPagedPoolUsage      uintptr
+	CB                         uint32
+	PageFaultCount             uint32
+	PeakWorkingSetSize         uintptr
+	WorkingSetSize             uintptr
+	QuotaPeakPagedPoolUsage    uintptr
+	QuotaPagedPoolUsage        uintptr
 	QuotaPeakNonPagedPoolUsage uintptr
-	QuotaNonPagedPoolUsage   uintptr
-	PagefileUsage          uint32
-	PeakPagefileUsage      uint32
+	QuotaNonPagedPoolUsage     uintptr
+	PagefileUsage              uint32
+	PeakPagefileUsage          uint32
 }
 
 // killProcessGroupImpl kills a process and all its children on Windows.
@@ -132,7 +133,7 @@ func getChildProcesses(parentPid int) []int {
 
 	ret, _, _ := procEnumProcesses.Call(
 		uintptr(unsafe.Pointer(&pids[0])),
-		uintptr(len(pids)) * 4,
+		uintptr(len(pids))*4,
 		uintptr(unsafe.Pointer(&needed)),
 	)
 	if ret == 0 {

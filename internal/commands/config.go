@@ -172,13 +172,7 @@ func (c *Config) buildCommonConfig() models.CommonConfig {
 		maxLimit := int64(12 * 1024 * 1024 * 1024)
 		if total > 0 {
 			// default: min(12GB, Total RAM - 2GB)
-			limit = total - (2 * 1024 * 1024 * 1024)
-			if limit > maxLimit {
-				limit = maxLimit
-			}
-			if limit < 0 {
-				limit = 0
-			}
+			limit = max(min(total-(2*1024*1024*1024), maxLimit), 0)
 		} else {
 			// RAM couldn't be determined, default to 12GB
 			limit = maxLimit

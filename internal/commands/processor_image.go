@@ -83,38 +83,38 @@ func (p *ImageProcessor) processImage(ctx context.Context, m *models.ShrinkMedia
 	// Setup memory monitoring if configured
 	var output []byte
 	var err error
-	
+
 	if cfg.Common.MemoryLimit > 0 {
 		cmd := exec.CommandContext(ctx, imCmd, args...)
 		utils.SetupProcessGroup(cmd)
-		
+
 		stderrPipe, pipeErr := cmd.StderrPipe()
 		if pipeErr != nil {
 			os.Remove(outputPath)
 			return models.ProcessResult{SourcePath: m.Path, Error: pipeErr, StopAll: true}
 		}
-		
+
 		monCfg := utils.ProcessMonitorConfig{
-			MemoryLimit:    cfg.Common.MemoryLimit,
-			CheckInterval:  time.Duration(cfg.Common.MemoryCheckInterval) * time.Millisecond,
+			MemoryLimit:   cfg.Common.MemoryLimit,
+			CheckInterval: time.Duration(cfg.Common.MemoryCheckInterval) * time.Millisecond,
 		}
 		monitor := utils.NewProcessMonitor(cmd, monCfg)
-		
+
 		if startErr := cmd.Start(); startErr != nil {
 			os.Remove(outputPath)
 			return models.ProcessResult{SourcePath: m.Path, Error: startErr, StopAll: true}
 		}
-		
+
 		monitor.Start(ctx)
 		defer monitor.Stop()
-		
+
 		waitErr := cmd.Wait()
 		output, _ = io.ReadAll(stderrPipe)
-		
+
 		if waitErr != nil {
 			// Clean up on failure
 			os.Remove(outputPath)
-			
+
 			// Check if memory limit was exceeded
 			if monitor.Exceeded() {
 				return models.ProcessResult{
@@ -124,7 +124,7 @@ func (p *ImageProcessor) processImage(ctx context.Context, m *models.ShrinkMedia
 					StopAll:    true,
 				}
 			}
-			
+
 			// Categorize ImageMagick errors
 			errorLog := strings.Split(string(output), "\n")
 			isUnsupported := isImageMagickUnsupportedError(errorLog)

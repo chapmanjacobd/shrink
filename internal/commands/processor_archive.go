@@ -121,8 +121,8 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *models.Shri
 
 	if p.cfg.Common.MemoryLimit > 0 {
 		monCfg := utils.ProcessMonitorConfig{
-			MemoryLimit:    p.cfg.Common.MemoryLimit,
-			CheckInterval:  time.Duration(p.cfg.Common.MemoryCheckInterval) * time.Millisecond,
+			MemoryLimit:   p.cfg.Common.MemoryLimit,
+			CheckInterval: time.Duration(p.cfg.Common.MemoryCheckInterval) * time.Millisecond,
 		}
 
 		cmd := exec.CommandContext(ctx, unar, "-force-rename", "-o", outputDir, filepath.Base(m.Path))
@@ -305,17 +305,17 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *models.Shri
 }
 
 // EstimateSizeForArchive estimates size using compressed size and inspects archive contents
-// Returns: futureSize, processingTime, hasProcessableContent, totalArchiveSize
-func (p *ArchiveProcessor) EstimateSizeForArchive(m *models.ShrinkMedia, cfg *models.ProcessorConfig) (int64, int, bool, int64) {
+// Returns: futureSize, processingTime, hasProcessableContent, totalArchiveSize, isBroken
+func (p *ArchiveProcessor) EstimateSizeForArchive(m *models.ShrinkMedia, cfg *models.ProcessorConfig) (int64, int, bool, int64, bool) {
 	slog.Debug("EstimateSizeForArchive starting", "path", m.Path)
 	if !p.unarInstalled {
-		return 0, 0, false, 0
+		return 0, 0, false, 0, false
 	}
 
 	// Skip secondary parts of multi-part archives to avoid double processing
 	if isSecondaryPart(m.Path) {
 		slog.Debug("Skipping secondary archive part", "path", m.Path)
-		return 0, 0, false, 0
+		return 0, 0, false, 0, false
 	}
 
 	// Get archive contents and check for multi-part volumes
@@ -331,7 +331,7 @@ func (p *ArchiveProcessor) EstimateSizeForArchive(m *models.ShrinkMedia, cfg *mo
 	// Check for missing parts in sequence for known multi-part types
 	if isBrokenSequence(m.Path, partFiles) {
 		slog.Info("Broken sequence detected for archive", "path", m.Path)
-		return 0, 0, false, 0
+		return 0, 0, false, 0, true
 	}
 
 	// Sum up sizes
@@ -345,19 +345,19 @@ func (p *ArchiveProcessor) EstimateSizeForArchive(m *models.ShrinkMedia, cfg *mo
 				totalArchiveSize += info.Size()
 			} else {
 				// Missing part file - archive is broken
-				return 0, 0, false, 0
+				return 0, 0, false, 0, true
 			}
 		}
 	}
 
 	// If lsar failed (empty contents due to error or missing parts), archive is broken
 	if lsarFailed {
-		return 0, 0, false, 0
+		return 0, 0, false, 0, true
 	}
 
 	if len(contents) == 0 {
 		// Archive has no contents but lsar didn't fail - just no processable content
-		return 0, 0, false, m.Size
+		return 0, 0, false, m.Size, false
 	}
 	var totalFutureSize int64
 	var totalProcessingTime int
@@ -431,13 +431,12 @@ func (p *ArchiveProcessor) EstimateSizeForArchive(m *models.ShrinkMedia, cfg *mo
 	}
 
 	slog.Debug("EstimateSizeForArchive complete", "path", m.Path, "futureSize", totalFutureSize, "processable", hasProcessableContent)
-	return totalFutureSize, totalProcessingTime, hasProcessableContent, totalArchiveSize
+	return totalFutureSize, totalProcessingTime, hasProcessableContent, totalArchiveSize, false
 }
 
 func (p *ArchiveProcessor) EstimateSize(m *models.ShrinkMedia, cfg *models.ProcessorConfig) models.ProcessableInfo {
 	slog.Debug("EstimateSize starting", "path", m.Path)
-	futureSize, processingTime, hasProcessable, totalArchiveSize := p.EstimateSizeForArchive(m, cfg)
-	isBroken := false
+	futureSize, processingTime, hasProcessable, totalArchiveSize, isBroken := p.EstimateSizeForArchive(m, cfg)
 	var partFiles []string
 	if !hasProcessable {
 		if totalArchiveSize == 0 {
@@ -665,8 +664,8 @@ func (p *ArchiveProcessor) getPartFilesImpl(path string) []string {
 				slog.Debug("lsar StderrPipe failed", "error", pipeErr)
 			} else {
 				monCfg := utils.ProcessMonitorConfig{
-					MemoryLimit:    p.cfg.Common.MemoryLimit,
-					CheckInterval:  time.Duration(p.cfg.Common.MemoryCheckInterval) * time.Millisecond,
+					MemoryLimit:   p.cfg.Common.MemoryLimit,
+					CheckInterval: time.Duration(p.cfg.Common.MemoryCheckInterval) * time.Millisecond,
 				}
 				monitor := utils.NewProcessMonitor(lsarCmd, monCfg)
 
@@ -701,7 +700,7 @@ func (p *ArchiveProcessor) getPartFilesImpl(path string) []string {
 			slog.Warn("lsar XADVolumes call timed out", "path", path)
 			err = fmt.Errorf("lsar timeout")
 		}
-		
+
 		if err == nil || len(lsarOutput) > 0 {
 			slog.Debug("lsar XADVolumes call returned", "path", path, "output_len", len(lsarOutput))
 			jsonBytes := extractLSARJSON(lsarOutput)
@@ -760,7 +759,7 @@ func (p *ArchiveProcessor) getPartFilesImpl(path string) []string {
 			break
 		}
 		prevBaseWithoutExt = baseWithoutExt
-		
+
 		e := strings.ToLower(filepath.Ext(baseWithoutExt))
 		slog.Debug("Extension loop iteration", "iteration", loopCount, "baseWithoutExt", baseWithoutExt, "ext", e)
 		if e == "" {
@@ -835,7 +834,7 @@ func (p *ArchiveProcessor) getPartFilesImpl(path string) []string {
 
 	// Pattern 2: .NNN parts (generic split files)
 	pattern2 := filepath.Join(dir, baseWithoutExt+".???")
-	slog.Debug("Glob pattern 2 (.???)" , "pattern", pattern2)
+	slog.Debug("Glob pattern 2 (.???)", "pattern", pattern2)
 	if pattern, err := globWithTimeout(pattern2, globTimeout); err == nil {
 		slog.Debug("Glob pattern 2 complete", "found", len(pattern))
 		for _, p := range pattern {
@@ -915,37 +914,38 @@ func (p *ArchiveProcessor) lsarWithStatus(path string) ([]models.ShrinkMedia, bo
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	slog.Debug("Running lsar command", "path", path)
-	lsarCmd := exec.CommandContext(ctx, lsar, "-json", path)
-	lsarCmd.Dir = filepath.Dir(path)
-	
 	// Use memory monitoring if configured
 	var output []byte
 	var err error
-	
+
 	if p.cfg.Common.MemoryLimit > 0 {
+		slog.Debug("Running lsar with memory monitoring", "path", path)
+		lsarCmd := exec.CommandContext(ctx, lsar, "-json", path)
+		lsarCmd.Dir = filepath.Dir(path)
 		utils.SetupProcessGroup(lsarCmd)
-		
-		stderrPipe, pipeErr := lsarCmd.StderrPipe()
-		if pipeErr != nil {
-			slog.Debug("lsar StderrPipe failed", "error", pipeErr)
-		} else {
+
+		// Capture both stdout and stderr
+		stdoutPipe, stdoutErr := lsarCmd.StdoutPipe()
+		stderrPipe, stderrErr := lsarCmd.StderrPipe()
+
+		if stdoutErr == nil && stderrErr == nil {
 			monCfg := utils.ProcessMonitorConfig{
-				MemoryLimit:    p.cfg.Common.MemoryLimit,
-				CheckInterval:  time.Duration(p.cfg.Common.MemoryCheckInterval) * time.Millisecond,
+				MemoryLimit:   p.cfg.Common.MemoryLimit,
+				CheckInterval: time.Duration(p.cfg.Common.MemoryCheckInterval) * time.Millisecond,
 			}
 			monitor := utils.NewProcessMonitor(lsarCmd, monCfg)
-			
-			if startErr := lsarCmd.Start(); startErr != nil {
-				slog.Debug("lsar Start failed", "error", startErr)
-			} else {
+
+			if startErr := lsarCmd.Start(); startErr == nil {
 				monitor.Start(ctx)
-				
+
 				waitErr := lsarCmd.Wait()
-				output, _ = io.ReadAll(stderrPipe)
-				
+				// Read both stdout and stderr
+				stdoutData, _ := io.ReadAll(stdoutPipe)
+				stderrData, _ := io.ReadAll(stderrPipe)
+				output = append(stdoutData, stderrData...)
+
 				monitor.Stop()
-				
+
 				if waitErr != nil {
 					if ctx.Err() == context.DeadlineExceeded {
 						slog.Warn("lsar command timed out", "path", path)
@@ -954,12 +954,21 @@ func (p *ArchiveProcessor) lsarWithStatus(path string) ([]models.ShrinkMedia, bo
 						err = waitErr
 					}
 				}
+			} else {
+				slog.Debug("lsar Start failed, using fallback", "error", startErr)
+				// Fall through to CombinedOutput
 			}
+		} else {
+			slog.Debug("lsar pipe setup failed, using fallback", "stdout_err", stdoutErr, "stderr_err", stderrErr)
+			// Fall through to CombinedOutput
 		}
 	}
-	
-	if err == nil {
-		// Fallback to CombinedOutput if monitoring not used or failed
+
+	// Use CombinedOutput if monitoring not configured or failed
+	if len(output) == 0 && err == nil {
+		slog.Debug("Running lsar with CombinedOutput", "path", path)
+		lsarCmd := exec.CommandContext(ctx, lsar, "-json", path)
+		lsarCmd.Dir = filepath.Dir(path)
 		output, err = lsarCmd.CombinedOutput()
 	}
 

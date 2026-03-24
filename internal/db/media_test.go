@@ -63,7 +63,7 @@ func TestMediaLifecycle(t *testing.T) {
 	}
 
 	// 3. MarkShrinked
-	MarkShrinked([]*sql.DB{db}, "test.mp4")
+	MarkShrinked([]*sql.DB{db}, "test.mp4", ShrinkStatusSuccess)
 
 	// 4. UpdateMedia
 	UpdateMedia([]*sql.DB{db}, "test.mp4", "test.av1.mkv", 600, 10.0)

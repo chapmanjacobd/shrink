@@ -3,8 +3,9 @@
 package utils
 
 import (
-	"golang.org/x/sys/unix"
 	"unsafe"
+
+	"golang.org/x/sys/unix"
 )
 
 // GetTotalRAM returns the total physical memory in bytes.

@@ -82,37 +82,37 @@ func (p *TextProcessor) processText(ctx context.Context, m *models.ShrinkMedia, 
 	// Setup memory monitoring if configured
 	var output []byte
 	var err error
-	
+
 	if cfg.Common.MemoryLimit > 0 {
 		cmd := exec.CommandContext(ctx, ebookConvert, args...)
 		utils.SetupProcessGroup(cmd)
-		
+
 		stderrPipe, pipeErr := cmd.StderrPipe()
 		if pipeErr != nil {
 			os.RemoveAll(outputDir)
 			return models.ProcessResult{SourcePath: m.Path, Error: pipeErr, StopAll: true}
 		}
-		
+
 		monCfg := utils.ProcessMonitorConfig{
-			MemoryLimit:    cfg.Common.MemoryLimit,
-			CheckInterval:  time.Duration(cfg.Common.MemoryCheckInterval) * time.Millisecond,
+			MemoryLimit:   cfg.Common.MemoryLimit,
+			CheckInterval: time.Duration(cfg.Common.MemoryCheckInterval) * time.Millisecond,
 		}
 		monitor := utils.NewProcessMonitor(cmd, monCfg)
-		
+
 		if startErr := cmd.Start(); startErr != nil {
 			os.RemoveAll(outputDir)
 			return models.ProcessResult{SourcePath: m.Path, Error: startErr, StopAll: true}
 		}
-		
+
 		monitor.Start(ctx)
 		defer monitor.Stop()
-		
+
 		waitErr := cmd.Wait()
 		output, _ = io.ReadAll(stderrPipe)
-		
+
 		if waitErr != nil {
 			os.RemoveAll(outputDir)
-			
+
 			if monitor.Exceeded() {
 				return models.ProcessResult{
 					SourcePath: m.Path,
@@ -121,7 +121,7 @@ func (p *TextProcessor) processText(ctx context.Context, m *models.ShrinkMedia, 
 					StopAll:    true,
 				}
 			}
-			
+
 			return models.ProcessResult{SourcePath: m.Path, Error: waitErr, Output: string(output)}
 		}
 	} else {
@@ -217,31 +217,31 @@ func (p *TextProcessor) runOCR(path string, cfg *models.ProcessorConfig) string 
 	// Setup memory monitoring if configured
 	var output []byte
 	var err error
-	
+
 	if cfg.Common.MemoryLimit > 0 {
 		cmd := exec.Command(ocrmypdf, args...)
 		utils.SetupProcessGroup(cmd)
-		
+
 		stderrPipe, pipeErr := cmd.StderrPipe()
 		if pipeErr != nil {
 			slog.Debug("ocrmypdf StderrPipe failed", "error", pipeErr)
 		} else {
 			monCfg := utils.ProcessMonitorConfig{
-				MemoryLimit:    cfg.Common.MemoryLimit,
-				CheckInterval:  time.Duration(cfg.Common.MemoryCheckInterval) * time.Millisecond,
+				MemoryLimit:   cfg.Common.MemoryLimit,
+				CheckInterval: time.Duration(cfg.Common.MemoryCheckInterval) * time.Millisecond,
 			}
 			monitor := utils.NewProcessMonitor(cmd, monCfg)
-			
+
 			if startErr := cmd.Start(); startErr != nil {
 				slog.Debug("ocrmypdf Start failed", "error", startErr)
 			} else {
 				monitor.Start(context.Background())
-				
+
 				waitErr := cmd.Wait()
 				output, _ = io.ReadAll(stderrPipe)
-				
+
 				monitor.Stop()
-				
+
 				if waitErr != nil {
 					outputStr := string(output)
 					// Check if it's a "skip-text" message (not really an error)
@@ -258,7 +258,7 @@ func (p *TextProcessor) runOCR(path string, cfg *models.ProcessorConfig) string 
 			}
 		}
 	}
-	
+
 	// Fallback to standard execution if monitoring not used or failed
 	if err == nil {
 		cmd := exec.Command(ocrmypdf, args...)
@@ -420,21 +420,21 @@ func (p *TextProcessor) processEbookImages(ctx context.Context, images []string,
 		if cfg.Common.MemoryLimit > 0 {
 			cmd := exec.CommandContext(ctx, imCmd, args...)
 			utils.SetupProcessGroup(cmd)
-			
+
 			monCfg := utils.ProcessMonitorConfig{
-				MemoryLimit:    cfg.Common.MemoryLimit,
-				CheckInterval:  time.Duration(cfg.Common.MemoryCheckInterval) * time.Millisecond,
+				MemoryLimit:   cfg.Common.MemoryLimit,
+				CheckInterval: time.Duration(cfg.Common.MemoryCheckInterval) * time.Millisecond,
 			}
 			monitor := utils.NewProcessMonitor(cmd, monCfg)
-			
+
 			if startErr := cmd.Start(); startErr != nil {
 				cmdErr = startErr
 			} else {
 				monitor.Start(ctx)
-				
+
 				waitErr := cmd.Wait()
 				monitor.Stop()
-				
+
 				if waitErr != nil {
 					cmdErr = waitErr
 				}
@@ -443,7 +443,7 @@ func (p *TextProcessor) processEbookImages(ctx context.Context, images []string,
 			cmd := exec.CommandContext(ctx, imCmd, args...)
 			cmdErr = cmd.Run()
 		}
-		
+
 		if cmdErr != nil {
 			slog.Warn("Failed to convert ebook image", "path", img, "error", cmdErr)
 			// Clean up partial transcode if original still exists

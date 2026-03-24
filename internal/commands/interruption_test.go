@@ -101,11 +101,11 @@ func TestInterruptionPreservesOriginal(t *testing.T) {
 		os.Setenv("PATH", binDir+":"+oldPath)
 		defer os.Setenv("PATH", oldPath)
 
-		p := NewArchiveProcessor(nil)
+		cfg := &models.ProcessorConfig{}
+		p := NewArchiveProcessor(nil, cfg)
 		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 		defer cancel()
 
-		cfg := &models.ProcessorConfig{}
 		res := p.Process(ctx, &models.ShrinkMedia{Path: zipPath, Ext: ".zip"}, cfg, nil)
 
 		if res.Error == nil {
