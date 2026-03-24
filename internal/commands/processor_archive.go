@@ -403,17 +403,62 @@ func (p *ArchiveProcessor) EstimateSizeForArchive(m *models.ShrinkMedia, cfg *mo
 			duration := content.Duration
 			if duration <= 0 {
 				// Estimate from compressed size (smaller = lower quality source)
-				duration = float64(content.CompressedSize) / float64(cfg.Common.SourceVideoBitrate) * 8
+				sourceBitrate := float64(utils.GetEstimatedBitrate(ext))
+				if sourceBitrate <= 0 {
+					sourceBitrate = float64(cfg.Common.SourceVideoBitrate)
+				}
+				duration = float64(content.CompressedSize) / sourceBitrate * 8
 			}
-			futureSize = int64(duration * float64(cfg.Video.TargetVideoBitrate) / 8)
-			processingTime = int(math.Ceil(duration / cfg.Video.TranscodingVideoRate))
+			
+			targetBitrate := float64(cfg.Video.TargetVideoBitrate)
+			transcodeRate := cfg.Video.TranscodingVideoRate
+			if content.Width > 0 && content.Height > 0 {
+				maxW := float64(cfg.Video.MaxVideoWidth)
+				maxH := float64(cfg.Video.MaxVideoHeight)
+				actualW := float64(content.Width)
+				actualH := float64(content.Height)
+				outW, outH := actualW, actualH
+				if outW > maxW || outH > maxH {
+					scale := math.Min(maxW/outW, maxH/outH)
+					outW *= scale
+					outH *= scale
+				}
+				baselinePixels := maxW * maxH
+				outPixels := outW * outH
+				if baselinePixels > 0 {
+					pixelRatio := outPixels / baselinePixels
+					if pixelRatio < 0.25 {
+						pixelRatio = 0.25
+					}
+					if pixelRatio > 1.0 {
+						pixelRatio = 1.0
+					}
+					targetBitrate *= pixelRatio
+
+					sourcePixels := actualW * actualH
+					if sourcePixels > outPixels && outPixels > 0 {
+						complexityRatio := outPixels / sourcePixels
+						if complexityRatio < 0.2 {
+							complexityRatio = 0.2
+						}
+						transcodeRate *= complexityRatio
+					}
+				}
+			}
+
+			futureSize = int64(duration * targetBitrate / 8)
+			processingTime = int(math.Ceil(duration / transcodeRate))
 		}
 		// Audio files
 		if !isProcessable && ext != "" && utils.AudioExtensionMap[ext] {
 			isProcessable = true
 			duration := content.Duration
 			if duration <= 0 {
-				duration = float64(content.CompressedSize) / float64(cfg.Common.SourceAudioBitrate) * 8
+				sourceBitrate := float64(utils.GetEstimatedBitrate(ext))
+				if sourceBitrate <= 0 {
+					sourceBitrate = float64(cfg.Common.SourceAudioBitrate)
+				}
+				duration = float64(content.CompressedSize) / sourceBitrate * 8
 			}
 			futureSize = int64(duration * float64(cfg.Audio.TargetAudioBitrate) / 8)
 			processingTime = int(math.Ceil(duration / cfg.Audio.TranscodingAudioRate))

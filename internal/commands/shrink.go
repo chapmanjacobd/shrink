@@ -340,7 +340,7 @@ func (c *ShrinkCmd) PrintSummary(media []models.ShrinkMedia) {
 
 	// Print summary table
 	fmt.Println()
-	headers := []string{"Media Type", "Count", "Current", "Future", "Savings", "Speed"}
+	headers := []string{"Media Type", "Count", "Current", "Future", "Savings", "Future Compression"}
 	var rows [][]string
 
 	// Sort keys for consistent output

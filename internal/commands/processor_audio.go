@@ -29,7 +29,11 @@ func (p *AudioProcessor) CanProcess(m *models.ShrinkMedia) bool {
 func (p *AudioProcessor) EstimateSize(m *models.ShrinkMedia, cfg *models.ProcessorConfig) models.ProcessableInfo {
 	duration := m.Duration
 	if duration <= 0 {
-		duration = float64(m.Size) / float64(cfg.Common.SourceAudioBitrate) * 8
+		sourceBitrate := float64(utils.GetEstimatedBitrate(m.Ext))
+		if sourceBitrate <= 0 {
+			sourceBitrate = float64(cfg.Common.SourceAudioBitrate)
+		}
+		duration = float64(m.Size) / sourceBitrate * 8
 	}
 
 	futureSize := int64(duration * float64(cfg.Audio.TargetAudioBitrate) / 8)
