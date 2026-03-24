@@ -5,7 +5,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"log/slog"
 	"path/filepath"
 	"strings"
 
