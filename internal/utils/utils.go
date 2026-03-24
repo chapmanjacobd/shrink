@@ -353,9 +353,9 @@ var ImageExtensions = []string{
 
 var TextExtensions = []string{
 	"azw", "azw3", "azw4", "cbc", "chm", "djv", "djvu", "doc", "docx", "dot",
-	"epub", "fb2", "fbz", "htmlz", "ind", "indt", "lit", "lrf", "md",
+	"epub", "fb2", "fbz", "htmlz", "lit", "lrf", "md",
 	"mobi", "odt", "pdb", "pdf", "pml", "pot", "pps", "prc", "rb",
-	"rtf", "snb", "tcr", "txtz", "vsd", "xls", "xlt",
+	"rtf", "snb", "tcr", "txtz", "vsd",
 }
 
 var ArchiveExtensions = []string{
@@ -564,8 +564,12 @@ func PrintTableToString(headers []string, rows [][]string) string {
 	// Build format strings (add 1 extra space padding per column)
 	// Use right-align for numeric columns, left-align for text
 	var headerFormatParts []string
-	for _, w := range colWidths {
-		headerFormatParts = append(headerFormatParts, fmt.Sprintf("%%-%ds", w+1))
+	for i, w := range colWidths {
+		if isNumericCol[i] {
+			headerFormatParts = append(headerFormatParts, fmt.Sprintf("%%%ds", w+1))
+		} else {
+			headerFormatParts = append(headerFormatParts, fmt.Sprintf("%%-%ds", w+1))
+		}
 	}
 	headerFormat := strings.Join(headerFormatParts, " ") + "\n"
 
