@@ -109,18 +109,6 @@ func ensureSchema(db *sql.DB) error {
 	return nil
 }
 
-// indexExists checks if an index exists in the database
-func indexExists(db *sql.DB, indexName string) (bool, error) {
-	var count int
-	err := db.QueryRow(`
-		SELECT COUNT(*) FROM sqlite_master 
-		WHERE type='index' AND name=?`, indexName).Scan(&count)
-	if err != nil {
-		return false, err
-	}
-	return count > 0, nil
-}
-
 func getTableColumns(db *sql.DB, tableName string) (map[string]string, error) {
 	rows, err := db.Query(fmt.Sprintf("PRAGMA table_info(%s)", tableName))
 	if err != nil {
