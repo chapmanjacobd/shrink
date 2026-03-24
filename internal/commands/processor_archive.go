@@ -12,11 +12,35 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/chapmanjacobd/shrink/internal/ffmpeg"
 	"github.com/chapmanjacobd/shrink/internal/models"
 	"github.com/chapmanjacobd/shrink/internal/utils"
 )
+
+// globWithTimeout performs a filepath.Glob with a timeout to prevent hanging
+func globWithTimeout(pattern string, timeout time.Duration) ([]string, error) {
+	resultChan := make(chan struct {
+		matches []string
+		err     error
+	}, 1)
+
+	go func() {
+		matches, err := filepath.Glob(pattern)
+		resultChan <- struct {
+			matches []string
+			err     error
+		}{matches, err}
+	}()
+
+	select {
+	case result := <-resultChan:
+		return result.matches, result.err
+	case <-time.After(timeout):
+		return nil, fmt.Errorf("glob timeout after %v", timeout)
+	}
+}
 
 // ArchiveProcessor handles archive file processing
 type ArchiveProcessor struct {
@@ -534,6 +558,25 @@ func isSecondaryPart(path string) bool {
 // getPartFiles returns list of all part files for a multi-part archive
 func (p *ArchiveProcessor) getPartFiles(path string) []string {
 	slog.Debug("Getting part files", "path", path)
+	
+	// Use a channel and goroutine to implement timeout
+	resultChan := make(chan []string, 1)
+	
+	go func() {
+		resultChan <- p.getPartFilesImpl(path)
+	}()
+	
+	select {
+	case result := <-resultChan:
+		return result
+	case <-time.After(10 * time.Second):
+		slog.Warn("getPartFiles timed out after 10 seconds", "path", path)
+		return nil
+	}
+}
+
+// getPartFilesImpl is the actual implementation of getPartFiles
+func (p *ArchiveProcessor) getPartFilesImpl(path string) []string {
 	partFilesMap := make(map[string]bool)
 	dir := filepath.Dir(path)
 	baseName := filepath.Base(path)
@@ -542,9 +585,21 @@ func (p *ArchiveProcessor) getPartFiles(path string) []string {
 	lsar := utils.GetCommandPath("lsar")
 	if lsar != "" {
 		slog.Debug("Calling lsar for XADVolumes", "path", path)
-		lsarCmd := exec.Command(lsar, "-json", path)
+		
+		// Add timeout to prevent hanging
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		
+		lsarCmd := exec.CommandContext(ctx, lsar, "-json", path)
 		lsarCmd.Dir = dir
-		if lsarOutput, err := lsarCmd.CombinedOutput(); err == nil || len(lsarOutput) > 0 {
+		lsarOutput, err := lsarCmd.CombinedOutput()
+		
+		if ctx.Err() == context.DeadlineExceeded {
+			slog.Warn("lsar XADVolumes call timed out", "path", path)
+			err = fmt.Errorf("lsar timeout")
+		}
+		
+		if err == nil || len(lsarOutput) > 0 {
 			slog.Debug("lsar XADVolumes call returned", "path", path, "output_len", len(lsarOutput))
 			jsonBytes := extractLSARJSON(lsarOutput)
 			var lsarJSON struct {
@@ -587,9 +642,18 @@ func (p *ArchiveProcessor) getPartFiles(path string) []string {
 	// baseWithoutExt should be the name before the first archive-related extension
 	// e.g., "test.zip" -> "test", "test.tar.gz" -> "test"
 	baseWithoutExt := baseName
+	slog.Debug("Starting extension stripping loop", "baseWithoutExt", baseWithoutExt)
+	loopCount := 0
 	for {
+		loopCount++
+		if loopCount > 20 {
+			slog.Warn("Extension stripping loop exceeded 20 iterations, breaking", "path", path, "baseWithoutExt", baseWithoutExt)
+			break
+		}
 		e := strings.ToLower(filepath.Ext(baseWithoutExt))
+		slog.Debug("Extension loop iteration", "iteration", loopCount, "baseWithoutExt", baseWithoutExt, "ext", e)
 		if e == "" {
+			slog.Debug("Extension loop: no extension found, breaking")
 			break
 		}
 		// If it's a known archive extension or a part extension (like .z01, .001), trim it
@@ -597,6 +661,7 @@ func (p *ArchiveProcessor) getPartFiles(path string) []string {
 		for _, ae := range utils.ArchiveExtensions {
 			if e == "."+ae {
 				isArchiveExt = true
+				slog.Debug("Found matching archive extension", "ext", e, "archiveExt", ae)
 				break
 			}
 		}
@@ -604,22 +669,30 @@ func (p *ArchiveProcessor) getPartFiles(path string) []string {
 		if !isArchiveExt {
 			if len(e) == 4 && e[1] == 'z' && e[2] >= '0' && e[2] <= '9' && e[3] >= '0' && e[3] <= '9' {
 				isArchiveExt = true
+				slog.Debug("Found .zNN pattern", "ext", e)
 			} else if len(e) == 4 && e[1] >= '0' && e[1] <= '9' && e[2] >= '0' && e[2] <= '9' && e[3] >= '0' && e[3] <= '9' {
 				isArchiveExt = true
+				slog.Debug("Found .NNN pattern", "ext", e)
 			}
 		}
 
 		if isArchiveExt {
 			baseWithoutExt = strings.TrimSuffix(baseWithoutExt, e)
+			slog.Debug("Trimmed extension", "newBaseWithoutExt", baseWithoutExt)
 		} else {
+			slog.Debug("Not an archive extension, breaking", "ext", e)
 			break
 		}
 	}
+	slog.Debug("Extension stripping loop complete", "iterations", loopCount, "baseWithoutExt", baseWithoutExt)
 	slog.Debug("Globbing for parts", "baseWithoutExt", baseWithoutExt, "dir", dir)
 
+	globTimeout := 5 * time.Second
+
 	// Pattern 1: .zNN parts (Zip split files)
-	slog.Debug("Glob pattern 1 (.z*)", "pattern", filepath.Join(dir, baseWithoutExt+".z*"))
-	if pattern, err := filepath.Glob(filepath.Join(dir, baseWithoutExt+".z*")); err == nil {
+	pattern1 := filepath.Join(dir, baseWithoutExt+".z*")
+	slog.Debug("Glob pattern 1 (.z*)", "pattern", pattern1)
+	if pattern, err := globWithTimeout(pattern1, globTimeout); err == nil {
 		slog.Debug("Glob pattern 1 complete", "found", len(pattern))
 		for _, p := range pattern {
 			if info, err := os.Stat(p); err == nil && !info.IsDir() {
@@ -632,12 +705,13 @@ func (p *ArchiveProcessor) getPartFiles(path string) []string {
 			}
 		}
 	} else {
-		slog.Debug("Glob pattern 1 failed", "err", err)
+		slog.Debug("Glob pattern 1 failed or timed out", "err", err)
 	}
 
 	// Pattern 2: .NNN parts (generic split files)
-	slog.Debug("Glob pattern 2 (.???)" , "pattern", filepath.Join(dir, baseWithoutExt+".???"))
-	if pattern, err := filepath.Glob(filepath.Join(dir, baseWithoutExt+".???")); err == nil {
+	pattern2 := filepath.Join(dir, baseWithoutExt+".???")
+	slog.Debug("Glob pattern 2 (.???)" , "pattern", pattern2)
+	if pattern, err := globWithTimeout(pattern2, globTimeout); err == nil {
 		slog.Debug("Glob pattern 2 complete", "found", len(pattern))
 		for _, p := range pattern {
 			if info, err := os.Stat(p); err == nil && !info.IsDir() {
@@ -650,13 +724,14 @@ func (p *ArchiveProcessor) getPartFiles(path string) []string {
 			}
 		}
 	} else {
-		slog.Debug("Glob pattern 2 failed", "err", err)
+		slog.Debug("Glob pattern 2 failed or timed out", "err", err)
 	}
 
 	// Pattern 3: .partNN.rar or .rNN.rar (RAR split files)
 	if strings.HasSuffix(ext, ".rar") {
-		slog.Debug("Glob pattern 3 (.part*.rar)", "pattern", filepath.Join(dir, baseWithoutExt+".part*.rar"))
-		if pattern, err := filepath.Glob(filepath.Join(dir, baseWithoutExt+".part*.rar")); err == nil {
+		pattern3 := filepath.Join(dir, baseWithoutExt+".part*.rar")
+		slog.Debug("Glob pattern 3 (.part*.rar)", "pattern", pattern3)
+		if pattern, err := globWithTimeout(pattern3, globTimeout); err == nil {
 			slog.Debug("Glob pattern 3 complete", "found", len(pattern))
 			for _, p := range pattern {
 				if _, err := os.Stat(p); err == nil {
@@ -668,10 +743,11 @@ func (p *ArchiveProcessor) getPartFiles(path string) []string {
 				}
 			}
 		} else {
-			slog.Debug("Glob pattern 3 failed", "err", err)
+			slog.Debug("Glob pattern 3 failed or timed out", "err", err)
 		}
-		slog.Debug("Glob pattern 4 (.r??)", "pattern", filepath.Join(dir, baseWithoutExt+".r??"))
-		if pattern, err := filepath.Glob(filepath.Join(dir, baseWithoutExt+".r??")); err == nil {
+		pattern4 := filepath.Join(dir, baseWithoutExt+".r??")
+		slog.Debug("Glob pattern 4 (.r??)", "pattern", pattern4)
+		if pattern, err := globWithTimeout(pattern4, globTimeout); err == nil {
 			slog.Debug("Glob pattern 4 complete", "found", len(pattern))
 			for _, p := range pattern {
 				if _, err := os.Stat(p); err == nil {
@@ -683,7 +759,7 @@ func (p *ArchiveProcessor) getPartFiles(path string) []string {
 				}
 			}
 		} else {
-			slog.Debug("Glob pattern 4 failed", "err", err)
+			slog.Debug("Glob pattern 4 failed or timed out", "err", err)
 		}
 	}
 
@@ -709,10 +785,20 @@ func (p *ArchiveProcessor) lsarWithStatus(path string) ([]models.ShrinkMedia, bo
 	if lsar == "" {
 		return nil, true
 	}
+	
+	// Add timeout to prevent hanging
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	
 	slog.Debug("Running lsar command", "path", path)
-	lsarCmd := exec.Command(lsar, "-json", path)
+	lsarCmd := exec.CommandContext(ctx, lsar, "-json", path)
 	lsarCmd.Dir = filepath.Dir(path)
 	output, err := lsarCmd.CombinedOutput()
+	
+	if ctx.Err() == context.DeadlineExceeded {
+		slog.Warn("lsar command timed out", "path", path)
+		err = fmt.Errorf("lsar timeout")
+	}
 	slog.Debug("lsar command completed", "path", path, "output_len", len(output), "err", err)
 	lsarFailed := err != nil
 
