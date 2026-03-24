@@ -553,11 +553,13 @@ func (p *ArchiveProcessor) getPartFiles(path string) []string {
 				} `json:"lsarProperties"`
 			}
 			if json.Unmarshal(jsonBytes, &lsarJSON) == nil && len(lsarJSON.LsarProperties.XADVolumes) > 0 {
+				slog.Debug("lsar returned XADVolumes", "path", path, "count", len(lsarJSON.LsarProperties.XADVolumes))
 				for _, partFile := range lsarJSON.LsarProperties.XADVolumes {
 					if !filepath.IsAbs(partFile) {
 						partFile = filepath.Join(dir, partFile)
 					}
 					// Only include files that exist and are not the main archive
+					slog.Debug("Checking lsar part file existence", "part", partFile)
 					if info, err := os.Stat(partFile); err == nil && !info.IsDir() {
 						absPart, _ := filepath.Abs(partFile)
 						absMain, _ := filepath.Abs(path)
@@ -565,15 +567,22 @@ func (p *ArchiveProcessor) getPartFiles(path string) []string {
 							partFilesMap[absPart] = true
 							slog.Debug("Found multi-part archive part (lsar)", "path", absPart)
 						}
+					} else {
+						slog.Debug("lsar part file not found or is directory", "part", partFile, "err", err)
 					}
 				}
+			} else {
+				slog.Debug("lsar returned no XADVolumes or parse failed", "path", path)
 			}
+		} else {
+			slog.Debug("lsar XADVolumes call failed or returned empty", "path", path, "err", err)
 		}
 	}
 
 	// Also use glob to find any additional part files that lsar might have missed
 	// Common multi-part archive patterns: .z01, .z02, .zip, .001, .002, .rar, etc.
 	ext := strings.ToLower(filepath.Ext(baseName))
+	slog.Debug("Starting glob search for archive parts", "path", path, "ext", ext)
 
 	// baseWithoutExt should be the name before the first archive-related extension
 	// e.g., "test.zip" -> "test", "test.tar.gz" -> "test"
@@ -609,7 +618,9 @@ func (p *ArchiveProcessor) getPartFiles(path string) []string {
 	slog.Debug("Globbing for parts", "baseWithoutExt", baseWithoutExt, "dir", dir)
 
 	// Pattern 1: .zNN parts (Zip split files)
+	slog.Debug("Glob pattern 1 (.z*)", "pattern", filepath.Join(dir, baseWithoutExt+".z*"))
 	if pattern, err := filepath.Glob(filepath.Join(dir, baseWithoutExt+".z*")); err == nil {
+		slog.Debug("Glob pattern 1 complete", "found", len(pattern))
 		for _, p := range pattern {
 			if info, err := os.Stat(p); err == nil && !info.IsDir() {
 				absP, _ := filepath.Abs(p)
@@ -620,10 +631,14 @@ func (p *ArchiveProcessor) getPartFiles(path string) []string {
 				}
 			}
 		}
+	} else {
+		slog.Debug("Glob pattern 1 failed", "err", err)
 	}
 
 	// Pattern 2: .NNN parts (generic split files)
+	slog.Debug("Glob pattern 2 (.???)" , "pattern", filepath.Join(dir, baseWithoutExt+".???"))
 	if pattern, err := filepath.Glob(filepath.Join(dir, baseWithoutExt+".???")); err == nil {
+		slog.Debug("Glob pattern 2 complete", "found", len(pattern))
 		for _, p := range pattern {
 			if info, err := os.Stat(p); err == nil && !info.IsDir() {
 				absP, _ := filepath.Abs(p)
@@ -634,11 +649,15 @@ func (p *ArchiveProcessor) getPartFiles(path string) []string {
 				}
 			}
 		}
+	} else {
+		slog.Debug("Glob pattern 2 failed", "err", err)
 	}
 
 	// Pattern 3: .partNN.rar or .rNN.rar (RAR split files)
 	if strings.HasSuffix(ext, ".rar") {
+		slog.Debug("Glob pattern 3 (.part*.rar)", "pattern", filepath.Join(dir, baseWithoutExt+".part*.rar"))
 		if pattern, err := filepath.Glob(filepath.Join(dir, baseWithoutExt+".part*.rar")); err == nil {
+			slog.Debug("Glob pattern 3 complete", "found", len(pattern))
 			for _, p := range pattern {
 				if _, err := os.Stat(p); err == nil {
 					absP, _ := filepath.Abs(p)
@@ -648,8 +667,12 @@ func (p *ArchiveProcessor) getPartFiles(path string) []string {
 					}
 				}
 			}
+		} else {
+			slog.Debug("Glob pattern 3 failed", "err", err)
 		}
+		slog.Debug("Glob pattern 4 (.r??)", "pattern", filepath.Join(dir, baseWithoutExt+".r??"))
 		if pattern, err := filepath.Glob(filepath.Join(dir, baseWithoutExt+".r??")); err == nil {
+			slog.Debug("Glob pattern 4 complete", "found", len(pattern))
 			for _, p := range pattern {
 				if _, err := os.Stat(p); err == nil {
 					absP, _ := filepath.Abs(p)
@@ -659,8 +682,12 @@ func (p *ArchiveProcessor) getPartFiles(path string) []string {
 					}
 				}
 			}
+		} else {
+			slog.Debug("Glob pattern 4 failed", "err", err)
 		}
 	}
+
+	slog.Debug("All glob patterns complete", "path", path)
 
 	// Convert map to slice
 	var partFiles []string
