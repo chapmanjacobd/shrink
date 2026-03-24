@@ -71,6 +71,7 @@ func NewEngine(ui UI, cfg *models.ProcessorConfig, engCfg EngineConfig, sqlDBs [
 func (e *Engine) analyzeMedia(media []models.ShrinkMedia) []models.ShrinkMedia {
 	var toShrink []models.ShrinkMedia
 
+	slog.Info("Starting media analysis", "total_files", len(media))
 	for i := range media {
 		m := &media[i]
 		processor := e.registry.GetProcessor(m)
@@ -85,7 +86,9 @@ func (e *Engine) analyzeMedia(media []models.ShrinkMedia) []models.ShrinkMedia {
 		e.metrics.RecordStarted(m.DisplayCategory(), m.Path)
 
 		// Estimate size and time
+		slog.Debug("Estimating size", "path", m.Path)
 		info := processor.EstimateSize(m, e.cfg)
+		slog.Debug("Estimate complete", "path", m.Path, "processable", info.IsProcessable)
 
 		if info.IsBroken {
 			m.IsBroken = true
@@ -115,6 +118,7 @@ func (e *Engine) analyzeMedia(media []models.ShrinkMedia) []models.ShrinkMedia {
 		}
 	}
 
+	slog.Info("Media analysis complete", "to_shrink", len(toShrink))
 	return toShrink
 }
 

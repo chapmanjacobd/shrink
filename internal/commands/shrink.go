@@ -106,8 +106,10 @@ func (c *ShrinkCmd) Run(ctx *kong.Context) error {
 	engine := NewEngine(c, cfg, engCfg, c.sqlDBs, registry, metrics)
 
 	// Analyze and decide what to shrink
+	slog.Info("Analyzing files", "count", len(filteredMedia))
 	toShrink := engine.analyzeMedia(filteredMedia)
 	filteredMedia = nil // Free memory
+	slog.Info("Analysis complete", "selected", len(toShrink))
 
 	if len(toShrink) == 0 {
 		fmt.Println("No files to shrink")
@@ -127,14 +129,19 @@ func (c *ShrinkCmd) Run(ctx *kong.Context) error {
 	}
 	toShrink = deduped
 	seenPaths = nil // Free memory
+	slog.Info("Deduplication complete", "unique_count", len(toShrink))
 
 	// Apply continue-from filter
 	if c.ContinueFrom != "" {
+		slog.Debug("Applying continue-from filter", "from", c.ContinueFrom)
 		toShrink = c.ApplyContinueFrom(toShrink)
+		slog.Info("Continue-from filter applied", "remaining", len(toShrink))
 	}
 
 	// Sort by efficiency (most space freed per second)
+	slog.Debug("Sorting files by efficiency")
 	c.SortByEfficiency(toShrink)
+	slog.Info("Sort complete")
 
 	// Print summary
 	c.PrintSummary(toShrink)

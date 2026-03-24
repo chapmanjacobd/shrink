@@ -223,6 +223,7 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *models.Shri
 // EstimateSizeForArchive estimates size using compressed size and inspects archive contents
 // Returns: futureSize, processingTime, hasProcessableContent, totalArchiveSize
 func (p *ArchiveProcessor) EstimateSizeForArchive(m *models.ShrinkMedia, cfg *models.ProcessorConfig) (int64, int, bool, int64) {
+	slog.Debug("EstimateSizeForArchive starting", "path", m.Path)
 	if !p.unarInstalled {
 		return 0, 0, false, 0
 	}
@@ -239,7 +240,9 @@ func (p *ArchiveProcessor) EstimateSizeForArchive(m *models.ShrinkMedia, cfg *mo
 
 	// Check for multi-part archives and verify all parts exist
 	totalArchiveSize := m.Size
+	slog.Debug("Calling getPartFiles", "path", m.Path)
 	partFiles := p.getPartFiles(m.Path)
+	slog.Debug("getPartFiles returned", "path", m.Path, "parts", len(partFiles))
 
 	// Check for missing parts in sequence for known multi-part types
 	if isBrokenSequence(m.Path, partFiles) {
@@ -343,19 +346,23 @@ func (p *ArchiveProcessor) EstimateSizeForArchive(m *models.ShrinkMedia, cfg *mo
 		}
 	}
 
+	slog.Debug("EstimateSizeForArchive complete", "path", m.Path, "futureSize", totalFutureSize, "processable", hasProcessableContent)
 	return totalFutureSize, totalProcessingTime, hasProcessableContent, totalArchiveSize
 }
 
 func (p *ArchiveProcessor) EstimateSize(m *models.ShrinkMedia, cfg *models.ProcessorConfig) models.ProcessableInfo {
+	slog.Debug("EstimateSize starting", "path", m.Path)
 	futureSize, processingTime, hasProcessable, totalArchiveSize := p.EstimateSizeForArchive(m, cfg)
 	isBroken := false
 	var partFiles []string
 	if !hasProcessable {
 		if totalArchiveSize == 0 {
-			isBroken = true
+			slog.Debug("Archive has no processable content and size=0, checking parts", "path", m.Path)
 			partFiles = p.getPartFiles(m.Path)
+			slog.Debug("getPartFiles (broken check) returned", "path", m.Path, "parts", len(partFiles))
 		}
 	}
+	slog.Debug("EstimateSize complete", "path", m.Path, "processable", hasProcessable, "broken", isBroken)
 	return models.ProcessableInfo{
 		FutureSize:     futureSize,
 		ProcessingTime: processingTime,
@@ -526,6 +533,7 @@ func isSecondaryPart(path string) bool {
 
 // getPartFiles returns list of all part files for a multi-part archive
 func (p *ArchiveProcessor) getPartFiles(path string) []string {
+	slog.Debug("Getting part files", "path", path)
 	partFilesMap := make(map[string]bool)
 	dir := filepath.Dir(path)
 	baseName := filepath.Base(path)
@@ -533,9 +541,11 @@ func (p *ArchiveProcessor) getPartFiles(path string) []string {
 	// Get parts from lsar XADVolumes
 	lsar := utils.GetCommandPath("lsar")
 	if lsar != "" {
+		slog.Debug("Calling lsar for XADVolumes", "path", path)
 		lsarCmd := exec.Command(lsar, "-json", path)
 		lsarCmd.Dir = dir
 		if lsarOutput, err := lsarCmd.CombinedOutput(); err == nil || len(lsarOutput) > 0 {
+			slog.Debug("lsar XADVolumes call returned", "path", path, "output_len", len(lsarOutput))
 			jsonBytes := extractLSARJSON(lsarOutput)
 			var lsarJSON struct {
 				LsarProperties struct {
@@ -661,18 +671,22 @@ func (p *ArchiveProcessor) getPartFiles(path string) []string {
 	// Sort for consistent ordering
 	sort.Strings(partFiles)
 
+	slog.Debug("getPartFiles complete", "path", path, "parts", len(partFiles))
 	return partFiles
 }
 
 // lsarWithStatus lists archive contents and returns whether lsar encountered an error
 func (p *ArchiveProcessor) lsarWithStatus(path string) ([]models.ShrinkMedia, bool) {
+	slog.Debug("lsarWithStatus starting", "path", path)
 	lsar := utils.GetCommandPath("lsar")
 	if lsar == "" {
 		return nil, true
 	}
+	slog.Debug("Running lsar command", "path", path)
 	lsarCmd := exec.Command(lsar, "-json", path)
 	lsarCmd.Dir = filepath.Dir(path)
 	output, err := lsarCmd.CombinedOutput()
+	slog.Debug("lsar command completed", "path", path, "output_len", len(output), "err", err)
 	lsarFailed := err != nil
 
 	jsonBytes := extractLSARJSON(output)
@@ -714,6 +728,7 @@ func (p *ArchiveProcessor) lsarWithStatus(path string) ([]models.ShrinkMedia, bo
 			Ext:            ext,
 		})
 	}
+	slog.Debug("lsarWithStatus complete", "path", path, "count", len(media), "failed", lsarFailed)
 	return media, lsarFailed
 }
 
