@@ -4,12 +4,14 @@ package ffmpeg
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/chapmanjacobd/shrink/internal/models"
 	"github.com/chapmanjacobd/shrink/internal/utils"
@@ -100,33 +102,107 @@ func (p *FFmpegProcessor) Process(ctx context.Context, m *models.ShrinkMedia, cf
 
 	// Build and execute FFmpeg command
 	args := p.buildFFmpegArgs(m.Path, outputPath, probe, videoStream, audioStream, albumArtStream, probe.SubtitleStreams)
-	cmd := exec.CommandContext(ctx, ffmpeg, args...)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		// Clean up any incomplete output file
-		os.Remove(outputPath)
 
-		// Categorize FFmpeg errors
-		errorLog := strings.Split(string(output), "\n")
-		isUnsupported := p.isUnsupportedError(errorLog)
-		isEnvError := p.isEnvironmentError(errorLog)
-		isFileErr := p.isFileError(errorLog)
+	// Setup memory monitoring if configured
+	var monitor *utils.ProcessMonitor
+	var output []byte
 
-		if isEnvError {
-			// Environment errors should stop all processing (OOM, signal, hardware failure)
-			return models.ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("ffmpeg environment error: %w", err), Output: string(output), StopAll: true}
-		} else if isUnsupported {
-			// Unsupported codec/format - remove transcode attempt and return original
-			os.Remove(outputPath)
-			slog.Info("Unsupported format, keeping original", "path", m.Path)
-			return models.ProcessResult{SourcePath: m.Path, Success: true, Outputs: []models.ProcessOutputFile{{Path: m.Path, Size: m.Size}}}
-		} else if isFileErr {
-			// File error (corrupt, missing, etc.) - remove transcode attempt
-			os.Remove(outputPath)
-			return models.ProcessResult{SourcePath: m.Path, Success: false, Error: fmt.Errorf("file error: %w", err), Output: string(output)}
+	if cfg.Common.MemoryLimit > 0 {
+		monCfg := utils.ProcessMonitorConfig{
+			MemoryLimit:    cfg.Common.MemoryLimit,
+			CheckInterval:  time.Duration(cfg.Common.MemoryCheckInterval) * time.Millisecond,
 		}
 
-		return models.ProcessResult{SourcePath: m.Path, Error: err, Output: string(output)}
+		cmd := exec.CommandContext(ctx, ffmpeg, args...)
+		utils.SetupProcessGroup(cmd)
+
+		// Capture stderr for error reporting
+		stderrPipe, pipeErr := cmd.StderrPipe()
+		if pipeErr != nil {
+			return models.ProcessResult{SourcePath: m.Path, Error: pipeErr, StopAll: true}
+		}
+
+		monitor = utils.NewProcessMonitor(cmd, monCfg)
+
+		if startErr := cmd.Start(); startErr != nil {
+			return models.ProcessResult{SourcePath: m.Path, Error: startErr, StopAll: true}
+		}
+
+		monitor.Start(ctx)
+		defer monitor.Stop()
+
+		// Wait for command to complete
+		waitErr := cmd.Wait()
+
+		// Read stderr output
+		output, _ = io.ReadAll(stderrPipe)
+
+		if waitErr != nil {
+			// Clean up any incomplete output file
+			os.Remove(outputPath)
+
+			// Check if memory limit was exceeded
+			if monitor.Exceeded() {
+				return models.ProcessResult{
+					SourcePath: m.Path,
+					Error:      fmt.Errorf("process exceeded memory limit of %s", utils.FormatSize(cfg.Common.MemoryLimit)),
+					Output:     string(output),
+					StopAll:    true,
+				}
+			}
+
+			// Categorize FFmpeg errors
+			errorLog := strings.Split(string(output), "\n")
+			isUnsupported := p.isUnsupportedError(errorLog)
+			isEnvError := p.isEnvironmentError(errorLog)
+			isFileErr := p.isFileError(errorLog)
+
+			if isEnvError {
+				// Environment errors should stop all processing (OOM, signal, hardware failure)
+				return models.ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("ffmpeg environment error: %w", waitErr), Output: string(output), StopAll: true}
+			} else if isUnsupported {
+				// Unsupported codec/format - remove transcode attempt and return original
+				os.Remove(outputPath)
+				slog.Info("Unsupported format, keeping original", "path", m.Path)
+				return models.ProcessResult{SourcePath: m.Path, Success: true, Outputs: []models.ProcessOutputFile{{Path: m.Path, Size: m.Size}}}
+			} else if isFileErr {
+				// File error (corrupt, missing, etc.) - remove transcode attempt
+				os.Remove(outputPath)
+				return models.ProcessResult{SourcePath: m.Path, Success: false, Error: fmt.Errorf("file error: %w", waitErr), Output: string(output)}
+			}
+
+			return models.ProcessResult{SourcePath: m.Path, Error: waitErr, Output: string(output)}
+		}
+	} else {
+		// No memory monitoring - use standard execution
+		cmd := exec.CommandContext(ctx, ffmpeg, args...)
+		output, err = cmd.CombinedOutput()
+		if err != nil {
+			// Clean up any incomplete output file
+			os.Remove(outputPath)
+
+			// Categorize FFmpeg errors
+			errorLog := strings.Split(string(output), "\n")
+			isUnsupported := p.isUnsupportedError(errorLog)
+			isEnvError := p.isEnvironmentError(errorLog)
+			isFileErr := p.isFileError(errorLog)
+
+			if isEnvError {
+				// Environment errors should stop all processing (OOM, signal, hardware failure)
+				return models.ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("ffmpeg environment error: %w", err), Output: string(output), StopAll: true}
+			} else if isUnsupported {
+				// Unsupported codec/format - remove transcode attempt and return original
+				os.Remove(outputPath)
+				slog.Info("Unsupported format, keeping original", "path", m.Path)
+				return models.ProcessResult{SourcePath: m.Path, Success: true, Outputs: []models.ProcessOutputFile{{Path: m.Path, Size: m.Size}}}
+			} else if isFileErr {
+				// File error (corrupt, missing, etc.) - remove transcode attempt
+				os.Remove(outputPath)
+				return models.ProcessResult{SourcePath: m.Path, Success: false, Error: fmt.Errorf("file error: %w", err), Output: string(output)}
+			}
+
+			return models.ProcessResult{SourcePath: m.Path, Error: err, Output: string(output)}
+		}
 	}
 
 	// Validate transcode (may return multiple results if splitting was used)

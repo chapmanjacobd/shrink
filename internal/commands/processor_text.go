@@ -3,11 +3,13 @@ package commands
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/chapmanjacobd/shrink/internal/models"
 	"github.com/chapmanjacobd/shrink/internal/utils"
@@ -77,12 +79,59 @@ func (p *TextProcessor) processText(ctx context.Context, m *models.ShrinkMedia, 
 		args = append(args, "--pdf-engine", "pdftohtml")
 	}
 
-	cmd := exec.CommandContext(ctx, ebookConvert, args...)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		// Clean up on failure
-		os.RemoveAll(outputDir)
-		return models.ProcessResult{SourcePath: m.Path, Error: err, Output: string(output)}
+	// Setup memory monitoring if configured
+	var output []byte
+	var err error
+	
+	if cfg.Common.MemoryLimit > 0 {
+		cmd := exec.CommandContext(ctx, ebookConvert, args...)
+		utils.SetupProcessGroup(cmd)
+		
+		stderrPipe, pipeErr := cmd.StderrPipe()
+		if pipeErr != nil {
+			os.RemoveAll(outputDir)
+			return models.ProcessResult{SourcePath: m.Path, Error: pipeErr, StopAll: true}
+		}
+		
+		monCfg := utils.ProcessMonitorConfig{
+			MemoryLimit:    cfg.Common.MemoryLimit,
+			CheckInterval:  time.Duration(cfg.Common.MemoryCheckInterval) * time.Millisecond,
+		}
+		monitor := utils.NewProcessMonitor(cmd, monCfg)
+		
+		if startErr := cmd.Start(); startErr != nil {
+			os.RemoveAll(outputDir)
+			return models.ProcessResult{SourcePath: m.Path, Error: startErr, StopAll: true}
+		}
+		
+		monitor.Start(ctx)
+		defer monitor.Stop()
+		
+		waitErr := cmd.Wait()
+		output, _ = io.ReadAll(stderrPipe)
+		
+		if waitErr != nil {
+			os.RemoveAll(outputDir)
+			
+			if monitor.Exceeded() {
+				return models.ProcessResult{
+					SourcePath: m.Path,
+					Error:      fmt.Errorf("process exceeded memory limit of %s", utils.FormatSize(cfg.Common.MemoryLimit)),
+					Output:     string(output),
+					StopAll:    true,
+				}
+			}
+			
+			return models.ProcessResult{SourcePath: m.Path, Error: waitErr, Output: string(output)}
+		}
+	} else {
+		cmd := exec.CommandContext(ctx, ebookConvert, args...)
+		output, err = cmd.CombinedOutput()
+		if err != nil {
+			// Clean up on failure
+			os.RemoveAll(outputDir)
+			return models.ProcessResult{SourcePath: m.Path, Error: err, Output: string(output)}
+		}
 	}
 
 	if !p.folderExists(outputDir) {
@@ -165,20 +214,68 @@ func (p *TextProcessor) runOCR(path string, cfg *models.ProcessorConfig) string 
 
 	args = append(args, path, outputPath)
 
-	cmd := exec.Command(ocrmypdf, args...)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		outputStr := string(output)
-		// Check if it's a "skip-text" message (not really an error)
-		if strings.Contains(outputStr, "already contains text") ||
-			strings.Contains(outputStr, "skipping") {
-			slog.Info("Skipping OCR (PDF already has text)", "path", path)
+	// Setup memory monitoring if configured
+	var output []byte
+	var err error
+	
+	if cfg.Common.MemoryLimit > 0 {
+		cmd := exec.Command(ocrmypdf, args...)
+		utils.SetupProcessGroup(cmd)
+		
+		stderrPipe, pipeErr := cmd.StderrPipe()
+		if pipeErr != nil {
+			slog.Debug("ocrmypdf StderrPipe failed", "error", pipeErr)
+		} else {
+			monCfg := utils.ProcessMonitorConfig{
+				MemoryLimit:    cfg.Common.MemoryLimit,
+				CheckInterval:  time.Duration(cfg.Common.MemoryCheckInterval) * time.Millisecond,
+			}
+			monitor := utils.NewProcessMonitor(cmd, monCfg)
+			
+			if startErr := cmd.Start(); startErr != nil {
+				slog.Debug("ocrmypdf Start failed", "error", startErr)
+			} else {
+				monitor.Start(context.Background())
+				
+				waitErr := cmd.Wait()
+				output, _ = io.ReadAll(stderrPipe)
+				
+				monitor.Stop()
+				
+				if waitErr != nil {
+					outputStr := string(output)
+					// Check if it's a "skip-text" message (not really an error)
+					if strings.Contains(outputStr, "already contains text") ||
+						strings.Contains(outputStr, "skipping") {
+						slog.Info("Skipping OCR (PDF already has text)", "path", path)
+						os.Remove(outputPath)
+						return ""
+					}
+					slog.Warn("OCR failed", "path", path, "error", waitErr, "output", outputStr)
+					os.Remove(outputPath)
+					return ""
+				}
+			}
+		}
+	}
+	
+	// Fallback to standard execution if monitoring not used or failed
+	if err == nil {
+		cmd := exec.Command(ocrmypdf, args...)
+		output, err = cmd.CombinedOutput()
+		if err != nil {
+			outputStr := string(output)
+			// Check if it's a "skip-text" message (not really an error)
+			if strings.Contains(outputStr, "already contains text") ||
+				strings.Contains(outputStr, "skipping") {
+				slog.Info("Skipping OCR (PDF already has text)", "path", path)
+				os.Remove(outputPath)
+				return ""
+			}
+			slog.Warn("OCR failed", "path", path, "error", err, "output", outputStr)
 			os.Remove(outputPath)
 			return ""
 		}
-		slog.Warn("OCR failed", "path", path, "error", err, "output", outputStr)
-		os.Remove(outputPath)
-		return ""
 	}
 
 	if _, err := os.Stat(outputPath); err == nil {
@@ -318,9 +415,37 @@ func (p *TextProcessor) processEbookImages(ctx context.Context, images []string,
 			outputPath,
 		}
 
-		cmd := exec.CommandContext(ctx, imCmd, args...)
-		if err := cmd.Run(); err != nil {
-			slog.Warn("Failed to convert ebook image", "path", img, "error", err)
+		// Setup memory monitoring if configured
+		var cmdErr error
+		if cfg.Common.MemoryLimit > 0 {
+			cmd := exec.CommandContext(ctx, imCmd, args...)
+			utils.SetupProcessGroup(cmd)
+			
+			monCfg := utils.ProcessMonitorConfig{
+				MemoryLimit:    cfg.Common.MemoryLimit,
+				CheckInterval:  time.Duration(cfg.Common.MemoryCheckInterval) * time.Millisecond,
+			}
+			monitor := utils.NewProcessMonitor(cmd, monCfg)
+			
+			if startErr := cmd.Start(); startErr != nil {
+				cmdErr = startErr
+			} else {
+				monitor.Start(ctx)
+				
+				waitErr := cmd.Wait()
+				monitor.Stop()
+				
+				if waitErr != nil {
+					cmdErr = waitErr
+				}
+			}
+		} else {
+			cmd := exec.CommandContext(ctx, imCmd, args...)
+			cmdErr = cmd.Run()
+		}
+		
+		if cmdErr != nil {
+			slog.Warn("Failed to convert ebook image", "path", img, "error", cmdErr)
 			// Clean up partial transcode if original still exists
 			if _, statErr := os.Stat(img); statErr == nil {
 				os.Remove(outputPath)

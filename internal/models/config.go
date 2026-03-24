@@ -76,6 +76,9 @@ type CommonConfig struct {
 	ForceShrink        bool
 	VerboseFFmpeg      bool
 	IncludeTimecode    bool
+	// Memory monitoring
+	MemoryLimit        int64 // Memory limit in bytes (0 = no limit)
+	MemoryCheckInterval int   // Memory check interval in milliseconds
 }
 
 // ProcessorConfig contains comprehensive configuration for all media processing

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"math"
 	"os"
@@ -47,12 +48,14 @@ type ArchiveProcessor struct {
 	BaseProcessor
 	unarInstalled bool
 	ffmpeg        *ffmpeg.FFmpegProcessor
+	cfg           *models.ProcessorConfig
 }
 
-func NewArchiveProcessor(ffmpeg *ffmpeg.FFmpegProcessor) *ArchiveProcessor {
+func NewArchiveProcessor(ffmpeg *ffmpeg.FFmpegProcessor, cfg *models.ProcessorConfig) *ArchiveProcessor {
 	return &ArchiveProcessor{
 		BaseProcessor: BaseProcessor{category: "Archived", requiredTool: "unar"},
 		ffmpeg:        ffmpeg,
+		cfg:           cfg,
 		unarInstalled: utils.CommandExists("lsar") && utils.CommandExists("unar"),
 	}
 }
@@ -112,13 +115,70 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *models.Shri
 		return models.ProcessResult{SourcePath: m.Path, PartFiles: partFiles, Error: err}
 	}
 
-	cmd := exec.CommandContext(ctx, unar, "-force-rename", "-o", outputDir, filepath.Base(m.Path))
-	cmd.Dir = filepath.Dir(m.Path)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		// Clean up on failure
-		os.RemoveAll(outputDir)
-		return models.ProcessResult{SourcePath: m.Path, PartFiles: partFiles, Error: err, Output: string(output)}
+	// Setup memory monitoring if configured
+	var output []byte
+	var err error
+
+	if p.cfg.Common.MemoryLimit > 0 {
+		monCfg := utils.ProcessMonitorConfig{
+			MemoryLimit:    p.cfg.Common.MemoryLimit,
+			CheckInterval:  time.Duration(p.cfg.Common.MemoryCheckInterval) * time.Millisecond,
+		}
+
+		cmd := exec.CommandContext(ctx, unar, "-force-rename", "-o", outputDir, filepath.Base(m.Path))
+		cmd.Dir = filepath.Dir(m.Path)
+		utils.SetupProcessGroup(cmd)
+
+		// Capture stderr for error reporting
+		stderrPipe, pipeErr := cmd.StderrPipe()
+		if pipeErr != nil {
+			os.RemoveAll(outputDir)
+			return models.ProcessResult{SourcePath: m.Path, PartFiles: partFiles, Error: pipeErr, StopAll: true}
+		}
+
+		monitor := utils.NewProcessMonitor(cmd, monCfg)
+
+		if startErr := cmd.Start(); startErr != nil {
+			os.RemoveAll(outputDir)
+			return models.ProcessResult{SourcePath: m.Path, PartFiles: partFiles, Error: startErr, StopAll: true}
+		}
+
+		monitor.Start(ctx)
+		defer monitor.Stop()
+
+		// Wait for command to complete
+		waitErr := cmd.Wait()
+
+		// Read stderr output
+		output, _ = io.ReadAll(stderrPipe)
+
+		if waitErr != nil {
+			// Clean up on failure
+			os.RemoveAll(outputDir)
+
+			// Check if memory limit was exceeded
+			if monitor.Exceeded() {
+				return models.ProcessResult{
+					SourcePath: m.Path,
+					PartFiles:  partFiles,
+					Error:      fmt.Errorf("process exceeded memory limit of %s", utils.FormatSize(p.cfg.Common.MemoryLimit)),
+					Output:     string(output),
+					StopAll:    true,
+				}
+			}
+
+			return models.ProcessResult{SourcePath: m.Path, PartFiles: partFiles, Error: waitErr, Output: string(output)}
+		}
+	} else {
+		// No memory monitoring - use standard execution
+		cmd := exec.CommandContext(ctx, unar, "-force-rename", "-o", outputDir, filepath.Base(m.Path))
+		cmd.Dir = filepath.Dir(m.Path)
+		output, err = cmd.CombinedOutput()
+		if err != nil {
+			// Clean up on failure
+			os.RemoveAll(outputDir)
+			return models.ProcessResult{SourcePath: m.Path, PartFiles: partFiles, Error: err, Output: string(output)}
+		}
 	}
 
 	// Verify that something was actually extracted
@@ -558,14 +618,14 @@ func isSecondaryPart(path string) bool {
 // getPartFiles returns list of all part files for a multi-part archive
 func (p *ArchiveProcessor) getPartFiles(path string) []string {
 	slog.Debug("Getting part files", "path", path)
-	
+
 	// Use a channel and goroutine to implement timeout
 	resultChan := make(chan []string, 1)
-	
+
 	go func() {
 		resultChan <- p.getPartFilesImpl(path)
 	}()
-	
+
 	select {
 	case result := <-resultChan:
 		return result
@@ -585,15 +645,58 @@ func (p *ArchiveProcessor) getPartFilesImpl(path string) []string {
 	lsar := utils.GetCommandPath("lsar")
 	if lsar != "" {
 		slog.Debug("Calling lsar for XADVolumes", "path", path)
-		
+
 		// Add timeout to prevent hanging
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		
+
 		lsarCmd := exec.CommandContext(ctx, lsar, "-json", path)
 		lsarCmd.Dir = dir
-		lsarOutput, err := lsarCmd.CombinedOutput()
-		
+
+		// Use memory monitoring if configured
+		var lsarOutput []byte
+		var err error
+
+		if p.cfg.Common.MemoryLimit > 0 {
+			utils.SetupProcessGroup(lsarCmd)
+
+			stderrPipe, pipeErr := lsarCmd.StderrPipe()
+			if pipeErr != nil {
+				slog.Debug("lsar StderrPipe failed", "error", pipeErr)
+			} else {
+				monCfg := utils.ProcessMonitorConfig{
+					MemoryLimit:    p.cfg.Common.MemoryLimit,
+					CheckInterval:  time.Duration(p.cfg.Common.MemoryCheckInterval) * time.Millisecond,
+				}
+				monitor := utils.NewProcessMonitor(lsarCmd, monCfg)
+
+				if startErr := lsarCmd.Start(); startErr != nil {
+					slog.Debug("lsar Start failed", "error", startErr)
+				} else {
+					monitor.Start(ctx)
+
+					waitErr := lsarCmd.Wait()
+					lsarOutput, _ = io.ReadAll(stderrPipe)
+
+					monitor.Stop()
+
+					if waitErr != nil {
+						if ctx.Err() == context.DeadlineExceeded {
+							slog.Warn("lsar XADVolumes call timed out", "path", path)
+							err = fmt.Errorf("lsar timeout")
+						} else {
+							err = waitErr
+						}
+					}
+				}
+			}
+		}
+
+		if err == nil {
+			// Fallback to CombinedOutput if monitoring not used or failed
+			lsarOutput, err = lsarCmd.CombinedOutput()
+		}
+
 		if ctx.Err() == context.DeadlineExceeded {
 			slog.Warn("lsar XADVolumes call timed out", "path", path)
 			err = fmt.Errorf("lsar timeout")
@@ -807,16 +910,59 @@ func (p *ArchiveProcessor) lsarWithStatus(path string) ([]models.ShrinkMedia, bo
 	if lsar == "" {
 		return nil, true
 	}
-	
+
 	// Add timeout to prevent hanging
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	
+
 	slog.Debug("Running lsar command", "path", path)
 	lsarCmd := exec.CommandContext(ctx, lsar, "-json", path)
 	lsarCmd.Dir = filepath.Dir(path)
-	output, err := lsarCmd.CombinedOutput()
 	
+	// Use memory monitoring if configured
+	var output []byte
+	var err error
+	
+	if p.cfg.Common.MemoryLimit > 0 {
+		utils.SetupProcessGroup(lsarCmd)
+		
+		stderrPipe, pipeErr := lsarCmd.StderrPipe()
+		if pipeErr != nil {
+			slog.Debug("lsar StderrPipe failed", "error", pipeErr)
+		} else {
+			monCfg := utils.ProcessMonitorConfig{
+				MemoryLimit:    p.cfg.Common.MemoryLimit,
+				CheckInterval:  time.Duration(p.cfg.Common.MemoryCheckInterval) * time.Millisecond,
+			}
+			monitor := utils.NewProcessMonitor(lsarCmd, monCfg)
+			
+			if startErr := lsarCmd.Start(); startErr != nil {
+				slog.Debug("lsar Start failed", "error", startErr)
+			} else {
+				monitor.Start(ctx)
+				
+				waitErr := lsarCmd.Wait()
+				output, _ = io.ReadAll(stderrPipe)
+				
+				monitor.Stop()
+				
+				if waitErr != nil {
+					if ctx.Err() == context.DeadlineExceeded {
+						slog.Warn("lsar command timed out", "path", path)
+						err = fmt.Errorf("lsar timeout")
+					} else {
+						err = waitErr
+					}
+				}
+			}
+		}
+	}
+	
+	if err == nil {
+		// Fallback to CombinedOutput if monitoring not used or failed
+		output, err = lsarCmd.CombinedOutput()
+	}
+
 	if ctx.Err() == context.DeadlineExceeded {
 		slog.Warn("lsar command timed out", "path", path)
 		err = fmt.Errorf("lsar timeout")

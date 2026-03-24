@@ -20,6 +20,7 @@ type Config struct {
 	ImageFlags       `embed:"" group:"Image"`
 	TextFlags        `embed:"" group:"Text"`
 	ParallelFlags    `embed:"" group:"Parallel"`
+	MemoryFlags      `embed:"" group:"Memory"`
 	TimeoutFlags     `embed:"" group:"Timeout"`
 
 	ContinueFrom string `help:"Skip media until specific file path is seen" env:"SHRINK_CONTINUE_FROM"`
@@ -114,6 +115,11 @@ type ParallelFlags struct {
 	TextThreads  int `default:"2" help:"Maximum concurrent text conversions" env:"SHRINK_TEXT_THREADS"`
 }
 
+type MemoryFlags struct {
+	MemoryLimit         string `default:"" help:"Maximum memory usage per process (e.g., 4G, 512M). Empty = no limit" env:"SHRINK_MEMORY_LIMIT"`
+	MemoryCheckInterval int    `default:"500" help:"Memory check interval in milliseconds" env:"SHRINK_MEMORY_CHECK_INTERVAL"`
+}
+
 type TimeoutFlags struct {
 	VideoTimeout     string  `default:"90m" help:"Video timeout when duration is unknown" env:"SHRINK_VIDEO_TIMEOUT"`
 	AudioTimeout     string  `default:"10m" help:"Audio timeout when duration is unknown" env:"SHRINK_AUDIO_TIMEOUT"`
@@ -161,18 +167,20 @@ func (c *Config) BuildProcessorConfig() *models.ProcessorConfig {
 
 func (c *Config) buildCommonConfig() models.CommonConfig {
 	return models.CommonConfig{
-		SourceAudioBitrate: utils.ParseBitrate(c.SourceAudioBitrate),
-		SourceVideoBitrate: utils.ParseBitrate(c.SourceVideoBitrate),
-		DeleteUnplayable:   c.DeleteUnplayable,
-		DeleteLarger:       c.DeleteLarger,
-		MoveBroken:         c.MoveBroken,
-		Valid:              c.Valid,
-		Invalid:            c.Invalid,
-		ForceShrink:        c.ForceShrink,
-		VerboseFFmpeg:      c.VerboseFFmpeg,
-		IncludeTimecode:    c.IncludeTimecode,
-		MaxWidthBuffer:     c.MaxWidthBuffer,
-		MaxHeightBuffer:    c.MaxHeightBuffer,
+		SourceAudioBitrate:  utils.ParseBitrate(c.SourceAudioBitrate),
+		SourceVideoBitrate:  utils.ParseBitrate(c.SourceVideoBitrate),
+		DeleteUnplayable:    c.DeleteUnplayable,
+		DeleteLarger:        c.DeleteLarger,
+		MoveBroken:          c.MoveBroken,
+		Valid:               c.Valid,
+		Invalid:             c.Invalid,
+		ForceShrink:         c.ForceShrink,
+		VerboseFFmpeg:       c.VerboseFFmpeg,
+		IncludeTimecode:     c.IncludeTimecode,
+		MaxWidthBuffer:      c.MaxWidthBuffer,
+		MaxHeightBuffer:     c.MaxHeightBuffer,
+		MemoryLimit:         utils.ParseSize(c.MemoryLimit),
+		MemoryCheckInterval: c.MemoryCheckInterval,
 	}
 }
 
