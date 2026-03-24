@@ -691,11 +691,13 @@ func (p *ArchiveProcessor) getPartFilesImpl(path string) []string {
 		}
 
 		if isArchiveExt {
-			newBase := strings.TrimSuffix(baseWithoutExt, e)
-			slog.Debug("Trimmed extension", "oldBase", baseWithoutExt, "ext", e, "newBase", newBase)
+			// Use the original case extension for trimming, not the lowercased version
+			originalExt := filepath.Ext(baseWithoutExt)
+			newBase := strings.TrimSuffix(baseWithoutExt, originalExt)
+			slog.Debug("Trimmed extension", "oldBase", baseWithoutExt, "ext", originalExt, "newBase", newBase)
 			// Safety: ensure we actually removed something
 			if newBase == baseWithoutExt {
-				slog.Warn("TrimSuffix did not remove extension, breaking", "path", path, "ext", e)
+				slog.Warn("TrimSuffix did not remove extension, breaking", "path", path, "ext", originalExt)
 				break
 			}
 			baseWithoutExt = newBase
