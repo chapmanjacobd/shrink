@@ -409,7 +409,7 @@ func (p *ArchiveProcessor) EstimateSizeForArchive(m *models.ShrinkMedia, cfg *mo
 				}
 				duration = float64(content.CompressedSize) / sourceBitrate * 8
 			}
-			
+
 			targetBitrate := float64(cfg.Video.TargetVideoBitrate)
 			transcodeRate := cfg.Video.TranscodingVideoRate
 			if content.Width > 0 && content.Height > 0 {
