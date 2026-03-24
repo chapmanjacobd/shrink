@@ -184,7 +184,14 @@ func TestFileDisappears(t *testing.T) {
 	// No, just provide a non-existent file in the DB.
 	dbPath := filepath.Join(tempDir, "test.db")
 	db, _ := db.Connect(dbPath)
-	db.Exec(`CREATE TABLE media (path TEXT PRIMARY KEY, size INTEGER, media_type TEXT, time_deleted INTEGER DEFAULT 0)`)
+	db.Exec(`CREATE TABLE media (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		path TEXT UNIQUE NOT NULL,
+		size INTEGER,
+		media_type TEXT,
+		time_deleted INTEGER DEFAULT 0,
+		is_shrinked INTEGER DEFAULT 0
+	)`)
 	db.Exec(`INSERT INTO media (path, size, media_type) VALUES (?, ?, ?)`,
 		filepath.Join(tempDir, "ghost.avi"), 1000, "video")
 	db.Close()

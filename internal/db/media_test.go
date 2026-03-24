@@ -16,9 +16,28 @@ func setupTestDB(t *testing.T) (*sql.DB, string) {
 	if err != nil {
 		t.Fatalf("Failed to open DB: %v", err)
 	}
-	err = InitDB(db)
+	// Create the expected schema for testing
+	_, err = db.Exec(`
+		CREATE TABLE media (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			path TEXT UNIQUE NOT NULL,
+			size INTEGER NOT NULL,
+			duration INTEGER DEFAULT 0,
+			video_count INTEGER DEFAULT 0,
+			audio_count INTEGER DEFAULT 0,
+			video_codecs TEXT,
+			audio_codecs TEXT,
+			subtitle_codecs TEXT,
+			media_type TEXT,
+			time_deleted INTEGER DEFAULT 0,
+			is_shrinked INTEGER DEFAULT 0
+		) STRICT;
+		CREATE INDEX idx_media_path ON media(path);
+		CREATE INDEX idx_media_type ON media(media_type);
+		CREATE INDEX idx_media_deleted ON media(time_deleted);
+	`)
 	if err != nil {
-		t.Fatalf("Failed to init DB: %v", err)
+		t.Fatalf("Failed to create schema: %v", err)
 	}
 	return db, dbPath
 }

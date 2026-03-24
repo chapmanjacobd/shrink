@@ -347,7 +347,8 @@ func TestShrinkMultiPartArchive(t *testing.T) {
 	dbPath := filepath.Join(tempDir, "test.db")
 	db, _ := db.Connect(dbPath)
 	db.Exec(`CREATE TABLE media (
-		path TEXT PRIMARY KEY,
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		path TEXT UNIQUE NOT NULL,
 		size INTEGER,
 		duration REAL,
 		video_count INTEGER,
@@ -426,7 +427,8 @@ func TestShrinkBrokenArchive(t *testing.T) {
 	}
 
 	_, err = db.Exec(`CREATE TABLE media (
-		path TEXT PRIMARY KEY,
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		path TEXT UNIQUE NOT NULL,
 		size INTEGER,
 		duration REAL,
 		video_count INTEGER,
@@ -485,7 +487,8 @@ func TestShrinkArchiveKeep(t *testing.T) {
 	}
 
 	_, err = db.Exec(`CREATE TABLE media (
-		path TEXT PRIMARY KEY,
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		path TEXT UNIQUE NOT NULL,
 		size INTEGER,
 		duration REAL,
 		video_count INTEGER,

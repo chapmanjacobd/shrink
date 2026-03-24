@@ -19,4 +19,5 @@ package db
 // For more information, see README.md
 
 // FTS5 support is required. Build with: go build -tags fts5
-var _ = _fts5BuildTagRequired
+// This variable is defined in fts5.go when the fts5 tag is present
+var _ bool = _fts5BuildTagRequired

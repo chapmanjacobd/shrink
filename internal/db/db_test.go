@@ -12,40 +12,83 @@ func TestDatabaseLifecycle(t *testing.T) {
 	tempDir := t.TempDir()
 	dbPath := filepath.Join(tempDir, "test.db")
 
+	// Create database with expected schema
 	db, err := Connect(dbPath)
 	if err != nil {
 		t.Fatalf("Open failed: %v", err)
 	}
-	defer db.Close()
 
-	// 1. InitDB
-	err = InitDB(db)
+	// Create the expected schema for testing
+	_, err = db.Exec(`
+		CREATE TABLE media (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			path TEXT UNIQUE NOT NULL,
+			size INTEGER NOT NULL,
+			duration INTEGER DEFAULT 0,
+			video_count INTEGER DEFAULT 0,
+			audio_count INTEGER DEFAULT 0,
+			video_codecs TEXT,
+			audio_codecs TEXT,
+			subtitle_codecs TEXT,
+			media_type TEXT,
+			time_deleted INTEGER DEFAULT 0,
+			is_shrinked INTEGER DEFAULT 0
+		) STRICT;
+		CREATE INDEX idx_media_path ON media(path);
+		CREATE INDEX idx_media_type ON media(media_type);
+		CREATE INDEX idx_media_deleted ON media(time_deleted);
+	`)
 	if err != nil {
-		t.Fatalf("InitDB failed: %v", err)
+		t.Fatalf("Failed to create schema: %v", err)
 	}
-	if !DatabaseExists(dbPath) {
-		t.Fatalf("DatabaseExists returned false after InitDB")
-	}
+	db.Close()
 
-	// 2. Connect
+	// 1. Connect
 	db2, err := Connect(dbPath)
 	if err != nil {
 		t.Fatalf("Connect failed: %v", err)
 	}
 	defer db2.Close()
 
-	// 3. MigrateDB
-	err = MigrateDB(db)
-	if err != nil {
-		t.Fatalf("MigrateDB failed: %v", err)
+	if !DatabaseExists(dbPath) {
+		t.Fatalf("DatabaseExists returned false")
 	}
 
-	// 4. ConnectWithInit (should not error on existing DB)
+	// 2. ConnectWithInit (should validate schema successfully)
 	db3, _, err := ConnectWithInit(dbPath)
 	if err != nil {
 		t.Fatalf("ConnectWithInit failed: %v", err)
 	}
-	db3.Close()
+	defer db3.Close()
+}
+
+func TestEnsureSchemaValidation(t *testing.T) {
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "validation.db")
+
+	db, err := Connect(dbPath)
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer db.Close()
+
+	// Create table with missing columns
+	_, err = db.Exec(`
+		CREATE TABLE media (
+			id INTEGER PRIMARY KEY,
+			path TEXT,
+			size INTEGER
+		);
+	`)
+	if err != nil {
+		t.Fatalf("Failed to create table: %v", err)
+	}
+
+	// ensureSchema should fail due to missing columns
+	err = ensureSchema(db)
+	if err == nil {
+		t.Error("ensureSchema should fail with missing columns")
+	}
 }
 
 func TestResolveDatabasePath(t *testing.T) {
@@ -68,60 +111,40 @@ func TestResolveDatabasePath(t *testing.T) {
 	}
 }
 
-func TestMigrationToInteger(t *testing.T) {
+func TestIndexExists(t *testing.T) {
 	tempDir := t.TempDir()
-	dbPath := filepath.Join(tempDir, "migration.db")
+	dbPath := filepath.Join(tempDir, "index.db")
+
 	db, err := Connect(dbPath)
 	if err != nil {
-		t.Fatalf("failed to open db: %v", err)
+		t.Fatalf("Open failed: %v", err)
 	}
 	defer db.Close()
 
-	// 1. Create a table with REAL duration (legacy)
+	// Create table and index
 	_, err = db.Exec(`
-		CREATE TABLE media (
-			path TEXT PRIMARY KEY,
-			size INTEGER,
-			duration REAL
-		);
+		CREATE TABLE test (id INTEGER PRIMARY KEY);
+		CREATE INDEX idx_test ON test(id);
 	`)
 	if err != nil {
-		t.Fatalf("failed to create legacy table: %v", err)
+		t.Fatalf("Failed to create table: %v", err)
 	}
 
-	// Insert some data with fractional duration
-	_, err = db.Exec("INSERT INTO media (path, size, duration) VALUES (?, ?, ?)", "test.mp4", 1000, 12.34)
+	// Test index exists
+	exists, err := indexExists(db, "idx_test")
 	if err != nil {
-		t.Fatalf("failed to insert: %v", err)
+		t.Fatalf("indexExists failed: %v", err)
+	}
+	if !exists {
+		t.Error("Expected idx_test to exist")
 	}
 
-	// 2. Run InitDB which should trigger MigrateDB and migrateToIntegerDuration
-	err = InitDB(db)
+	// Test non-existent index
+	exists, err = indexExists(db, "idx_nonexistent")
 	if err != nil {
-		t.Fatalf("InitDB failed: %v", err)
+		t.Fatalf("indexExists failed: %v", err)
 	}
-
-	// 3. Verify column type is now INTEGER
-	columns, err := getTableColumns(db, "media")
-	if err != nil {
-		t.Fatalf("getTableColumns failed: %v", err)
-	}
-	if columns["DURATION"] != "INTEGER" {
-		t.Errorf("Expected DURATION type to be INTEGER, got %s", columns["DURATION"])
-	}
-
-	// 4. Verify data was preserved (rounded)
-	var duration int64
-	err = db.QueryRow("SELECT duration FROM media WHERE path = 'test.mp4'").Scan(&duration)
-	if err != nil {
-		t.Fatalf("Failed to query duration: %v", err)
-	}
-	if duration != 12 {
-		t.Errorf("Expected duration 12, got %d", duration)
-	}
-
-	// 5. Verify STRICT is now there
-	if !IsTableStrict(db, "media") {
-		t.Errorf("Expected table to be STRICT after migration")
+	if exists {
+		t.Error("Expected idx_nonexistent to not exist")
 	}
 }

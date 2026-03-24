@@ -52,7 +52,8 @@ func RunScenario(t *testing.T, s Scenario, runCmd func(dbPath, tempDir string, a
 	}
 
 	_, err = db.Exec(`CREATE TABLE media (
-		path TEXT PRIMARY KEY,
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		path TEXT UNIQUE NOT NULL,
 		size INTEGER,
 		duration REAL,
 		video_count INTEGER,
