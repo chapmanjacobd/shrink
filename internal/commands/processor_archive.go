@@ -644,12 +644,20 @@ func (p *ArchiveProcessor) getPartFilesImpl(path string) []string {
 	baseWithoutExt := baseName
 	slog.Debug("Starting extension stripping loop", "baseWithoutExt", baseWithoutExt)
 	loopCount := 0
+	prevBaseWithoutExt := ""
 	for {
 		loopCount++
 		if loopCount > 20 {
 			slog.Warn("Extension stripping loop exceeded 20 iterations, breaking", "path", path, "baseWithoutExt", baseWithoutExt)
 			break
 		}
+		// Safety check: if baseWithoutExt isn't changing, we're in an infinite loop
+		if baseWithoutExt == prevBaseWithoutExt {
+			slog.Warn("Extension stripping loop detected no change, breaking", "path", path, "baseWithoutExt", baseWithoutExt)
+			break
+		}
+		prevBaseWithoutExt = baseWithoutExt
+		
 		e := strings.ToLower(filepath.Ext(baseWithoutExt))
 		slog.Debug("Extension loop iteration", "iteration", loopCount, "baseWithoutExt", baseWithoutExt, "ext", e)
 		if e == "" {
@@ -665,20 +673,32 @@ func (p *ArchiveProcessor) getPartFilesImpl(path string) []string {
 				break
 			}
 		}
-		// Check for .zNN or .NNN
+		// Check for .zNN or .NNN pattern
 		if !isArchiveExt {
-			if len(e) == 4 && e[1] == 'z' && e[2] >= '0' && e[2] <= '9' && e[3] >= '0' && e[3] <= '9' {
+			// .zNN pattern: exactly 3 chars, starts with 'z', followed by 2 digits
+			if len(e) == 3 && e[1] == 'z' && e[2] >= '0' && e[2] <= '9' && e[3] >= '0' && e[3] <= '9' {
 				isArchiveExt = true
 				slog.Debug("Found .zNN pattern", "ext", e)
+			} else if len(e) == 4 && e[1] == 'z' && e[2] >= '0' && e[2] <= '9' && e[3] >= '0' && e[3] <= '9' {
+				// .zNNN pattern (4 chars total including dot)
+				isArchiveExt = true
+				slog.Debug("Found .zNNN pattern", "ext", e)
 			} else if len(e) == 4 && e[1] >= '0' && e[1] <= '9' && e[2] >= '0' && e[2] <= '9' && e[3] >= '0' && e[3] <= '9' {
+				// .NNN pattern (exactly 3 digits)
 				isArchiveExt = true
 				slog.Debug("Found .NNN pattern", "ext", e)
 			}
 		}
 
 		if isArchiveExt {
-			baseWithoutExt = strings.TrimSuffix(baseWithoutExt, e)
-			slog.Debug("Trimmed extension", "newBaseWithoutExt", baseWithoutExt)
+			newBase := strings.TrimSuffix(baseWithoutExt, e)
+			slog.Debug("Trimmed extension", "oldBase", baseWithoutExt, "ext", e, "newBase", newBase)
+			// Safety: ensure we actually removed something
+			if newBase == baseWithoutExt {
+				slog.Warn("TrimSuffix did not remove extension, breaking", "path", path, "ext", e)
+				break
+			}
+			baseWithoutExt = newBase
 		} else {
 			slog.Debug("Not an archive extension, breaking", "ext", e)
 			break
