@@ -132,7 +132,7 @@ func buildSystemdCommand(ctx context.Context, exe string, args []string, cfg Sys
 	// Add memory limits
 	if cfg.MemoryLimit > 0 {
 		systemdArgs = append(systemdArgs,
-			"-p", "MemoryMax="+FormatSize(cfg.MemoryLimit),
+			"-p", "MemoryMax="+strconv.FormatInt(cfg.MemoryLimit, 10),
 		)
 		// Set swap limit (default to half of memory limit if not specified)
 		swapMax := cfg.MemorySwapMax
@@ -141,7 +141,7 @@ func buildSystemdCommand(ctx context.Context, exe string, args []string, cfg Sys
 		}
 		if swapMax > 0 {
 			systemdArgs = append(systemdArgs,
-				"-p", "MemorySwapMax="+FormatSize(swapMax),
+				"-p", "MemorySwapMax="+strconv.FormatInt(swapMax, 10),
 			)
 		} else {
 			// Explicitly disable swap
