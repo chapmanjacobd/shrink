@@ -23,10 +23,10 @@ func TestBuildSystemdCommand(t *testing.T) {
 	exe := "echo"
 	args := []string{"hello"}
 	cfg := SystemdRunConfig{
-		Enabled:      true,
-		MemoryLimit:  1024 * 1024 * 1024, // 1GB
+		Enabled:       true,
+		MemoryLimit:   1024 * 1024 * 1024, // 1GB
 		MemorySwapMax: 512 * 1024 * 1024,  // 512MB
-		Nice:         10,
+		Nice:          10,
 	}
 
 	cmd, err := buildSystemdCommand(ctx, exe, args, cfg)
@@ -75,7 +75,7 @@ func TestBuildSystemdCommand(t *testing.T) {
 func TestBuildSystemdCommandFormatting(t *testing.T) {
 	// This test specifically checks the formatting logic by calling buildSystemdCommand
 	// and inspecting the arguments if systemd-run is available.
-	
+
 	systemdRun := GetCommandPath("systemd-run")
 	if systemdRun == "" {
 		t.Skip("systemd-run not found, skipping formatting test")
@@ -105,7 +105,7 @@ func TestBuildSystemdCommandFormatting(t *testing.T) {
 		{
 			name:          "No Swap",
 			memoryLimit:   1024,
-			memorySwapMax: -1, 
+			memorySwapMax: -1,
 			wantMax:       "MemoryMax=1024",
 			wantSwap:      "MemorySwapMax=0",
 		},
@@ -129,6 +129,315 @@ func TestBuildSystemdCommandFormatting(t *testing.T) {
 			}
 			if !strings.Contains(argStr, tt.wantSwap) {
 				t.Errorf("expected %s in %s", tt.wantSwap, argStr)
+			}
+		})
+	}
+}
+
+func TestBuildSystemdCommandMemoryLimits(t *testing.T) {
+	systemdRun := GetCommandPath("systemd-run")
+	if systemdRun == "" {
+		t.Skip("systemd-run not found, skipping memory limits test")
+	}
+
+	tests := []struct {
+		name              string
+		cfg               SystemdRunConfig
+		wantMemoryMax     string
+		wantMemorySwapMax string
+		wantNoMemoryLimit bool
+	}{
+		{
+			name: "2GB limit with 1GB swap",
+			cfg: SystemdRunConfig{
+				Enabled:       true,
+				MemoryLimit:   2 * 1024 * 1024 * 1024,
+				MemorySwapMax: 1024 * 1024 * 1024,
+			},
+			wantMemoryMax:     "MemoryMax=2147483648",
+			wantMemorySwapMax: "MemorySwapMax=1073741824",
+		},
+		{
+			name: "512MB limit with default swap (half)",
+			cfg: SystemdRunConfig{
+				Enabled:     true,
+				MemoryLimit: 512 * 1024 * 1024,
+			},
+			wantMemoryMax:     "MemoryMax=536870912",
+			wantMemorySwapMax: "MemorySwapMax=268435456",
+		},
+		{
+			name: "swap explicitly disabled",
+			cfg: SystemdRunConfig{
+				Enabled:       true,
+				MemoryLimit:   1024 * 1024 * 1024,
+				MemorySwapMax: -1, // Use -1 to explicitly disable swap
+			},
+			wantMemoryMax:     "MemoryMax=1073741824",
+			wantMemorySwapMax: "MemorySwapMax=0",
+		},
+		{
+			name: "negative swap disables swap",
+			cfg: SystemdRunConfig{
+				Enabled:       true,
+				MemoryLimit:   1024 * 1024 * 1024,
+				MemorySwapMax: -1,
+			},
+			wantMemoryMax:     "MemoryMax=1073741824",
+			wantMemorySwapMax: "MemorySwapMax=0",
+		},
+		{
+			name: "no memory limit (direct execution)",
+			cfg: SystemdRunConfig{
+				Enabled:     true,
+				MemoryLimit: 0,
+			},
+			wantNoMemoryLimit: true,
+		},
+		{
+			name: "disabled systemd-run (direct execution)",
+			cfg: SystemdRunConfig{
+				Enabled:     false,
+				MemoryLimit: 1024 * 1024 * 1024,
+			},
+			wantNoMemoryLimit: true,
+		},
+		{
+			name: "large memory value",
+			cfg: SystemdRunConfig{
+				Enabled:       true,
+				MemoryLimit:   8 * 1024 * 1024 * 1024,
+				MemorySwapMax: 4 * 1024 * 1024 * 1024,
+			},
+			wantMemoryMax:     "MemoryMax=8589934592",
+			wantMemorySwapMax: "MemorySwapMax=4294967296",
+		},
+		{
+			name: "minimum memory value",
+			cfg: SystemdRunConfig{
+				Enabled:       true,
+				MemoryLimit:   1,
+				MemorySwapMax: 0,
+			},
+			wantMemoryMax:     "MemoryMax=1",
+			wantMemorySwapMax: "MemorySwapMax=0",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd, err := buildSystemdCommand(context.Background(), "true", nil, tt.cfg)
+			if err != nil {
+				t.Fatalf("buildSystemdCommand failed: %v", err)
+			}
+
+			argStr := strings.Join(cmd.Args, " ")
+
+			if tt.wantNoMemoryLimit {
+				// Should not contain MemoryMax
+				if strings.Contains(argStr, "MemoryMax") {
+					t.Errorf("expected no MemoryMax in command, but got: %s", argStr)
+				}
+				return
+			}
+
+			if !strings.Contains(argStr, tt.wantMemoryMax) {
+				t.Errorf("expected %s in %s", tt.wantMemoryMax, argStr)
+			}
+			if tt.wantMemorySwapMax != "" && !strings.Contains(argStr, tt.wantMemorySwapMax) {
+				t.Errorf("expected %s in %s", tt.wantMemorySwapMax, argStr)
+			}
+		})
+	}
+}
+
+func TestBuildSystemdCommandSwapDefaultLogic(t *testing.T) {
+	systemdRun := GetCommandPath("systemd-run")
+	if systemdRun == "" {
+		t.Skip("systemd-run not found, skipping swap default logic test")
+	}
+
+	tests := []struct {
+		name          string
+		memoryLimit   int64
+		memorySwapMax int64
+		wantSwap      int64
+	}{
+		{
+			name:          "swap defaults to half of memory",
+			memoryLimit:   1000,
+			memorySwapMax: 0,
+			wantSwap:      500,
+		},
+		{
+			name:          "swap defaults to half (odd number)",
+			memoryLimit:   1025,
+			memorySwapMax: 0,
+			wantSwap:      512,
+		},
+		{
+			name:          "explicit swap value is used",
+			memoryLimit:   1000,
+			memorySwapMax: 200,
+			wantSwap:      200,
+		},
+		{
+			name:          "zero swap when MemorySwapMax is 0",
+			memoryLimit:   1000,
+			memorySwapMax: 0,
+			wantSwap:      500, // default to half
+		},
+		{
+			name:          "negative swap becomes 0",
+			memoryLimit:   1000,
+			memorySwapMax: -100,
+			wantSwap:      0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := SystemdRunConfig{
+				Enabled:       true,
+				MemoryLimit:   tt.memoryLimit,
+				MemorySwapMax: tt.memorySwapMax,
+			}
+			cmd, err := buildSystemdCommand(context.Background(), "true", nil, cfg)
+			if err != nil {
+				t.Fatalf("buildSystemdCommand failed: %v", err)
+			}
+
+			argStr := strings.Join(cmd.Args, " ")
+			expectedSwap := "MemorySwapMax=" + strconv.FormatInt(tt.wantSwap, 10)
+			if !strings.Contains(argStr, expectedSwap) {
+				t.Errorf("expected %s in %s", expectedSwap, argStr)
+			}
+		})
+	}
+}
+
+// TestParseSizeToSystemdCommandE2E tests the full end-to-end flow from CLI string
+// parsing to systemd-run command building, including the default 12GB value.
+func TestParseSizeToSystemdCommandE2E(t *testing.T) {
+	systemdRun := GetCommandPath("systemd-run")
+	if systemdRun == "" {
+		t.Skip("systemd-run not found, skipping e2e test")
+	}
+
+	tests := []struct {
+		name              string
+		cliMemoryLimit    string
+		cliMemorySwapMax  string
+		wantMemoryMax     string
+		wantMemorySwapMax string
+		wantNoSystemd     bool // true if systemd-run should not be used
+	}{
+		{
+			name:              "default empty (12GB default)",
+			cliMemoryLimit:    "",
+			cliMemorySwapMax:  "",
+			wantMemoryMax:     "MemoryMax=12884901888",    // 12 * 1024 * 1024 * 1024
+			wantMemorySwapMax: "MemorySwapMax=6442450944", // half of 12GB
+		},
+		{
+			name:              "4G memory limit",
+			cliMemoryLimit:    "4G",
+			cliMemorySwapMax:  "",
+			wantMemoryMax:     "MemoryMax=4294967296",
+			wantMemorySwapMax: "MemorySwapMax=2147483648", // half of 4G
+		},
+		{
+			name:              "512M memory limit",
+			cliMemoryLimit:    "512M",
+			cliMemorySwapMax:  "",
+			wantMemoryMax:     "MemoryMax=536870912",
+			wantMemorySwapMax: "MemorySwapMax=268435456", // half of 512M
+		},
+		{
+			name:              "2G with 1G swap",
+			cliMemoryLimit:    "2G",
+			cliMemorySwapMax:  "1G",
+			wantMemoryMax:     "MemoryMax=2147483648",
+			wantMemorySwapMax: "MemorySwapMax=1073741824",
+		},
+		{
+			name:              "swap disabled with 0",
+			cliMemoryLimit:    "2G",
+			cliMemorySwapMax:  "0",
+			wantMemoryMax:     "MemoryMax=2147483648",
+			wantMemorySwapMax: "MemorySwapMax=0",
+		},
+		{
+			name:             "0 memory limit (no systemd)",
+			cliMemoryLimit:   "0",
+			cliMemorySwapMax: "",
+			wantNoSystemd:    true,
+		},
+		{
+			name:              "1GiB explicit",
+			cliMemoryLimit:    "1GiB",
+			cliMemorySwapMax:  "",
+			wantMemoryMax:     "MemoryMax=1073741824",
+			wantMemorySwapMax: "MemorySwapMax=536870912",
+		},
+		{
+			name:              "1024MiB explicit",
+			cliMemoryLimit:    "1024MiB",
+			cliMemorySwapMax:  "",
+			wantMemoryMax:     "MemoryMax=1073741824",
+			wantMemorySwapMax: "MemorySwapMax=536870912",
+		},
+		{
+			name:              "1048576KiB explicit",
+			cliMemoryLimit:    "1048576KiB",
+			cliMemorySwapMax:  "",
+			wantMemoryMax:     "MemoryMax=1073741824",
+			wantMemorySwapMax: "MemorySwapMax=536870912",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Parse CLI strings to int64 (simulating config.go logic)
+			memoryLimit := ParseSize(tt.cliMemoryLimit)
+			if memoryLimit == 0 && tt.cliMemoryLimit == "" {
+				// Default to 12GB when empty
+				memoryLimit = 12 * 1024 * 1024 * 1024
+			}
+
+			var memorySwapMax int64
+			if tt.cliMemorySwapMax == "0" {
+				memorySwapMax = -1 // Explicitly disable swap
+			} else {
+				memorySwapMax = ParseSize(tt.cliMemorySwapMax)
+			}
+
+			cfg := SystemdRunConfig{
+				Enabled:       true,
+				MemoryLimit:   memoryLimit,
+				MemorySwapMax: memorySwapMax,
+			}
+
+			cmd, err := buildSystemdCommand(context.Background(), "ffmpeg", []string{"-i", "input.mkv"}, cfg)
+			if err != nil {
+				t.Fatalf("buildSystemdCommand failed: %v", err)
+			}
+
+			argStr := strings.Join(cmd.Args, " ")
+
+			if tt.wantNoSystemd {
+				// Should not contain systemd-run memory limits
+				if strings.Contains(argStr, "MemoryMax") {
+					t.Errorf("expected no MemoryMax in command, but got: %s", argStr)
+				}
+				return
+			}
+
+			if !strings.Contains(argStr, tt.wantMemoryMax) {
+				t.Errorf("expected %s in %s", tt.wantMemoryMax, argStr)
+			}
+			if tt.wantMemorySwapMax != "" && !strings.Contains(argStr, tt.wantMemorySwapMax) {
+				t.Errorf("expected %s in %s", tt.wantMemorySwapMax, argStr)
 			}
 		})
 	}

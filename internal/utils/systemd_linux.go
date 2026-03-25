@@ -8,8 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
-	"strings"
-	"testing"
 )
 
 // SystemdRunConfig holds configuration for running commands via systemd-run.
@@ -34,16 +32,6 @@ type SystemdRunConfig struct {
 	Dir string
 }
 
-// isTesting returns true if the code is running under `go test`.
-func isTesting() bool {
-	for _, arg := range os.Args {
-		if strings.HasPrefix(arg, "-test.") {
-			return true
-		}
-	}
-	return testing.Testing()
-}
-
 // RunCommandWithSystemd executes a command, optionally wrapping it with systemd-run
 // for resource control. Returns the command's exit error and output.
 //
@@ -51,18 +39,7 @@ func isTesting() bool {
 //   - systemd-run --scope -p MemoryMax=<limit> -p MemorySwapMax=<swap> --nice=<nice> -- ...
 //
 // If systemd-run is not available or Enabled is false, runs the command directly.
-// During tests, systemd-run is disabled to avoid D-Bus authentication prompts.
 func RunCommandWithSystemd(ctx context.Context, exe string, args []string, cfg SystemdRunConfig) ([]byte, error) {
-	// Disable systemd-run during tests to avoid D-Bus authentication
-	if isTesting() {
-		cmd := exec.CommandContext(ctx, exe, args...)
-		SetupProcessGroup(cmd)
-		if cfg.Dir != "" {
-			cmd.Dir = cfg.Dir
-		}
-		return cmd.CombinedOutput()
-	}
-
 	cmd, err := buildSystemdCommand(ctx, exe, args, cfg)
 	if err != nil {
 		return nil, err
@@ -152,12 +129,17 @@ func buildSystemdCommand(ctx context.Context, exe string, args []string, cfg Sys
 	}
 
 	// Add remaining systemd-run flags
+	// Note: --same-dir is only used when Dir is not specified, as it conflicts
+	// with --working-directory. When Dir is specified, we want the command to
+	// run in that directory, not the same directory as systemd-run.
 	systemdArgs = append(systemdArgs,
-		"--same-dir",
 		"--collect",
 		"--quiet",
-		"--",
 	)
+	if cfg.Dir == "" {
+		systemdArgs = append(systemdArgs, "--same-dir")
+	}
+	systemdArgs = append(systemdArgs, "--")
 
 	// Append the actual command
 	systemdArgs = append(systemdArgs, exe)
