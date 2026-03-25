@@ -3,8 +3,9 @@
 package utils
 
 import (
-	"syscall"
-	"unsafe"
+	"os/exec"
+	"strconv"
+	"strings"
 
 	"golang.org/x/sys/unix"
 )
@@ -60,78 +61,73 @@ func getChildMemoryUsage(pid int) int64 {
 
 // getProcessRSS returns the RSS (Resident Set Size) memory of a process in bytes.
 func getProcessRSS(pid int) int64 {
-	// macOS: use sysctl
+	// macOS: use ps
 	if rss, err := getProcessRSSDarwin(pid); err == nil {
 		return rss
 	}
 	return 0
 }
 
-// getProcessRSSDarwin gets RSS on macOS using sysctl.
+// getProcessRSSDarwin gets RSS on macOS using ps command.
 func getProcessRSSDarwin(pid int) (int64, error) {
-	// Use sysctl to get process info on macOS
-	// MIB: CTL_KERN, KERN_PROC, KERN_PROC_PID, pid
-	mib := [4]int32{syscall.CTL_KERN, syscall.KERN_PROC, syscall.KERN_PROC_PID, int32(pid)}
-
-	// First call to get required buffer size
-	size := uintptr(0)
-	_, _, errno := syscall.Syscall6(
-		syscall.SYS___SYSCTL,
-		uintptr(unsafe.Pointer(&mib[0])),
-		uintptr(len(mib)),
-		0,
-		uintptr(unsafe.Pointer(&size)),
-		0,
-		0,
-	)
-	if errno != 0 {
-		return 0, errno
+	cmd := exec.Command("ps", "-o", "rss=", "-p", strconv.Itoa(pid))
+	out, err := cmd.Output()
+	if err != nil {
+		return 0, err
 	}
 
-	if size == 0 {
-		return 0, syscall.ENOENT
+	rssStr := strings.TrimSpace(string(out))
+	if rssStr == "" {
+		return 0, nil
 	}
 
-	// Allocate buffer and get process info
-	buf := make([]byte, size)
-	_, _, errno = syscall.Syscall6(
-		syscall.SYS___SYSCTL,
-		uintptr(unsafe.Pointer(&mib[0])),
-		uintptr(len(mib)),
-		uintptr(unsafe.Pointer(&buf[0])),
-		uintptr(unsafe.Pointer(&size)),
-		0,
-		0,
-	)
-	if errno != 0 {
-		return 0, errno
+	rssKb, err := strconv.ParseInt(rssStr, 10, 64)
+	if err != nil {
+		return 0, err
 	}
 
-	// Parse kinfo_proc structure (platform-specific)
-	// The structure layout varies, but we can extract RSS from it
-	// This is a simplified extraction - full implementation would need
-	// proper struct definition
-	return extractRSSFromKInfoProc(buf), nil
-}
-
-// extractRSSFromKInfoProc extracts RSS from kinfo_proc structure.
-// This is a simplified implementation.
-func extractRSSFromKInfoProc(buf []byte) int64 {
-	// kinfo_proc structure on macOS is complex and varies by version
-	// For now, return 0 and rely on fallback methods
-	// A full implementation would parse the struct properly
-	return 0
+	// ps returns RSS in kilobytes
+	return rssKb * 1024, nil
 }
 
 // getChildProcesses returns a list of child process PIDs.
 func getChildProcesses(parentPid int) []int {
-	// macOS doesn't have /proc. A full implementation would use
-	// libproc or sysctl to enumerate processes.
-	return nil
+	// Use pgrep to find child processes
+	cmd := exec.Command("pgrep", "-P", strconv.Itoa(parentPid))
+	out, err := cmd.Output()
+	if err != nil {
+		return nil
+	}
+
+	var children []int
+	lines := strings.Split(string(out), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if childPid, err := strconv.Atoi(line); err == nil {
+			children = append(children, childPid)
+		}
+	}
+	return children
 }
 
 // getProcessParent returns the parent PID of a process.
 func getProcessParent(pid int) int {
-	// macOS doesn't have /proc.
+	cmd := exec.Command("ps", "-o", "ppid=", "-p", strconv.Itoa(pid))
+	out, err := cmd.Output()
+	if err != nil {
+		return 0
+	}
+
+	ppidStr := strings.TrimSpace(string(out))
+	if ppidStr == "" {
+		return 0
+	}
+
+	if ppid, err := strconv.Atoi(ppidStr); err == nil {
+		return ppid
+	}
 	return 0
 }

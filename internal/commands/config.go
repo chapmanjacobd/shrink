@@ -109,10 +109,11 @@ type TextFlags struct {
 }
 
 type ParallelFlags struct {
-	VideoThreads int `default:"2" help:"Maximum concurrent video transcodes" env:"SHRINK_VIDEO_THREADS"`
-	AudioThreads int `default:"4" help:"Maximum concurrent audio transcodes" env:"SHRINK_AUDIO_THREADS"`
-	ImageThreads int `default:"8" help:"Maximum concurrent image conversions" env:"SHRINK_IMAGE_THREADS"`
-	TextThreads  int `default:"2" help:"Maximum concurrent text conversions" env:"SHRINK_TEXT_THREADS"`
+	VideoThreads    int `default:"2" help:"Maximum concurrent video transcodes" env:"SHRINK_VIDEO_THREADS"`
+	AudioThreads    int `default:"4" help:"Maximum concurrent audio transcodes" env:"SHRINK_AUDIO_THREADS"`
+	ImageThreads    int `default:"8" help:"Maximum concurrent image conversions" env:"SHRINK_IMAGE_THREADS"`
+	TextThreads     int `default:"2" help:"Maximum concurrent text conversions" env:"SHRINK_TEXT_THREADS"`
+	AnalysisThreads int `default:"0" help:"Maximum concurrent analysis workers (0: CPU count * 4)" env:"SHRINK_ANALYSIS_THREADS"`
 }
 
 type MemoryFlags struct {

@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -34,11 +35,12 @@ type UI interface {
 
 // EngineConfig contains concurrency and timeout settings for the engine.
 type EngineConfig struct {
-	VideoThreads int
-	AudioThreads int
-	ImageThreads int
-	TextThreads  int
-	Timeout      TimeoutFlags
+	VideoThreads    int
+	AudioThreads    int
+	ImageThreads    int
+	TextThreads     int
+	AnalysisThreads int
+	Timeout         TimeoutFlags
 }
 
 // Engine coordinates the media analysis and processing lifecycle.
@@ -69,52 +71,219 @@ func NewEngine(ui UI, cfg *models.ProcessorConfig, engCfg EngineConfig, sqlDBs [
 
 // analyzeMedia evaluates each media item to determine if it should be processed.
 func (e *Engine) analyzeMedia(media []models.ShrinkMedia) []models.ShrinkMedia {
-	var toShrink []models.ShrinkMedia
-
 	slog.Info("Starting media analysis", "total_files", len(media))
+
+	// Determine analysis parallelism
+	targetConcurrency := e.engCfg.AnalysisThreads
+	if targetConcurrency <= 0 {
+		targetConcurrency = runtime.NumCPU() * 4
+	}
+	slog.Info("Analysis parallelism configured", "workers", targetConcurrency)
+
+	// Channel for distributing work
+	jobs := make(chan int, len(media))
+	results := make(chan struct {
+		index  int
+		media  models.ShrinkMedia
+		skip   bool
+		broken bool
+	}, len(media))
+
+	var wg sync.WaitGroup
+	var completedJobs int64
+	var activeWorkers int32
+	var totalWorkerSamples int64
+	var workerSum int64
+	var concurrency atomic.Int32
+	concurrency.Store(int32(targetConcurrency))
+
+	// Worker function
+	startWorker := func() {
+		wg.Go(func() {
+			atomic.AddInt32(&activeWorkers, 1)
+			defer atomic.AddInt32(&activeWorkers, -1)
+
+			for {
+				if atomic.LoadInt32(&activeWorkers) > concurrency.Load() {
+					return // Scale down
+				}
+				idx, ok := <-jobs
+				if !ok {
+					return
+				}
+
+				m := &media[idx]
+				processor := e.registry.GetProcessor(m)
+				skip := false
+				broken := false
+
+				if processor == nil {
+					slog.Warn("No processor found for file", "path", m.Path, "ext", m.Ext)
+					skip = true
+				} else {
+					// Get processor's category
+					m.Category = processor.Category()
+					e.metrics.RecordStarted(m.DisplayCategory(), m.Path)
+
+					// Estimate size and time
+					slog.Debug("Estimating size", "path", m.Path)
+					info := processor.EstimateSize(m, e.cfg)
+					slog.Debug("Estimate complete", "path", m.Path, "processable", info.IsProcessable)
+
+					if info.IsBroken {
+						m.IsBroken = true
+						m.PartFiles = info.PartFiles
+						broken = true
+					} else if !info.IsProcessable {
+						e.metrics.RecordSkipped(m.DisplayCategory())
+						skip = true
+					} else {
+						// Use actual size if provided (e.g. multi-part archives)
+						if info.ActualSize > 0 {
+							m.Size = info.ActualSize
+						}
+
+						// Check if we should shrink
+						if !m.ShouldShrink(info.FutureSize, e.cfg) {
+							e.metrics.RecordSkipped(m.DisplayCategory())
+							skip = true
+						} else {
+							m.FutureSize = info.FutureSize
+							m.ProcessingTime = info.ProcessingTime
+							m.Savings = m.Size - info.FutureSize
+						}
+					}
+				}
+
+				results <- struct {
+					index  int
+					media  models.ShrinkMedia
+					skip   bool
+					broken bool
+				}{idx, *m, skip, broken}
+				atomic.AddInt64(&completedJobs, 1)
+			}
+		})
+	}
+
+	// Start initial workers
+	for i := int32(0); i < concurrency.Load(); i++ {
+		startWorker()
+	}
+
+	// Dynamic scaling monitor
+	monitorDone := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(4500 * time.Millisecond)
+		defer ticker.Stop()
+
+		var lastCompleted int64
+		var lastThroughput int64
+		direction := int32(1)
+
+		for {
+			select {
+			case <-ticker.C:
+				completed := atomic.LoadInt64(&completedJobs)
+				throughput := completed - lastCompleted
+				lastCompleted = completed
+
+				current := concurrency.Load()
+
+				if throughput < lastThroughput {
+					direction = -direction // Reverse direction if throughput drops
+				} else if throughput == lastThroughput && throughput > 0 {
+					direction = 1 // Gently push up if stable
+				}
+
+				newTarget := min(
+					max(current+(direction*2), 1), 1000)
+
+				concurrency.Store(newTarget)
+
+				active := atomic.LoadInt32(&activeWorkers)
+				for active < newTarget {
+					startWorker()
+					active++
+				}
+				// Track worker statistics
+				atomic.AddInt64(&workerSum, int64(active))
+				atomic.AddInt64(&totalWorkerSamples, 1)
+				lastThroughput = throughput
+			case <-monitorDone:
+				return
+			}
+		}
+	}()
+
+	// Progress reporter
+	progressDone := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(500 * time.Millisecond)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				completed := atomic.LoadInt64(&completedJobs)
+				workers := atomic.LoadInt32(&activeWorkers)
+				if completed > 0 || workers > 0 {
+					if workers == 0 && totalWorkerSamples > 0 {
+						avgWorkers := float64(workerSum) / float64(totalWorkerSamples)
+						fmt.Printf("\rAnalyzing %d/%d files (avg: %.1f workers)\033[K", completed, len(media), avgWorkers)
+					} else {
+						fmt.Printf("\rAnalyzing %d/%d files (%d workers)\033[K", completed, len(media), workers)
+					}
+				}
+			case <-progressDone:
+				// Final update
+				completed := atomic.LoadInt64(&completedJobs)
+				workers := atomic.LoadInt32(&activeWorkers)
+				if workers == 0 && totalWorkerSamples > 0 {
+					avgWorkers := float64(workerSum) / float64(totalWorkerSamples)
+					fmt.Printf("\rAnalyzed %d/%d files (avg: %.1f workers)\033[K\n", completed, len(media), avgWorkers)
+				} else {
+					fmt.Printf("\rAnalyzed %d/%d files\033[K\n", completed, len(media))
+				}
+				return
+			}
+		}
+	}()
+
+	// Submit jobs
+	go func() {
+		for i := range media {
+			jobs <- i
+		}
+		close(jobs)
+	}()
+
+	// Wait for completion and collect results
+	go func() {
+		wg.Wait()
+		close(monitorDone)
+		close(progressDone)
+		close(results)
+	}()
+
+	// Collect results
+	var toShrink []models.ShrinkMedia
+	resultMap := make(map[int]models.ShrinkMedia)
+	skipMap := make(map[int]bool)
+	brokenMap := make(map[int]bool)
+
+	for res := range results {
+		resultMap[res.index] = res.media
+		skipMap[res.index] = res.skip
+		brokenMap[res.index] = res.broken
+	}
+
+	// Build final slice in original order
 	for i := range media {
-		m := &media[i]
-		processor := e.registry.GetProcessor(m)
-		if processor == nil {
-			// This should not happen after filterByTools, but log if it does
-			slog.Warn("No processor found for file", "path", m.Path, "ext", m.Ext)
-			continue
-		}
-
-		// Get processor's category
-		m.Category = processor.Category()
-		e.metrics.RecordStarted(m.DisplayCategory(), m.Path)
-
-		// Estimate size and time
-		slog.Debug("Estimating size", "path", m.Path)
-		info := processor.EstimateSize(m, e.cfg)
-		slog.Debug("Estimate complete", "path", m.Path, "processable", info.IsProcessable)
-
-		if info.IsBroken {
-			m.IsBroken = true
-			m.PartFiles = info.PartFiles
-			toShrink = append(toShrink, *m)
-			continue
-		}
-
-		if !info.IsProcessable {
-			e.metrics.RecordSkipped(m.DisplayCategory())
-			continue
-		}
-
-		// Use actual size if provided (e.g. multi-part archives)
-		if info.ActualSize > 0 {
-			m.Size = info.ActualSize
-		}
-
-		// Check if we should shrink
-		if m.ShouldShrink(info.FutureSize, e.cfg) {
-			m.FutureSize = info.FutureSize
-			m.ProcessingTime = info.ProcessingTime
-			m.Savings = m.Size - info.FutureSize
-			toShrink = append(toShrink, *m)
-		} else {
-			e.metrics.RecordSkipped(m.DisplayCategory())
+		if brokenMap[i] {
+			toShrink = append(toShrink, resultMap[i])
+		} else if !skipMap[i] {
+			toShrink = append(toShrink, resultMap[i])
 		}
 	}
 

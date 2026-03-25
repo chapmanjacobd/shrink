@@ -97,11 +97,12 @@ func (c *ShrinkCmd) Run(ctx *kong.Context) error {
 
 	// Initialize Engine
 	engCfg := EngineConfig{
-		VideoThreads: c.VideoThreads,
-		AudioThreads: c.AudioThreads,
-		ImageThreads: c.ImageThreads,
-		TextThreads:  c.TextThreads,
-		Timeout:      c.TimeoutFlags,
+		VideoThreads:    c.VideoThreads,
+		AudioThreads:    c.AudioThreads,
+		ImageThreads:    c.ImageThreads,
+		TextThreads:     c.TextThreads,
+		AnalysisThreads: c.AnalysisThreads,
+		Timeout:         c.TimeoutFlags,
 	}
 	engine := NewEngine(c, cfg, engCfg, c.sqlDBs, registry, metrics)
 
