@@ -87,10 +87,12 @@ func (e *Engine) analyzeMedia(media []models.ShrinkMedia) []models.ShrinkMedia {
 		media  models.ShrinkMedia
 		skip   bool
 		broken bool
+		failed bool
 	}, len(media))
 
 	var wg sync.WaitGroup
 	var completedJobs int64
+	var failedJobs int64
 	var activeWorkers int32
 	var totalWorkerSamples int64
 	var workerSum int64
@@ -116,6 +118,7 @@ func (e *Engine) analyzeMedia(media []models.ShrinkMedia) []models.ShrinkMedia {
 				processor := e.registry.GetProcessor(m)
 				skip := false
 				broken := false
+				failed := false
 
 				if processor == nil {
 					slog.Warn("No processor found for file", "path", m.Path, "ext", m.Ext)
@@ -155,13 +158,26 @@ func (e *Engine) analyzeMedia(media []models.ShrinkMedia) []models.ShrinkMedia {
 					}
 				}
 
+				// Check if estimation failed (archive timeout, etc.)
+				// Failed analyses should not be counted as completed
+				if m.Category == "Archived" && m.FutureSize == 0 && m.Size > 0 && !broken {
+					// Archive analysis failed (likely timeout) - skip but don't count as completed
+					failed = true
+					atomic.AddInt64(&failedJobs, 1)
+					slog.Debug("Archive analysis failed, skipping", "path", m.Path)
+				}
+
 				results <- struct {
 					index  int
 					media  models.ShrinkMedia
 					skip   bool
 					broken bool
-				}{idx, *m, skip, broken}
-				atomic.AddInt64(&completedJobs, 1)
+					failed bool
+				}{idx, *m, skip, broken, failed}
+				
+				if !failed {
+					atomic.AddInt64(&completedJobs, 1)
+				}
 			}
 		})
 	}
@@ -226,25 +242,35 @@ func (e *Engine) analyzeMedia(media []models.ShrinkMedia) []models.ShrinkMedia {
 			select {
 			case <-ticker.C:
 				completed := atomic.LoadInt64(&completedJobs)
+				failed := atomic.LoadInt64(&failedJobs)
 				workers := atomic.LoadInt32(&activeWorkers)
-				if completed > 0 || workers > 0 {
-					if workers == 0 && totalWorkerSamples > 0 {
-						avgWorkers := float64(workerSum) / float64(totalWorkerSamples)
-						fmt.Printf("\rAnalyzing %d/%d files (avg: %.1f workers)\033[K", completed, len(media), avgWorkers)
-					} else {
-						fmt.Printf("\rAnalyzing %d/%d files (%d workers)\033[K", completed, len(media), workers)
+				if completed > 0 || workers > 0 || failed > 0 {
+					status := fmt.Sprintf("\rAnalyzing %d/%d files", completed, len(media))
+					if failed > 0 {
+						status += fmt.Sprintf(" (%d failed)", failed)
 					}
+					if workers > 0 {
+						status += fmt.Sprintf(" (%d workers)", workers)
+					} else if totalWorkerSamples > 0 {
+						avgWorkers := float64(workerSum) / float64(totalWorkerSamples)
+						status += fmt.Sprintf(" (avg: %.1f workers)", avgWorkers)
+					}
+					fmt.Printf("%s\033[K", status)
 				}
 			case <-progressDone:
 				// Final update
 				completed := atomic.LoadInt64(&completedJobs)
+				failed := atomic.LoadInt64(&failedJobs)
 				workers := atomic.LoadInt32(&activeWorkers)
+				status := fmt.Sprintf("\rAnalyzed %d/%d files", completed, len(media))
+				if failed > 0 {
+					status += fmt.Sprintf(" (%d failed)", failed)
+				}
 				if workers == 0 && totalWorkerSamples > 0 {
 					avgWorkers := float64(workerSum) / float64(totalWorkerSamples)
-					fmt.Printf("\rAnalyzed %d/%d files (avg: %.1f workers)\033[K\n", completed, len(media), avgWorkers)
-				} else {
-					fmt.Printf("\rAnalyzed %d/%d files\033[K\n", completed, len(media))
+					status += fmt.Sprintf(" (avg: %.1f workers)", avgWorkers)
 				}
+				fmt.Printf("%s\033[K\n", status)
 				return
 			}
 		}
@@ -271,15 +297,22 @@ func (e *Engine) analyzeMedia(media []models.ShrinkMedia) []models.ShrinkMedia {
 	resultMap := make(map[int]models.ShrinkMedia)
 	skipMap := make(map[int]bool)
 	brokenMap := make(map[int]bool)
+	failedMap := make(map[int]bool)
 
 	for res := range results {
 		resultMap[res.index] = res.media
 		skipMap[res.index] = res.skip
 		brokenMap[res.index] = res.broken
+		failedMap[res.index] = res.failed
 	}
 
 	// Build final slice in original order
+	// Failed analyses are skipped (not added to toShrink)
 	for i := range media {
+		if failedMap[i] {
+			// Analysis failed (e.g., lsar timeout) - skip this file
+			continue
+		}
 		if brokenMap[i] {
 			toShrink = append(toShrink, resultMap[i])
 		} else if !skipMap[i] {

@@ -353,8 +353,14 @@ func (c *ShrinkCmd) PrintSummary(media []models.ShrinkMedia) {
 
 	for _, key := range keys {
 		b := typeBreakdown[key]
-		ratio := float64(b.size) / float64(b.future)
-		speed := fmt.Sprintf("%.1fx", ratio)
+		var speed string
+		if b.future > 0 {
+			ratio := float64(b.size) / float64(b.future)
+			speed = fmt.Sprintf("%.1fx", ratio)
+		} else {
+			// No future size available (e.g., analysis failed, empty archive)
+			speed = "-"
+		}
 		rows = append(rows, []string{
 			key,
 			strconv.Itoa(b.count),
