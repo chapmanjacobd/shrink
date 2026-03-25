@@ -683,8 +683,11 @@ func (p *TextProcessor) packageToEPUB(ctx context.Context, folderPath, epubPath 
 		return fmt.Errorf("calibre not installed")
 	}
 
+	// Use content.opf as the input file (not the folder)
+	opfPath := filepath.Join(folderPath, "content.opf")
+
 	args := []string{
-		folderPath,
+		opfPath,
 		epubPath,
 		"--no-default-epub-cover",
 		"--epub-inline-toc",
