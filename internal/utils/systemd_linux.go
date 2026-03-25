@@ -100,7 +100,7 @@ func buildSystemdCommand(ctx context.Context, exe string, args []string, cfg Sys
 	}
 
 	// Build systemd-run command
-	systemdArgs := []string{"systemd-run"}
+	var systemdArgs []string
 
 	// Check if running as user (not root)
 	if os.Getenv("SUDO_UID") == "" {
