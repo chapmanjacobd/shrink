@@ -3,6 +3,7 @@
 package utils
 
 import (
+	"syscall"
 	"unsafe"
 
 	"golang.org/x/sys/unix"
@@ -70,12 +71,12 @@ func getProcessRSS(pid int) int64 {
 func getProcessRSSDarwin(pid int) (int64, error) {
 	// Use sysctl to get process info on macOS
 	// MIB: CTL_KERN, KERN_PROC, KERN_PROC_PID, pid
-	mib := [4]int32{unix.CTL_KERN, unix.KERN_PROC, unix.KERN_PROC_PID, int32(pid)}
+	mib := [4]int32{syscall.CTL_KERN, syscall.KERN_PROC, syscall.KERN_PROC_PID, int32(pid)}
 
 	// First call to get required buffer size
 	size := uintptr(0)
-	_, _, errno := unix.Syscall6(
-		unix.SYS___SYSCTL,
+	_, _, errno := syscall.Syscall6(
+		syscall.SYS___SYSCTL,
 		uintptr(unsafe.Pointer(&mib[0])),
 		uintptr(len(mib)),
 		0,
@@ -88,13 +89,13 @@ func getProcessRSSDarwin(pid int) (int64, error) {
 	}
 
 	if size == 0 {
-		return 0, unix.ENOENT
+		return 0, syscall.ENOENT
 	}
 
 	// Allocate buffer and get process info
 	buf := make([]byte, size)
-	_, _, errno = unix.Syscall6(
-		unix.SYS___SYSCTL,
+	_, _, errno = syscall.Syscall6(
+		syscall.SYS___SYSCTL,
 		uintptr(unsafe.Pointer(&mib[0])),
 		uintptr(len(mib)),
 		uintptr(unsafe.Pointer(&buf[0])),
