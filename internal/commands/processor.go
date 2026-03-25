@@ -69,8 +69,3 @@ func (r *MediaRegistry) GetProcessor(m *models.ShrinkMedia) models.MediaProcesso
 	}
 	return nil
 }
-
-// GetAllProcessors returns all registered processors
-func (r *MediaRegistry) GetAllProcessors() []models.MediaProcessor {
-	return r.processors
-}

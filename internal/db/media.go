@@ -16,16 +16,13 @@ import (
 // ShrinkStatus codes for tracking processing outcomes
 // 0 = not processed, 1 = success, >1 = various failure/skip states
 const (
-	ShrinkStatusNotProcessed   = 0 // File has not been processed yet
-	ShrinkStatusSuccess        = 1 // Successfully processed and saved space
-	ShrinkStatusTooLarge       = 2 // Transcoded file was larger than original (kept original)
-	ShrinkStatusUnplayable     = 3 // File was unplayable/corrupt
-	ShrinkStatusUnsupported    = 4 // Unsupported format/codec
-	ShrinkStatusError          = 5 // Processing error (file-specific, not environment)
-	ShrinkStatusSkipped        = 6 // Skipped (no savings, already optimized, etc.)
-	ShrinkStatusBroken         = 7 // File is broken (moved to broken directory)
-	ShrinkStatusInterrupted    = 8 // Interrupted by user (Ctrl-C, SIGTERM) - should NOT persist
-	ShrinkStatusEnvironmentErr = 9 // Environment error (OOM, hardware failure) - should NOT persist
+	ShrinkStatusNotProcessed = 0 // File has not been processed yet
+	ShrinkStatusSuccess      = 1 // Successfully processed and saved space
+	ShrinkStatusTooLarge     = 2 // Transcoded file was larger than original (kept original)
+	ShrinkStatusUnplayable   = 3 // File was unplayable/corrupt
+	ShrinkStatusError        = 5 // Processing error (file-specific, not environment)
+	ShrinkStatusSkipped      = 6 // Skipped (no savings, already optimized, etc.)
+	ShrinkStatusBroken       = 7 // File is broken (moved to broken directory)
 )
 
 // MediaRecord represents a row in the media table
@@ -165,11 +162,6 @@ func MarkUnplayable(databases []*sql.DB, path string) {
 	MarkShrinked(databases, path, ShrinkStatusUnplayable)
 }
 
-// MarkUnsupported marks a file as having unsupported format/codec
-func MarkUnsupported(databases []*sql.DB, path string) {
-	MarkShrinked(databases, path, ShrinkStatusUnsupported)
-}
-
 // MarkProcessingError marks a file as having a processing error
 func MarkProcessingError(databases []*sql.DB, path string) {
 	MarkShrinked(databases, path, ShrinkStatusError)
@@ -184,9 +176,6 @@ func MarkSkipped(databases []*sql.DB, path string) {
 func MarkBroken(databases []*sql.DB, path string) {
 	MarkShrinked(databases, path, ShrinkStatusBroken)
 }
-
-// Note: Interrupted (Ctrl-C, SIGTERM) and EnvironmentErr statuses are NOT persisted
-// These indicate the process should be retried on next run
 
 // BulkMarkOptimizedExtensions marks files with already-optimized extensions as shrinked
 func BulkMarkOptimizedExtensions(databases []*sql.DB) {

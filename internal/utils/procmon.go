@@ -136,25 +136,6 @@ func (pm *ProcessMonitor) monitorLoop(ctx context.Context) {
 	}
 }
 
-// RunCommandWithMonitoring runs a command with memory monitoring.
-// This is a convenience function that combines exec.CommandContext with monitoring.
-func RunCommandWithMonitoring(ctx context.Context, cfg ProcessMonitorConfig, name string, args ...string) (*exec.Cmd, *ProcessMonitor, error) {
-	cmd := exec.CommandContext(ctx, name, args...)
-
-	// Set up process group for proper cleanup
-	setupProcessGroup(cmd)
-
-	monitor := NewProcessMonitor(cmd, cfg)
-
-	if err := cmd.Start(); err != nil {
-		return nil, nil, err
-	}
-
-	monitor.Start(ctx)
-
-	return cmd, monitor, nil
-}
-
 // killProcessGroup kills a process and all its children.
 func killProcessGroup(pid int) {
 	if pid <= 0 {

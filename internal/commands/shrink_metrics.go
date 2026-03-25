@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"maps"
 	"os"
 	"sort"
 	"strconv"
@@ -506,21 +505,4 @@ func (m *ShrinkMetrics) LogSummary() {
 		"success", totalSuccess,
 		"failed", totalFailed,
 		"savings", utils.FormatSize(totalSavings))
-}
-
-// GetStats returns stats for a specific media type
-func (m *ShrinkMetrics) GetStats(mediaType string) *MediaTypeStats {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return m.types[mediaType]
-}
-
-// GetAllStats returns all stats (read-only copy)
-func (m *ShrinkMetrics) GetAllStats() map[string]*MediaTypeStats {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	copy := make(map[string]*MediaTypeStats, len(m.types))
-	maps.Copy(copy, m.types)
-	return copy
 }
