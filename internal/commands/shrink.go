@@ -266,7 +266,7 @@ func (c *ShrinkCmd) filterByTools(media []models.ShrinkMedia, registry *MediaReg
 		p := registry.GetProcessor(&m)
 		if p == nil {
 			// If it's a known media/archive extension, it was filtered out by flags
-			if utils.MediaExtensionMap[m.Ext] || utils.ArchiveExtensionMap[m.Ext] {
+			if utils.MediaExtensionMap[m.Ext] || utils.ArchiveExtensionMap[m.Ext] || isMultiPartArchiveExt(m.Ext) {
 				continue
 			}
 

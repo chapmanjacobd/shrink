@@ -359,14 +359,14 @@ var TextExtensions = []string{
 }
 
 var ArchiveExtensions = []string{
-	"0", "0001", "001", "01", "1", "7z", "Z", "ace", "alz", "alzip",
-	"arc", "arj", "b5i", "b6i", "bin", "br", "bz2", "cab", "cb7", "cba",
-	"cbr", "cbt", "cbz", "ccd", "cdr", "cif", "cpio", "daa", "deb", "dmg",
-	"exe", "gi", "gz", "img", "iso", "lha", "lzh", "lzma", "lzo", "lzx",
-	"mdf", "msi", "nrg", "nsi", "nsis", "p01", "pak", "pdi", "r00", "r01",
-	"rar", "rpm", "sit", "sitx", "tar", "tar.bz2", "tar.gz", "tar.xz", "tar.zst", "taz",
-	"tbz2", "tgz", "toast", "txz", "tz", "tzst", "udf", "uif", "vcd", "wim",
-	"xar", "xz", "z", "z00", "z01", "zip", "zipx", "zoo", "zst", "zstd",
+	"7z", "Z", "ace", "alz", "alzip", "arc", "arj", "b5i", "b6i", "bin",
+	"br", "bz2", "cab", "cb7", "cba", "cbr", "cbt", "cbz", "ccd", "cdr",
+	"cif", "cpio", "daa", "deb", "dmg", "exe", "gi", "gz", "img", "iso",
+	"lha", "lzh", "lzma", "lzo", "lzx", "mdf", "msi", "nrg", "nsi", "nsis",
+	"p01", "pak", "pdi", "rar", "rpm", "sit", "sitx", "tar", "tar.bz2",
+	"tar.gz", "tar.xz", "tar.zst", "taz", "tbz2", "tgz", "toast", "txz",
+	"tz", "tzst", "udf", "uif", "vcd", "wim", "xar", "xz", "z", "zip",
+	"zipx", "zoo", "zst", "zstd",
 }
 
 var (
@@ -398,18 +398,6 @@ func init() {
 	for _, ext := range ArchiveExtensions {
 		ArchiveExtensionMap["."+ext] = true
 		MediaExtensionMap["."+ext] = true
-	}
-	// Add common multi-part extensions
-	for i := range 2 {
-		zExt := fmt.Sprintf(".z%02d", i)
-		ArchiveExtensionMap[zExt] = true
-		MediaExtensionMap[zExt] = true
-		rExt := fmt.Sprintf(".r%02d", i)
-		ArchiveExtensionMap[rExt] = true
-		MediaExtensionMap[rExt] = true
-		nExt := fmt.Sprintf(".%03d", i)
-		ArchiveExtensionMap[nExt] = true
-		MediaExtensionMap[nExt] = true
 	}
 }
 

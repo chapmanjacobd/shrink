@@ -74,7 +74,31 @@ func extractLSARJSON(output []byte) []byte {
 }
 
 func (p *ArchiveProcessor) CanProcess(m *models.ShrinkMedia) bool {
-	return utils.ArchiveExtensionMap[m.Ext]
+	// Check if it's a known archive extension or a multi-part archive pattern
+	return utils.ArchiveExtensionMap[m.Ext] || isMultiPartArchiveExt(m.Ext)
+}
+
+// isMultiPartArchiveExt checks if an extension is a multi-part archive pattern
+// Returns true for .zNN, .rNN, .NNN patterns (e.g., .z01, .r00, .001)
+func isMultiPartArchiveExt(ext string) bool {
+	if len(ext) < 3 || ext[0] != '.' {
+		return false
+	}
+	// .zNN or .zNNN pattern
+	if ext[1] == 'z' && ext[2] >= '0' && ext[2] <= '9' {
+		return true
+	}
+	// .rNN or .rNNN pattern
+	if ext[1] == 'r' && ext[2] >= '0' && ext[2] <= '9' {
+		return true
+	}
+	// .NNN pattern (all digits)
+	for i := 1; i < len(ext); i++ {
+		if ext[i] < '0' || ext[i] > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // ExtractAndProcess extracts archive contents and processes media recursively
@@ -245,7 +269,7 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *models.Shri
 				// Shouldn't shrink, keep as-is
 				outputFiles = append(outputFiles, models.ProcessOutputFile{Path: path, Size: fileSize})
 			}
-		} else if utils.ArchiveExtensionMap[ext] {
+		} else if utils.ArchiveExtensionMap[ext] || isMultiPartArchiveExt(ext) {
 			if isSecondaryPart(path) {
 				slog.Debug("Skipping nested secondary archive part", "path", path)
 				return nil
@@ -376,7 +400,7 @@ func (p *ArchiveProcessor) EstimateSizeForArchive(m *models.ShrinkMedia, cfg *mo
 		// Nested archives - use compressed size for estimation
 		// We don't extract during estimation to avoid temp space issues
 		// The actual contents will be analyzed during extraction
-		if ext != "" && utils.ArchiveExtensionMap[ext] {
+		if ext != "" && (utils.ArchiveExtensionMap[ext] || isMultiPartArchiveExt(ext)) {
 			if isSecondaryPart(content.Path) {
 				slog.Debug("Skipping nested secondary archive part during estimation", "path", content.Path)
 				continue
