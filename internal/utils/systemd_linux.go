@@ -102,7 +102,9 @@ func buildSystemdCommand(ctx context.Context, exe string, args []string, cfg Sys
 	}
 
 	// Add working directory if specified
-	if cfg.Dir != "" {
+	if cfg.Dir == "" {
+		systemdArgs = append(systemdArgs, "--same-dir")
+	} else {
 		systemdArgs = append(systemdArgs, "--working-directory="+cfg.Dir)
 	}
 
@@ -129,16 +131,10 @@ func buildSystemdCommand(ctx context.Context, exe string, args []string, cfg Sys
 	}
 
 	// Add remaining systemd-run flags
-	// Note: --same-dir is only used when Dir is not specified, as it conflicts
-	// with --working-directory. When Dir is specified, we want the command to
-	// run in that directory, not the same directory as systemd-run.
 	systemdArgs = append(systemdArgs,
 		"--collect",
 		"--quiet",
 	)
-	if cfg.Dir == "" {
-		systemdArgs = append(systemdArgs, "--same-dir")
-	}
 	systemdArgs = append(systemdArgs, "--")
 
 	// Append the actual command
