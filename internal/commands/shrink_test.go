@@ -209,13 +209,13 @@ func TestShrinkText(t *testing.T) {
 			},
 		},
 		ExpectFiles: []string{
-			"test.epub.OEB",
-		},
-		ExpectMissing: []string{
 			"test.epub",
 		},
+		ExpectMissing: []string{
+			"test.epub.OEB",
+		},
 		ExpectDBState: []testutils.ExpectedDBRecord{
-			{Path: "test.epub.OEB", TimeDeleted: 0, IsShrinked: 1},
+			{Path: "test.epub", TimeDeleted: 0, IsShrinked: 1},
 		},
 	}
 

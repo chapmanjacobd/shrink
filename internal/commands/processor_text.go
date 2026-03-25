@@ -142,19 +142,31 @@ func (p *TextProcessor) processText(ctx context.Context, m *models.ShrinkMedia, 
 	// Step 3: Replace CSS with optimized version
 	p.replaceCSS(outputDir)
 
-	// Step 4: Process images inside ebook (convert to AVIF)
-	imageFiles := p.findImages(outputDir)
-	converted := p.processEbookImages(ctx, imageFiles, cfg)
+	// Step 4: Process images inside ebook (convert to AVIF) and update content.opf
+	converted := p.processEbookImagesWithManifest(ctx, outputDir, cfg)
 
 	// Step 5: Update references in HTML files
 	p.updateImageReferences(outputDir, converted)
 
-	// Step 6: Return result
-	outputSize := utils.FolderSize(outputDir)
+	// Step 6: Repackage to EPUB
+	epubPath := strings.TrimSuffix(m.Path, ext) + ".epub"
+	if err := p.packageToEPUB(ctx, outputDir, epubPath, cfg); err != nil {
+		os.RemoveAll(outputDir)
+		return models.ProcessResult{SourcePath: m.Path, Error: err}
+	}
+
+	// Step 7: Clean up .OEB folder
+	os.RemoveAll(outputDir)
+
+	// Step 8: Return result with EPUB path
+	var outputSize int64
+	if info, err := os.Stat(epubPath); err == nil {
+		outputSize = info.Size()
+	}
 
 	return models.ProcessResult{
 		SourcePath: m.Path,
-		Outputs:    []models.ProcessOutputFile{{Path: outputDir, Size: outputSize}},
+		Outputs:    []models.ProcessOutputFile{{Path: epubPath, Size: outputSize}},
 		Success:    true,
 	}
 }
@@ -370,32 +382,20 @@ p > .calibre3:not(:only-of-type) {
 	os.WriteFile(cssPath, []byte(css), 0o644)
 }
 
-// findImages finds all image files in the ebook folder
-func (p *TextProcessor) findImages(dir string) []string {
-	var images []string
-	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			slog.Warn("Error accessing path while finding images", "path", path, "error", err)
-			return nil
-		}
-		ext := strings.ToLower(filepath.Ext(path))
-		if utils.ImageExtensionMap[ext] {
-			images = append(images, path)
-		}
-		return nil
-	})
-	return images
-}
-
-// processEbookImages converts images to AVIF and returns map of successfully converted files
-func (p *TextProcessor) processEbookImages(ctx context.Context, images []string, cfg *models.ProcessorConfig) map[string]string {
+// processEbookImagesWithManifest converts images to AVIF and updates content.opf manifest
+// Returns map of old basename -> new basename for successfully converted files
+func (p *TextProcessor) processEbookImagesWithManifest(ctx context.Context, outputDir string, cfg *models.ProcessorConfig) map[string]string {
 	converted := make(map[string]string)
 	imCmd := getImageMagickCommand()
 	if imCmd == "" {
 		slog.Warn("ImageMagick not available, skipping ebook image conversion")
 		return converted
 	}
-	for _, img := range images {
+
+	// Read image files from content.opf manifest instead of scanning filesystem
+	imageFiles := p.getImageFilesFromManifest(outputDir)
+
+	for _, img := range imageFiles {
 		// Respect context cancellation
 		if ctx.Err() != nil {
 			return converted
@@ -468,7 +468,167 @@ func (p *TextProcessor) processEbookImages(ctx context.Context, images []string,
 			}
 		}
 	}
+
+	// Update content.opf manifest with converted image references
+	if len(converted) > 0 {
+		p.updateManifest(outputDir, converted)
+	}
+
 	return converted
+}
+
+// getImageFilesFromManifest reads the content.opf file and returns list of image file paths
+func (p *TextProcessor) getImageFilesFromManifest(outputDir string) []string {
+	var images []string
+	manifestPath := filepath.Join(outputDir, "content.opf")
+
+	content, err := os.ReadFile(manifestPath)
+	if err != nil {
+		slog.Warn("Failed to read content.opf", "error", err)
+		return images
+	}
+
+	text := string(content)
+
+	// Parse manifest items - look for <item> elements with image media types
+	// Example: <item href="images/cover.jpg" media-type="image/jpeg" id="cover"/>
+	lines := strings.SplitSeq(text, "\n")
+	for line := range lines {
+		if !strings.Contains(line, "<item") {
+			continue
+		}
+
+		// Check if it's an image media-type
+		if !strings.Contains(line, `media-type="image/`) {
+			continue
+		}
+
+		// Extract href attribute
+		href := p.extractAttribute(line, "href")
+		if href == "" {
+			continue
+		}
+
+		// Convert to absolute path
+		imgPath := filepath.Join(outputDir, href)
+		images = append(images, imgPath)
+	}
+
+	return images
+}
+
+// extractAttribute extracts an attribute value from an XML tag
+func (p *TextProcessor) extractAttribute(tag, attrName string) string {
+	// Look for attrName="value" or attrName='value'
+	patterns := []string{
+		attrName + `="`,
+		attrName + `='`,
+	}
+
+	for _, pattern := range patterns {
+		idx := strings.Index(tag, pattern)
+		if idx == -1 {
+			continue
+		}
+
+		start := idx + len(pattern)
+		quote := pattern[len(pattern)-1]
+		end := strings.Index(tag[start:], string(quote))
+		if end == -1 {
+			continue
+		}
+
+		return tag[start : start+end]
+	}
+
+	return ""
+}
+
+// updateManifest updates the content.opf file with new image references
+func (p *TextProcessor) updateManifest(outputDir string, converted map[string]string) {
+	manifestPath := filepath.Join(outputDir, "content.opf")
+
+	content, err := os.ReadFile(manifestPath)
+	if err != nil {
+		slog.Warn("Failed to read content.opf for update", "error", err)
+		return
+	}
+
+	text := string(content)
+	modified := false
+
+	// Update manifest items (href attributes in <item> elements)
+	for oldName, newName := range converted {
+		// Replace in href attributes: href="images/old.jpg" -> href="images/old.avif"
+		if strings.Contains(text, `href="`+oldName+`"`) {
+			text = strings.ReplaceAll(text, `href="`+oldName+`"`, `href="`+newName+`"`)
+			modified = true
+		}
+		if strings.Contains(text, `href='`+oldName+`'`) {
+			text = strings.ReplaceAll(text, `href='`+oldName+`'`, `href='`+newName+`'`)
+			modified = true
+		}
+
+		// Update media-type attributes
+		newMediaType := p.getMediaType(".avif")
+		if newMediaType != "" {
+			// Find and update media-type for this item
+			text = p.updateMediaType(text, oldName, newMediaType)
+		}
+	}
+
+	if modified {
+		os.WriteFile(manifestPath, []byte(text), 0o644)
+	}
+}
+
+// getMediaType returns the MIME type for a file extension
+func (p *TextProcessor) getMediaType(ext string) string {
+	switch strings.ToLower(ext) {
+	case ".avif":
+		return "image/avif"
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".png":
+		return "image/png"
+	case ".gif":
+		return "image/gif"
+	case ".svg":
+		return "image/svg+xml"
+	case ".webp":
+		return "image/webp"
+	case ".bmp":
+		return "image/bmp"
+	default:
+		return ""
+	}
+}
+
+// updateMediaType updates the media-type attribute for a specific item in the manifest
+func (p *TextProcessor) updateMediaType(text, fileName, newMediaType string) string {
+	// Find the item element containing this file
+	// Look for patterns like: <item href="..." media-type="..." id="..."/>
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		if !strings.Contains(line, "<item") {
+			continue
+		}
+		if !strings.Contains(line, fileName) {
+			continue
+		}
+
+		// Update media-type in this line
+		if strings.Contains(line, `media-type="`) {
+			// Replace existing media-type
+			oldType := p.extractAttribute(line, "media-type")
+			if oldType != "" {
+				line = strings.Replace(line, `media-type="`+oldType+`"`, `media-type="`+newMediaType+`"`, 1)
+				lines[i] = line
+			}
+		}
+	}
+
+	return strings.Join(lines, "\n")
 }
 
 // updateImageReferences updates HTML files to reference new AVIF files
@@ -514,4 +674,65 @@ func (p *TextProcessor) updateReferencesInFile(path string, converted map[string
 func (p *TextProcessor) folderExists(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && info.IsDir()
+}
+
+// packageToEPUB creates an EPUB file from the OEB folder using Calibre
+func (p *TextProcessor) packageToEPUB(ctx context.Context, folderPath, epubPath string, cfg *models.ProcessorConfig) error {
+	ebookConvert := utils.GetCommandPath("ebook-convert")
+	if ebookConvert == "" {
+		return fmt.Errorf("calibre not installed")
+	}
+
+	args := []string{
+		folderPath,
+		epubPath,
+		"--no-default-epub-cover",
+		"--epub-inline-toc",
+		"--dont-split-on-page-breaks",
+	}
+
+	// Setup memory monitoring if configured
+	var output []byte
+	var err error
+
+	if cfg.Common.MemoryLimit > 0 {
+		cmd := exec.CommandContext(ctx, ebookConvert, args...)
+		utils.SetupProcessGroup(cmd)
+
+		stderrPipe, pipeErr := cmd.StderrPipe()
+		if pipeErr != nil {
+			return pipeErr
+		}
+
+		monCfg := utils.ProcessMonitorConfig{
+			MemoryLimit:   cfg.Common.MemoryLimit,
+			CheckInterval: time.Duration(cfg.Common.MemoryCheckInterval) * time.Millisecond,
+		}
+		monitor := utils.NewProcessMonitor(cmd, monCfg)
+
+		if startErr := cmd.Start(); startErr != nil {
+			return startErr
+		}
+
+		monitor.Start(ctx)
+		defer monitor.Stop()
+
+		waitErr := cmd.Wait()
+		output, _ = io.ReadAll(stderrPipe)
+
+		if waitErr != nil {
+			if monitor.Exceeded() {
+				return fmt.Errorf("process exceeded memory limit of %s", utils.FormatSize(cfg.Common.MemoryLimit))
+			}
+			return fmt.Errorf("ebook-convert failed: %w, output: %s", waitErr, output)
+		}
+	} else {
+		cmd := exec.CommandContext(ctx, ebookConvert, args...)
+		output, err = cmd.CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("ebook-convert failed: %w, output: %s", err, output)
+		}
+	}
+
+	return nil
 }

@@ -174,7 +174,7 @@ func (e *Engine) analyzeMedia(media []models.ShrinkMedia) []models.ShrinkMedia {
 					broken bool
 					failed bool
 				}{idx, *m, skip, broken, failed}
-				
+
 				if !failed {
 					atomic.AddInt64(&completedJobs, 1)
 				}
