@@ -120,6 +120,7 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *models.Shri
 		MemorySwapMax: p.cfg.Common.MemorySwapMax,
 		UseJournald:   p.cfg.Common.UseJournald,
 		Enabled:       !p.cfg.Common.DisableSystemd,
+		Dir:           filepath.Dir(m.Path),
 	}
 
 	unarArgs := []string{"-force-rename", "-o", outputDir, filepath.Base(m.Path)}
@@ -706,6 +707,7 @@ func (p *ArchiveProcessor) getPartFilesImpl(path string) []string {
 			MemorySwapMax: p.cfg.Common.MemorySwapMax,
 			UseJournald:   p.cfg.Common.UseJournald,
 			Enabled:       !p.cfg.Common.DisableSystemd,
+			Dir:           dir,
 		}
 
 		lsarArgs := []string{"-json", path}
@@ -942,6 +944,7 @@ func (p *ArchiveProcessor) lsarWithStatus(path string) ([]models.ShrinkMedia, bo
 		MemorySwapMax: p.cfg.Common.MemorySwapMax,
 		UseJournald:   p.cfg.Common.UseJournald,
 		Enabled:       !p.cfg.Common.DisableSystemd,
+		Dir:           filepath.Dir(path),
 	}
 
 	lsarArgs := []string{"-json", path}

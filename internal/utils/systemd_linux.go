@@ -29,6 +29,9 @@ type SystemdRunConfig struct {
 	// Enabled controls whether systemd-run is used at all.
 	// Default: true (use systemd-run if available)
 	Enabled bool
+	// Dir specifies the working directory for the command.
+	// If empty, the current working directory is used.
+	Dir string
 }
 
 // isTesting returns true if the code is running under `go test`.
@@ -54,6 +57,9 @@ func RunCommandWithSystemd(ctx context.Context, exe string, args []string, cfg S
 	if isTesting() {
 		cmd := exec.CommandContext(ctx, exe, args...)
 		SetupProcessGroup(cmd)
+		if cfg.Dir != "" {
+			cmd.Dir = cfg.Dir
+		}
 		return cmd.CombinedOutput()
 	}
 
@@ -75,6 +81,9 @@ func buildSystemdCommand(ctx context.Context, exe string, args []string, cfg Sys
 		// Direct execution
 		cmd := exec.CommandContext(ctx, exe, args...)
 		SetupProcessGroup(cmd)
+		if cfg.Dir != "" {
+			cmd.Dir = cfg.Dir
+		}
 		return cmd, nil
 	}
 
@@ -84,6 +93,9 @@ func buildSystemdCommand(ctx context.Context, exe string, args []string, cfg Sys
 		slog.Debug("systemd-run not found, running command directly", "command", exe)
 		cmd := exec.CommandContext(ctx, exe, args...)
 		SetupProcessGroup(cmd)
+		if cfg.Dir != "" {
+			cmd.Dir = cfg.Dir
+		}
 		return cmd, nil
 	}
 
@@ -110,6 +122,11 @@ func buildSystemdCommand(ctx context.Context, exe string, args []string, cfg Sys
 		)
 	} else {
 		systemdArgs = append(systemdArgs, "--scope")
+	}
+
+	// Add working directory if specified
+	if cfg.Dir != "" {
+		systemdArgs = append(systemdArgs, "--working-directory="+cfg.Dir)
 	}
 
 	// Add memory limits

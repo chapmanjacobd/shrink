@@ -15,6 +15,7 @@ type SystemdRunConfig struct {
 	Nice          int
 	UseJournald   bool
 	Enabled       bool
+	Dir           string // Working directory
 }
 
 // RunCommandWithSystemd executes a command directly without systemd-run wrapper.
@@ -22,5 +23,8 @@ type SystemdRunConfig struct {
 func RunCommandWithSystemd(ctx context.Context, exe string, args []string, cfg SystemdRunConfig) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, exe, args...)
 	SetupProcessGroup(cmd)
+	if cfg.Dir != "" {
+		cmd.Dir = cfg.Dir
+	}
 	return cmd.CombinedOutput()
 }
