@@ -76,9 +76,11 @@ type CommonConfig struct {
 	ForceShrink        bool
 	VerboseFFmpeg      bool
 	IncludeTimecode    bool
-	// Memory monitoring
-	MemoryLimit         int64 // Memory limit in bytes (0 = no limit)
-	MemoryCheckInterval int   // Memory check interval in milliseconds
+	// Memory monitoring via systemd-run (Linux only)
+	MemoryLimit    int64 // Memory limit in bytes (0 = no limit)
+	MemorySwapMax  int64 // Swap limit in bytes (0 = auto, -1 = disable swap)
+	UseJournald    bool  // Use journald-compatible mode for systemd-run
+	DisableSystemd bool  // Disable systemd-run wrapper even if available
 }
 
 // ProcessorConfig contains comprehensive configuration for all media processing

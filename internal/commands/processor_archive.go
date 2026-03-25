@@ -1,11 +1,9 @@
 package commands
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"math"
 	"os"
@@ -116,70 +114,20 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *models.Shri
 		return models.ProcessResult{SourcePath: m.Path, PartFiles: partFiles, Error: err}
 	}
 
-	// Setup memory monitoring if configured
-	var output []byte
-	var err error
+	// Setup systemd-run wrapper if configured (Linux only)
+	systemdCfg := utils.SystemdRunConfig{
+		MemoryLimit:   p.cfg.Common.MemoryLimit,
+		MemorySwapMax: p.cfg.Common.MemorySwapMax,
+		UseJournald:   p.cfg.Common.UseJournald,
+		Enabled:       !p.cfg.Common.DisableSystemd,
+	}
 
-	if p.cfg.Common.MemoryLimit > 0 {
-		monCfg := utils.ProcessMonitorConfig{
-			MemoryLimit:   p.cfg.Common.MemoryLimit,
-			CheckInterval: time.Duration(p.cfg.Common.MemoryCheckInterval) * time.Millisecond,
-		}
-
-		cmd := exec.CommandContext(ctx, unar, "-force-rename", "-o", outputDir, filepath.Base(m.Path))
-		cmd.Dir = filepath.Dir(m.Path)
-		utils.SetupProcessGroup(cmd)
-
-		// Capture stderr for error reporting
-		stderrPipe, pipeErr := cmd.StderrPipe()
-		if pipeErr != nil {
-			os.RemoveAll(outputDir)
-			return models.ProcessResult{SourcePath: m.Path, PartFiles: partFiles, Error: pipeErr, StopAll: true}
-		}
-
-		monitor := utils.NewProcessMonitor(cmd, monCfg)
-
-		if startErr := cmd.Start(); startErr != nil {
-			os.RemoveAll(outputDir)
-			return models.ProcessResult{SourcePath: m.Path, PartFiles: partFiles, Error: startErr, StopAll: true}
-		}
-
-		monitor.Start(ctx)
-		defer monitor.Stop()
-
-		// Wait for command to complete
-		waitErr := cmd.Wait()
-
-		// Read stderr output
-		output, _ = io.ReadAll(stderrPipe)
-
-		if waitErr != nil {
-			// Clean up on failure
-			os.RemoveAll(outputDir)
-
-			// Check if memory limit was exceeded
-			if monitor.Exceeded() {
-				return models.ProcessResult{
-					SourcePath: m.Path,
-					PartFiles:  partFiles,
-					Error:      fmt.Errorf("process exceeded memory limit of %s", utils.FormatSize(p.cfg.Common.MemoryLimit)),
-					Output:     string(output),
-					StopAll:    true,
-				}
-			}
-
-			return models.ProcessResult{SourcePath: m.Path, PartFiles: partFiles, Error: waitErr, Output: string(output)}
-		}
-	} else {
-		// No memory monitoring - use standard execution
-		cmd := exec.CommandContext(ctx, unar, "-force-rename", "-o", outputDir, filepath.Base(m.Path))
-		cmd.Dir = filepath.Dir(m.Path)
-		output, err = cmd.CombinedOutput()
-		if err != nil {
-			// Clean up on failure
-			os.RemoveAll(outputDir)
-			return models.ProcessResult{SourcePath: m.Path, PartFiles: partFiles, Error: err, Output: string(output)}
-		}
+	unarArgs := []string{"-force-rename", "-o", outputDir, filepath.Base(m.Path)}
+	output, err := utils.RunCommandWithSystemd(ctx, unar, unarArgs, systemdCfg)
+	if err != nil {
+		// Clean up on failure
+		os.RemoveAll(outputDir)
+		return models.ProcessResult{SourcePath: m.Path, PartFiles: partFiles, Error: err, Output: string(output)}
 	}
 
 	// Verify that something was actually extracted
@@ -752,49 +700,19 @@ func (p *ArchiveProcessor) getPartFilesImpl(path string) []string {
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
 
-		lsarCmd := exec.CommandContext(ctx, lsar, "-json", path)
-		lsarCmd.Dir = dir
-
-		// Use memory monitoring if configured
-		var lsarOutput []byte
-		var err error
-
-		if p.cfg.Common.MemoryLimit > 0 {
-			utils.SetupProcessGroup(lsarCmd)
-
-			var outBuf bytes.Buffer
-			lsarCmd.Stdout = &outBuf
-			lsarCmd.Stderr = &outBuf
-
-			monCfg := utils.ProcessMonitorConfig{
-				MemoryLimit:   p.cfg.Common.MemoryLimit,
-				CheckInterval: time.Duration(p.cfg.Common.MemoryCheckInterval) * time.Millisecond,
-			}
-			monitor := utils.NewProcessMonitor(lsarCmd, monCfg)
-
-			if startErr := lsarCmd.Start(); startErr != nil {
-				slog.Debug("lsar Start failed", "error", startErr)
-			} else {
-				monitor.Start(ctx)
-
-				waitErr := lsarCmd.Wait()
-				lsarOutput = outBuf.Bytes()
-
-				monitor.Stop()
-
-				if waitErr != nil {
-					if ctx.Err() == context.DeadlineExceeded {
-						slog.Warn("lsar XADVolumes call timed out", "path", path)
-						err = fmt.Errorf("lsar timeout")
-					} else {
-						err = waitErr
-					}
-				}
-			}
+		// Use systemd-run wrapper if configured (Linux only)
+		systemdCfg := utils.SystemdRunConfig{
+			MemoryLimit:   p.cfg.Common.MemoryLimit,
+			MemorySwapMax: p.cfg.Common.MemorySwapMax,
+			UseJournald:   p.cfg.Common.UseJournald,
+			Enabled:       !p.cfg.Common.DisableSystemd,
 		}
 
+		lsarArgs := []string{"-json", path}
+		lsarOutput, err := utils.RunCommandWithSystemd(ctx, lsar, lsarArgs, systemdCfg)
+
 		if len(lsarOutput) == 0 && err == nil {
-			// Fallback to CombinedOutput if monitoring not used or failed
+			// Fallback to CombinedOutput if systemd-run not used or failed
 			fallbackCmd := exec.CommandContext(ctx, lsar, "-json", path)
 			fallbackCmd.Dir = dir
 			lsarOutput, err = fallbackCmd.CombinedOutput()
@@ -1018,49 +936,18 @@ func (p *ArchiveProcessor) lsarWithStatus(path string) ([]models.ShrinkMedia, bo
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	// Use memory monitoring if configured
-	var output []byte
-	var err error
-
-	if p.cfg.Common.MemoryLimit > 0 {
-		slog.Debug("Running lsar with memory monitoring", "path", path)
-		lsarCmd := exec.CommandContext(ctx, lsar, "-json", path)
-		lsarCmd.Dir = filepath.Dir(path)
-		utils.SetupProcessGroup(lsarCmd)
-
-		var outBuf bytes.Buffer
-		lsarCmd.Stdout = &outBuf
-		lsarCmd.Stderr = &outBuf
-
-		monCfg := utils.ProcessMonitorConfig{
-			MemoryLimit:   p.cfg.Common.MemoryLimit,
-			CheckInterval: time.Duration(p.cfg.Common.MemoryCheckInterval) * time.Millisecond,
-		}
-		monitor := utils.NewProcessMonitor(lsarCmd, monCfg)
-
-		if startErr := lsarCmd.Start(); startErr == nil {
-			monitor.Start(ctx)
-
-			waitErr := lsarCmd.Wait()
-			output = outBuf.Bytes()
-
-			monitor.Stop()
-
-			if waitErr != nil {
-				if ctx.Err() == context.DeadlineExceeded {
-					slog.Warn("lsar command timed out", "path", path)
-					err = fmt.Errorf("lsar timeout")
-				} else {
-					err = waitErr
-				}
-			}
-		} else {
-			slog.Debug("lsar Start failed, using fallback", "error", startErr)
-			// Fall through to CombinedOutput
-		}
+	// Use systemd-run wrapper if configured (Linux only)
+	systemdCfg := utils.SystemdRunConfig{
+		MemoryLimit:   p.cfg.Common.MemoryLimit,
+		MemorySwapMax: p.cfg.Common.MemorySwapMax,
+		UseJournald:   p.cfg.Common.UseJournald,
+		Enabled:       !p.cfg.Common.DisableSystemd,
 	}
 
-	// Use CombinedOutput if monitoring not configured or failed
+	lsarArgs := []string{"-json", path}
+	output, err := utils.RunCommandWithSystemd(ctx, lsar, lsarArgs, systemdCfg)
+
+	// Use CombinedOutput if systemd-run not used or failed
 	if len(output) == 0 && err == nil {
 		slog.Debug("Running lsar with CombinedOutput", "path", path)
 		lsarCmd := exec.CommandContext(ctx, lsar, "-json", path)

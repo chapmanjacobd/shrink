@@ -3,13 +3,11 @@ package commands
 import (
 	"context"
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/chapmanjacobd/shrink/internal/models"
 	"github.com/chapmanjacobd/shrink/internal/utils"
@@ -79,59 +77,18 @@ func (p *TextProcessor) processText(ctx context.Context, m *models.ShrinkMedia, 
 		args = append(args, "--pdf-engine", "pdftohtml")
 	}
 
-	// Setup memory monitoring if configured
-	var output []byte
-	var err error
+	// Setup systemd-run wrapper if configured (Linux only)
+	systemdCfg := utils.SystemdRunConfig{
+		MemoryLimit:   cfg.Common.MemoryLimit,
+		MemorySwapMax: cfg.Common.MemorySwapMax,
+		UseJournald:   cfg.Common.UseJournald,
+		Enabled:       !cfg.Common.DisableSystemd,
+	}
 
-	if cfg.Common.MemoryLimit > 0 {
-		cmd := exec.CommandContext(ctx, ebookConvert, args...)
-		utils.SetupProcessGroup(cmd)
-
-		stderrPipe, pipeErr := cmd.StderrPipe()
-		if pipeErr != nil {
-			os.RemoveAll(outputDir)
-			return models.ProcessResult{SourcePath: m.Path, Error: pipeErr, StopAll: true}
-		}
-
-		monCfg := utils.ProcessMonitorConfig{
-			MemoryLimit:   cfg.Common.MemoryLimit,
-			CheckInterval: time.Duration(cfg.Common.MemoryCheckInterval) * time.Millisecond,
-		}
-		monitor := utils.NewProcessMonitor(cmd, monCfg)
-
-		if startErr := cmd.Start(); startErr != nil {
-			os.RemoveAll(outputDir)
-			return models.ProcessResult{SourcePath: m.Path, Error: startErr, StopAll: true}
-		}
-
-		monitor.Start(ctx)
-		defer monitor.Stop()
-
-		waitErr := cmd.Wait()
-		output, _ = io.ReadAll(stderrPipe)
-
-		if waitErr != nil {
-			os.RemoveAll(outputDir)
-
-			if monitor.Exceeded() {
-				return models.ProcessResult{
-					SourcePath: m.Path,
-					Error:      fmt.Errorf("process exceeded memory limit of %s", utils.FormatSize(cfg.Common.MemoryLimit)),
-					Output:     string(output),
-					StopAll:    true,
-				}
-			}
-
-			return models.ProcessResult{SourcePath: m.Path, Error: waitErr, Output: string(output)}
-		}
-	} else {
-		cmd := exec.CommandContext(ctx, ebookConvert, args...)
-		output, err = cmd.CombinedOutput()
-		if err != nil {
-			// Clean up on failure
-			os.RemoveAll(outputDir)
-			return models.ProcessResult{SourcePath: m.Path, Error: err, Output: string(output)}
-		}
+	output, err := utils.RunCommandWithSystemd(ctx, ebookConvert, args, systemdCfg)
+	if err != nil {
+		os.RemoveAll(outputDir)
+		return models.ProcessResult{SourcePath: m.Path, Error: err, Output: string(output)}
 	}
 
 	if !p.folderExists(outputDir) {
@@ -226,68 +183,27 @@ func (p *TextProcessor) runOCR(path string, cfg *models.ProcessorConfig) string 
 
 	args = append(args, path, outputPath)
 
-	// Setup memory monitoring if configured
-	var output []byte
-	var err error
-
-	if cfg.Common.MemoryLimit > 0 {
-		cmd := exec.Command(ocrmypdf, args...)
-		utils.SetupProcessGroup(cmd)
-
-		stderrPipe, pipeErr := cmd.StderrPipe()
-		if pipeErr != nil {
-			slog.Debug("ocrmypdf StderrPipe failed", "error", pipeErr)
-		} else {
-			monCfg := utils.ProcessMonitorConfig{
-				MemoryLimit:   cfg.Common.MemoryLimit,
-				CheckInterval: time.Duration(cfg.Common.MemoryCheckInterval) * time.Millisecond,
-			}
-			monitor := utils.NewProcessMonitor(cmd, monCfg)
-
-			if startErr := cmd.Start(); startErr != nil {
-				slog.Debug("ocrmypdf Start failed", "error", startErr)
-			} else {
-				monitor.Start(context.Background())
-
-				waitErr := cmd.Wait()
-				output, _ = io.ReadAll(stderrPipe)
-
-				monitor.Stop()
-
-				if waitErr != nil {
-					outputStr := string(output)
-					// Check if it's a "skip-text" message (not really an error)
-					if strings.Contains(outputStr, "already contains text") ||
-						strings.Contains(outputStr, "skipping") {
-						slog.Info("Skipping OCR (PDF already has text)", "path", path)
-						os.Remove(outputPath)
-						return ""
-					}
-					slog.Warn("OCR failed", "path", path, "error", waitErr, "output", outputStr)
-					os.Remove(outputPath)
-					return ""
-				}
-			}
-		}
+	// Setup systemd-run wrapper if configured (Linux only)
+	systemdCfg := utils.SystemdRunConfig{
+		MemoryLimit:   cfg.Common.MemoryLimit,
+		MemorySwapMax: cfg.Common.MemorySwapMax,
+		UseJournald:   cfg.Common.UseJournald,
+		Enabled:       !cfg.Common.DisableSystemd,
 	}
 
-	// Fallback to standard execution if monitoring not used or failed
-	if err == nil {
-		cmd := exec.Command(ocrmypdf, args...)
-		output, err = cmd.CombinedOutput()
-		if err != nil {
-			outputStr := string(output)
-			// Check if it's a "skip-text" message (not really an error)
-			if strings.Contains(outputStr, "already contains text") ||
-				strings.Contains(outputStr, "skipping") {
-				slog.Info("Skipping OCR (PDF already has text)", "path", path)
-				os.Remove(outputPath)
-				return ""
-			}
-			slog.Warn("OCR failed", "path", path, "error", err, "output", outputStr)
+	output, err := utils.RunCommandWithSystemd(context.Background(), ocrmypdf, args, systemdCfg)
+	outputStr := string(output)
+	if err != nil {
+		// Check if it's a "skip-text" message (not really an error)
+		if strings.Contains(outputStr, "already contains text") ||
+			strings.Contains(outputStr, "skipping") {
+			slog.Info("Skipping OCR (PDF already has text)", "path", path)
 			os.Remove(outputPath)
 			return ""
 		}
+		slog.Warn("OCR failed", "path", path, "error", err, "output", outputStr)
+		os.Remove(outputPath)
+		return ""
 	}
 
 	if _, err := os.Stat(outputPath); err == nil {
@@ -415,35 +331,15 @@ func (p *TextProcessor) processEbookImagesWithManifest(ctx context.Context, outp
 			outputPath,
 		}
 
-		// Setup memory monitoring if configured
-		var cmdErr error
-		if cfg.Common.MemoryLimit > 0 {
-			cmd := exec.CommandContext(ctx, imCmd, args...)
-			utils.SetupProcessGroup(cmd)
-
-			monCfg := utils.ProcessMonitorConfig{
-				MemoryLimit:   cfg.Common.MemoryLimit,
-				CheckInterval: time.Duration(cfg.Common.MemoryCheckInterval) * time.Millisecond,
-			}
-			monitor := utils.NewProcessMonitor(cmd, monCfg)
-
-			if startErr := cmd.Start(); startErr != nil {
-				cmdErr = startErr
-			} else {
-				monitor.Start(ctx)
-
-				waitErr := cmd.Wait()
-				monitor.Stop()
-
-				if waitErr != nil {
-					cmdErr = waitErr
-				}
-			}
-		} else {
-			cmd := exec.CommandContext(ctx, imCmd, args...)
-			cmdErr = cmd.Run()
+		// Setup systemd-run wrapper if configured (Linux only)
+		systemdCfg := utils.SystemdRunConfig{
+			MemoryLimit:   cfg.Common.MemoryLimit,
+			MemorySwapMax: cfg.Common.MemorySwapMax,
+			UseJournald:   cfg.Common.UseJournald,
+			Enabled:       !cfg.Common.DisableSystemd,
 		}
 
+		_, cmdErr := utils.RunCommandWithSystemd(ctx, imCmd, args, systemdCfg)
 		if cmdErr != nil {
 			slog.Warn("Failed to convert ebook image", "path", img, "error", cmdErr)
 			// Clean up partial transcode if original still exists
@@ -694,47 +590,17 @@ func (p *TextProcessor) packageToEPUB(ctx context.Context, folderPath, epubPath 
 		"--dont-split-on-page-breaks",
 	}
 
-	// Setup memory monitoring if configured
-	var output []byte
-	var err error
+	// Setup systemd-run wrapper if configured (Linux only)
+	systemdCfg := utils.SystemdRunConfig{
+		MemoryLimit:   cfg.Common.MemoryLimit,
+		MemorySwapMax: cfg.Common.MemorySwapMax,
+		UseJournald:   cfg.Common.UseJournald,
+		Enabled:       !cfg.Common.DisableSystemd,
+	}
 
-	if cfg.Common.MemoryLimit > 0 {
-		cmd := exec.CommandContext(ctx, ebookConvert, args...)
-		utils.SetupProcessGroup(cmd)
-
-		stderrPipe, pipeErr := cmd.StderrPipe()
-		if pipeErr != nil {
-			return pipeErr
-		}
-
-		monCfg := utils.ProcessMonitorConfig{
-			MemoryLimit:   cfg.Common.MemoryLimit,
-			CheckInterval: time.Duration(cfg.Common.MemoryCheckInterval) * time.Millisecond,
-		}
-		monitor := utils.NewProcessMonitor(cmd, monCfg)
-
-		if startErr := cmd.Start(); startErr != nil {
-			return startErr
-		}
-
-		monitor.Start(ctx)
-		defer monitor.Stop()
-
-		waitErr := cmd.Wait()
-		output, _ = io.ReadAll(stderrPipe)
-
-		if waitErr != nil {
-			if monitor.Exceeded() {
-				return fmt.Errorf("process exceeded memory limit of %s", utils.FormatSize(cfg.Common.MemoryLimit))
-			}
-			return fmt.Errorf("ebook-convert failed: %w, output: %s", waitErr, output)
-		}
-	} else {
-		cmd := exec.CommandContext(ctx, ebookConvert, args...)
-		output, err = cmd.CombinedOutput()
-		if err != nil {
-			return fmt.Errorf("ebook-convert failed: %w, output: %s", err, output)
-		}
+	output, err := utils.RunCommandWithSystemd(ctx, ebookConvert, args, systemdCfg)
+	if err != nil {
+		return fmt.Errorf("ebook-convert failed: %w, output: %s", err, output)
 	}
 
 	return nil

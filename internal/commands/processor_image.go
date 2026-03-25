@@ -3,10 +3,8 @@ package commands
 import (
 	"context"
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -80,92 +78,35 @@ func (p *ImageProcessor) processImage(ctx context.Context, m *models.ShrinkMedia
 
 	args = append(args, outputPath)
 
-	// Setup memory monitoring if configured
-	var output []byte
-	var err error
+	// Setup systemd-run wrapper if configured (Linux only)
+	systemdCfg := utils.SystemdRunConfig{
+		MemoryLimit:   cfg.Common.MemoryLimit,
+		MemorySwapMax: cfg.Common.MemorySwapMax,
+		UseJournald:   cfg.Common.UseJournald,
+		Enabled:       !cfg.Common.DisableSystemd,
+	}
 
-	if cfg.Common.MemoryLimit > 0 {
-		cmd := exec.CommandContext(ctx, imCmd, args...)
-		utils.SetupProcessGroup(cmd)
+	output, err := utils.RunCommandWithSystemd(ctx, imCmd, args, systemdCfg)
+	if err != nil {
+		// Clean up on failure
+		os.Remove(outputPath)
 
-		stderrPipe, pipeErr := cmd.StderrPipe()
-		if pipeErr != nil {
-			os.Remove(outputPath)
-			return models.ProcessResult{SourcePath: m.Path, Error: pipeErr, StopAll: true}
-		}
+		// Categorize ImageMagick errors
+		errorLog := strings.Split(string(output), "\n")
+		isUnsupported := isImageMagickUnsupportedError(errorLog)
+		isFileError := isImageMagickFileError(errorLog)
+		isEnvError := isImageMagickEnvironmentError(errorLog)
 
-		monCfg := utils.ProcessMonitorConfig{
-			MemoryLimit:   cfg.Common.MemoryLimit,
-			CheckInterval: time.Duration(cfg.Common.MemoryCheckInterval) * time.Millisecond,
-		}
-		monitor := utils.NewProcessMonitor(cmd, monCfg)
-
-		if startErr := cmd.Start(); startErr != nil {
-			os.Remove(outputPath)
-			return models.ProcessResult{SourcePath: m.Path, Error: startErr, StopAll: true}
-		}
-
-		monitor.Start(ctx)
-		defer monitor.Stop()
-
-		waitErr := cmd.Wait()
-		output, _ = io.ReadAll(stderrPipe)
-
-		if waitErr != nil {
-			// Clean up on failure
-			os.Remove(outputPath)
-
-			// Check if memory limit was exceeded
-			if monitor.Exceeded() {
-				return models.ProcessResult{
-					SourcePath: m.Path,
-					Error:      fmt.Errorf("process exceeded memory limit of %s", utils.FormatSize(cfg.Common.MemoryLimit)),
-					Output:     string(output),
-					StopAll:    true,
-				}
-			}
-
-			// Categorize ImageMagick errors
-			errorLog := strings.Split(string(output), "\n")
-			isUnsupported := isImageMagickUnsupportedError(errorLog)
-			isFileError := isImageMagickFileError(errorLog)
-			isEnvError := isImageMagickEnvironmentError(errorLog)
-
-			if isEnvError {
-				return models.ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("ImageMagick environment error: %w", waitErr), Output: string(output), StopAll: true}
-			} else if isUnsupported {
-				slog.Info("Unsupported image format, keeping original", "path", m.Path)
-				return models.ProcessResult{SourcePath: m.Path, Success: true, Outputs: []models.ProcessOutputFile{{Path: m.Path, Size: m.Size}}}
-			} else if isFileError {
-				return models.ProcessResult{SourcePath: m.Path, Error: waitErr, Output: string(output)}
-			}
-
-			return models.ProcessResult{SourcePath: m.Path, Error: waitErr, Output: string(output)}
-		}
-	} else {
-		cmd := exec.CommandContext(ctx, imCmd, args...)
-		output, err = cmd.CombinedOutput()
-		if err != nil {
-			// Clean up on failure
-			os.Remove(outputPath)
-			// Categorize ImageMagick errors
-			errorLog := strings.Split(string(output), "\n")
-			isUnsupported := isImageMagickUnsupportedError(errorLog)
-			isFileError := isImageMagickFileError(errorLog)
-			isEnvError := isImageMagickEnvironmentError(errorLog)
-
-			if isEnvError {
-				return models.ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("ImageMagick environment error: %w", err), Output: string(output), StopAll: true}
-			} else if isUnsupported {
-				os.Remove(outputPath)
-				slog.Info("Unsupported image format, keeping original", "path", m.Path)
-				return models.ProcessResult{SourcePath: m.Path, Success: true, Outputs: []models.ProcessOutputFile{{Path: m.Path, Size: m.Size}}}
-			} else if isFileError {
-				return models.ProcessResult{SourcePath: m.Path, Error: err, Output: string(output)}
-			}
-
+		if isEnvError {
+			return models.ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("ImageMagick environment error: %w", err), Output: string(output), StopAll: true}
+		} else if isUnsupported {
+			slog.Info("Unsupported image format, keeping original", "path", m.Path)
+			return models.ProcessResult{SourcePath: m.Path, Success: true, Outputs: []models.ProcessOutputFile{{Path: m.Path, Size: m.Size}}}
+		} else if isFileError {
 			return models.ProcessResult{SourcePath: m.Path, Error: err, Output: string(output)}
 		}
+
+		return models.ProcessResult{SourcePath: m.Path, Error: err, Output: string(output)}
 	}
 
 	outputStats, err := os.Stat(outputPath)

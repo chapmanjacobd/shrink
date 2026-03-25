@@ -117,8 +117,10 @@ type ParallelFlags struct {
 }
 
 type MemoryFlags struct {
-	MemoryLimit         string `default:"" help:"Maximum memory usage per process (e.g., 4G, 512M). Default: min(12GB, RAM - 2GB). Set to 0 for no limit" env:"SHRINK_MEMORY_LIMIT"`
-	MemoryCheckInterval int    `default:"500" help:"Memory check interval in milliseconds" env:"SHRINK_MEMORY_CHECK_INTERVAL"`
+	MemoryLimit    string `default:"" help:"Maximum memory usage per process (e.g., 4G, 512M). Default: min(12GB, RAM - 2GB). Set to 0 for no limit" env:"SHRINK_MEMORY_LIMIT"`
+	MemorySwapMax  string `default:"" help:"Maximum swap usage per process (e.g., 2G, 0 to disable). Default: half of MemoryLimit" env:"SHRINK_MEMORY_SWAP_MAX"`
+	UseJournald    bool   `help:"Use journald-compatible mode for systemd-run" env:"SHRINK_USE_JOURNALD"`
+	DisableSystemd bool   `help:"Disable systemd-run wrapper even if available" env:"SHRINK_DISABLE_SYSTEMD"`
 }
 
 type TimeoutFlags struct {
@@ -169,32 +171,33 @@ func (c *Config) BuildProcessorConfig() *models.ProcessorConfig {
 func (c *Config) buildCommonConfig() models.CommonConfig {
 	limit := utils.ParseSize(c.MemoryLimit)
 	if limit == 0 && c.MemoryLimit == "" {
-		total := utils.GetTotalRAM()
-		maxLimit := int64(12 * 1024 * 1024 * 1024)
-		if total > 0 {
-			// default: min(12GB, Total RAM - 2GB)
-			limit = max(min(total-(2*1024*1024*1024), maxLimit), 0)
-		} else {
-			// RAM couldn't be determined, default to 12GB
-			limit = maxLimit
-		}
+		// Default to 12GB limit
+		limit = 12 * 1024 * 1024 * 1024
+	}
+
+	// Parse swap limit
+	swapMax := utils.ParseSize(c.MemorySwapMax)
+	if c.MemorySwapMax == "0" {
+		swapMax = -1 // Explicitly disable swap
 	}
 
 	return models.CommonConfig{
-		SourceAudioBitrate:  utils.ParseBitrate(c.SourceAudioBitrate),
-		SourceVideoBitrate:  utils.ParseBitrate(c.SourceVideoBitrate),
-		DeleteUnplayable:    c.DeleteUnplayable,
-		DeleteLarger:        c.DeleteLarger,
-		MoveBroken:          c.MoveBroken,
-		Valid:               c.Valid,
-		Invalid:             c.Invalid,
-		ForceShrink:         c.ForceShrink,
-		VerboseFFmpeg:       c.VerboseFFmpeg,
-		IncludeTimecode:     c.IncludeTimecode,
-		MaxWidthBuffer:      c.MaxWidthBuffer,
-		MaxHeightBuffer:     c.MaxHeightBuffer,
-		MemoryLimit:         limit,
-		MemoryCheckInterval: c.MemoryCheckInterval,
+		SourceAudioBitrate: utils.ParseBitrate(c.SourceAudioBitrate),
+		SourceVideoBitrate: utils.ParseBitrate(c.SourceVideoBitrate),
+		DeleteUnplayable:   c.DeleteUnplayable,
+		DeleteLarger:       c.DeleteLarger,
+		MoveBroken:         c.MoveBroken,
+		Valid:              c.Valid,
+		Invalid:            c.Invalid,
+		ForceShrink:        c.ForceShrink,
+		VerboseFFmpeg:      c.VerboseFFmpeg,
+		IncludeTimecode:    c.IncludeTimecode,
+		MaxWidthBuffer:     c.MaxWidthBuffer,
+		MaxHeightBuffer:    c.MaxHeightBuffer,
+		MemoryLimit:        limit,
+		MemorySwapMax:      swapMax,
+		UseJournald:        c.UseJournald,
+		DisableSystemd:     c.DisableSystemd,
 	}
 }
 

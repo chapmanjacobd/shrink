@@ -400,7 +400,7 @@ func init() {
 		MediaExtensionMap["."+ext] = true
 	}
 	// Add common multi-part extensions
-	for i := range 100 {
+	for i := range 2 {
 		zExt := fmt.Sprintf(".z%02d", i)
 		ArchiveExtensionMap[zExt] = true
 		MediaExtensionMap[zExt] = true
