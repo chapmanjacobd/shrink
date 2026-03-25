@@ -798,7 +798,7 @@ func (p *ArchiveProcessor) getPartFilesImpl(path string) []string {
 			lsarOutput, err = lsarCmd.CombinedOutput()
 		}
 
-		if ctx.Err() == context.DeadlineExceeded {
+		if ctx.Err() == context.DeadlineExceeded && err == nil {
 			slog.Warn("lsar XADVolumes call timed out", "path", path)
 			err = fmt.Errorf("lsar timeout")
 		}

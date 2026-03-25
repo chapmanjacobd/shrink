@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"os/exec"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -154,22 +153,6 @@ func RunCommandWithMonitoring(ctx context.Context, cfg ProcessMonitorConfig, nam
 	monitor.Start(ctx)
 
 	return cmd, monitor, nil
-}
-
-// SetupProcessGroup configures the command to run in a new process group.
-// This allows us to kill all child processes together.
-func SetupProcessGroup(cmd *exec.Cmd) {
-	if cmd.SysProcAttr == nil {
-		cmd.SysProcAttr = &syscall.SysProcAttr{}
-	}
-	// Unix: create new process group
-	cmd.SysProcAttr.Setpgid = true
-}
-
-// setupProcessGroup configures the command to run in a new process group.
-// This allows us to kill all child processes together.
-func setupProcessGroup(cmd *exec.Cmd) {
-	SetupProcessGroup(cmd)
 }
 
 // killProcessGroup kills a process and all its children.
