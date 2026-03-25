@@ -730,8 +730,8 @@ func (p *ArchiveProcessor) getPartFiles(path string) []string {
 	select {
 	case result := <-resultChan:
 		return result
-	case <-time.After(10 * time.Second):
-		slog.Warn("getPartFiles timed out after 10 seconds", "path", path)
+	case <-time.After(30 * time.Second):
+		slog.Warn("getPartFiles timed out after 30 seconds", "path", path)
 		return nil
 	}
 }
