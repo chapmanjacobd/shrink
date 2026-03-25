@@ -33,11 +33,17 @@ func GetTotalRAM() int64 {
 	return 0
 }
 
+// SetupProcessGroup configures the command to run in a new process group on Windows.
+// Windows doesn't support Setpgid, so this is a no-op.
+func SetupProcessGroup(cmd *exec.Cmd) {
+	// Windows doesn't support process groups in the same way as Unix
+	// Process tree killing is handled via Windows APIs in killProcessGroupImpl
+}
+
 // setupProcessGroup configures the command to run in a new process group on Windows.
 // Windows doesn't support Setpgid, so this is a no-op.
 func setupProcessGroup(cmd *exec.Cmd) {
-	// Windows doesn't support process groups in the same way as Unix
-	// Process tree killing is handled via Windows APIs in killProcessGroupImpl
+	SetupProcessGroup(cmd)
 }
 
 var (
