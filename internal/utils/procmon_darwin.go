@@ -112,22 +112,3 @@ func getChildProcesses(parentPid int) []int {
 	}
 	return children
 }
-
-// getProcessParent returns the parent PID of a process.
-func getProcessParent(pid int) int {
-	cmd := exec.Command("ps", "-o", "ppid=", "-p", strconv.Itoa(pid))
-	out, err := cmd.Output()
-	if err != nil {
-		return 0
-	}
-
-	ppidStr := strings.TrimSpace(string(out))
-	if ppidStr == "" {
-		return 0
-	}
-
-	if ppid, err := strconv.Atoi(ppidStr); err == nil {
-		return ppid
-	}
-	return 0
-}

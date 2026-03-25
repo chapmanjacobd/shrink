@@ -3,6 +3,7 @@
 package utils
 
 import (
+	"os/exec"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -10,12 +11,19 @@ import (
 
 // GetTotalRAM returns the total physical memory in bytes.
 func GetTotalRAM() int64 {
-	var mem windows.MemoryStatusEx
+	var mem windows.MemoryStatus
 	mem.Length = uint32(unsafe.Sizeof(mem))
-	if err := windows.GlobalMemoryStatusEx(&mem); err == nil {
+	if err := windows.GlobalMemoryStatus(&mem); err == nil {
 		return int64(mem.TotalPhys)
 	}
 	return 0
+}
+
+// setupProcessGroup configures the command to run in a new process group on Windows.
+// Windows doesn't support Setpgid, so this is a no-op.
+func setupProcessGroup(cmd *exec.Cmd) {
+	// Windows doesn't support process groups in the same way as Unix
+	// Process tree killing is handled via Windows APIs in killProcessGroupImpl
 }
 
 var (
