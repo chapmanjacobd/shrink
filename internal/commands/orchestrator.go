@@ -381,17 +381,21 @@ func (e *Engine) processMedia(ctx context.Context, media []models.ShrinkMedia) {
 			go func(q chan models.ShrinkMedia) {
 				defer wg.Done()
 				for m := range q {
-					// Skip if stopAll or context canceled
-					if stopAll.Load() || ctx.Err() != nil {
-						continue
-					}
-
 					// Record that the file is actually running now
 					displayCat := m.DisplayCategory()
 					path := m.Path
 					e.metrics.RecordRunning(displayCat, path)
 
+					// Ensure Running count is decremented even on cancel
+					stopped := false
+					defer func() {
+						if !stopped {
+							e.metrics.RecordStopped(displayCat, path)
+						}
+					}()
+
 					result := e.processSingle(ctx, m)
+					stopped = true
 					e.metrics.RecordStopped(displayCat, path)
 
 					// Check for stop-all signal (environment error)
@@ -419,7 +423,11 @@ func (e *Engine) processMedia(ctx context.Context, media []models.ShrinkMedia) {
 					mCat = "Archived"
 				}
 				if mCat == targetCat {
-					q <- *m
+					select {
+					case q <- *m:
+					case <-ctx.Done():
+						break
+					}
 				}
 			}
 			close(q)
