@@ -328,6 +328,32 @@ func (e *Engine) analyzeMedia(media []models.ShrinkMedia) []models.ShrinkMedia {
 // Processing Orchestration
 // ============================================================================
 
+// processWorker handles a single media item with proper metrics tracking.
+// It ensures RecordStopped is always called, even on context cancellation.
+func (e *Engine) processWorker(ctx context.Context, m models.ShrinkMedia, stopAll *atomic.Bool, cancel context.CancelFunc) {
+	displayCat := m.DisplayCategory()
+	path := m.Path
+	e.metrics.RecordRunning(displayCat, path)
+
+	// Ensure Running count is decremented even on cancel
+	stopped := false
+	defer func() {
+		if !stopped {
+			e.metrics.RecordStopped(displayCat, path)
+		}
+	}()
+
+	result := e.processSingle(ctx, m)
+	stopped = true
+	e.metrics.RecordStopped(displayCat, path)
+
+	// Check for stop-all signal (environment error)
+	if result.StopAll {
+		stopAll.Store(true)
+		cancel()
+	}
+}
+
 // processMedia manages the concurrent processing of media files.
 func (e *Engine) processMedia(ctx context.Context, media []models.ShrinkMedia) {
 	var wg sync.WaitGroup
@@ -381,28 +407,7 @@ func (e *Engine) processMedia(ctx context.Context, media []models.ShrinkMedia) {
 			go func(q chan models.ShrinkMedia) {
 				defer wg.Done()
 				for m := range q {
-					// Record that the file is actually running now
-					displayCat := m.DisplayCategory()
-					path := m.Path
-					e.metrics.RecordRunning(displayCat, path)
-
-					// Ensure Running count is decremented even on cancel
-					stopped := false
-					defer func() {
-						if !stopped {
-							e.metrics.RecordStopped(displayCat, path)
-						}
-					}()
-
-					result := e.processSingle(ctx, m)
-					stopped = true
-					e.metrics.RecordStopped(displayCat, path)
-
-					// Check for stop-all signal (environment error)
-					if result.StopAll {
-						stopAll.Store(true)
-						cancel()
-					}
+					e.processWorker(ctx, m, &stopAll, cancel)
 				}
 			}(queues[cat])
 		}
