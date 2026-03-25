@@ -513,8 +513,10 @@ func (e *Engine) processSingle(ctx context.Context, m models.ShrinkMedia) models
 
 	if keepNewFiles {
 		e.finalizeSuccessfulProcessing(&m, result, originalAtime, originalMtime, elapsedSeconds)
+	} else {
+		// Note: If keepNewFiles is false, finalizeFileSwap already marked as TooLarge
+		e.metrics.RecordFailure(m.DisplayCategory(), elapsedSeconds)
 	}
-	// Note: If keepNewFiles is false, finalizeFileSwap already marked as TooLarge
 
 	return result
 }
