@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -761,41 +762,42 @@ func (p *ArchiveProcessor) getPartFilesImpl(path string) []string {
 		if p.cfg.Common.MemoryLimit > 0 {
 			utils.SetupProcessGroup(lsarCmd)
 
-			stderrPipe, pipeErr := lsarCmd.StderrPipe()
-			if pipeErr != nil {
-				slog.Debug("lsar StderrPipe failed", "error", pipeErr)
+			var outBuf bytes.Buffer
+			lsarCmd.Stdout = &outBuf
+			lsarCmd.Stderr = &outBuf
+
+			monCfg := utils.ProcessMonitorConfig{
+				MemoryLimit:   p.cfg.Common.MemoryLimit,
+				CheckInterval: time.Duration(p.cfg.Common.MemoryCheckInterval) * time.Millisecond,
+			}
+			monitor := utils.NewProcessMonitor(lsarCmd, monCfg)
+
+			if startErr := lsarCmd.Start(); startErr != nil {
+				slog.Debug("lsar Start failed", "error", startErr)
 			} else {
-				monCfg := utils.ProcessMonitorConfig{
-					MemoryLimit:   p.cfg.Common.MemoryLimit,
-					CheckInterval: time.Duration(p.cfg.Common.MemoryCheckInterval) * time.Millisecond,
-				}
-				monitor := utils.NewProcessMonitor(lsarCmd, monCfg)
+				monitor.Start(ctx)
 
-				if startErr := lsarCmd.Start(); startErr != nil {
-					slog.Debug("lsar Start failed", "error", startErr)
-				} else {
-					monitor.Start(ctx)
+				waitErr := lsarCmd.Wait()
+				lsarOutput = outBuf.Bytes()
 
-					waitErr := lsarCmd.Wait()
-					lsarOutput, _ = io.ReadAll(stderrPipe)
+				monitor.Stop()
 
-					monitor.Stop()
-
-					if waitErr != nil {
-						if ctx.Err() == context.DeadlineExceeded {
-							slog.Warn("lsar XADVolumes call timed out", "path", path)
-							err = fmt.Errorf("lsar timeout")
-						} else {
-							err = waitErr
-						}
+				if waitErr != nil {
+					if ctx.Err() == context.DeadlineExceeded {
+						slog.Warn("lsar XADVolumes call timed out", "path", path)
+						err = fmt.Errorf("lsar timeout")
+					} else {
+						err = waitErr
 					}
 				}
 			}
 		}
 
-		if err == nil {
+		if len(lsarOutput) == 0 && err == nil {
 			// Fallback to CombinedOutput if monitoring not used or failed
-			lsarOutput, err = lsarCmd.CombinedOutput()
+			fallbackCmd := exec.CommandContext(ctx, lsar, "-json", path)
+			fallbackCmd.Dir = dir
+			lsarOutput, err = fallbackCmd.CombinedOutput()
 		}
 
 		if ctx.Err() == context.DeadlineExceeded && err == nil {
@@ -1026,42 +1028,34 @@ func (p *ArchiveProcessor) lsarWithStatus(path string) ([]models.ShrinkMedia, bo
 		lsarCmd.Dir = filepath.Dir(path)
 		utils.SetupProcessGroup(lsarCmd)
 
-		// Capture both stdout and stderr
-		stdoutPipe, stdoutErr := lsarCmd.StdoutPipe()
-		stderrPipe, stderrErr := lsarCmd.StderrPipe()
+		var outBuf bytes.Buffer
+		lsarCmd.Stdout = &outBuf
+		lsarCmd.Stderr = &outBuf
 
-		if stdoutErr == nil && stderrErr == nil {
-			monCfg := utils.ProcessMonitorConfig{
-				MemoryLimit:   p.cfg.Common.MemoryLimit,
-				CheckInterval: time.Duration(p.cfg.Common.MemoryCheckInterval) * time.Millisecond,
-			}
-			monitor := utils.NewProcessMonitor(lsarCmd, monCfg)
+		monCfg := utils.ProcessMonitorConfig{
+			MemoryLimit:   p.cfg.Common.MemoryLimit,
+			CheckInterval: time.Duration(p.cfg.Common.MemoryCheckInterval) * time.Millisecond,
+		}
+		monitor := utils.NewProcessMonitor(lsarCmd, monCfg)
 
-			if startErr := lsarCmd.Start(); startErr == nil {
-				monitor.Start(ctx)
+		if startErr := lsarCmd.Start(); startErr == nil {
+			monitor.Start(ctx)
 
-				waitErr := lsarCmd.Wait()
-				// Read both stdout and stderr
-				stdoutData, _ := io.ReadAll(stdoutPipe)
-				stderrData, _ := io.ReadAll(stderrPipe)
-				output = append(stdoutData, stderrData...)
+			waitErr := lsarCmd.Wait()
+			output = outBuf.Bytes()
 
-				monitor.Stop()
+			monitor.Stop()
 
-				if waitErr != nil {
-					if ctx.Err() == context.DeadlineExceeded {
-						slog.Warn("lsar command timed out", "path", path)
-						err = fmt.Errorf("lsar timeout")
-					} else {
-						err = waitErr
-					}
+			if waitErr != nil {
+				if ctx.Err() == context.DeadlineExceeded {
+					slog.Warn("lsar command timed out", "path", path)
+					err = fmt.Errorf("lsar timeout")
+				} else {
+					err = waitErr
 				}
-			} else {
-				slog.Debug("lsar Start failed, using fallback", "error", startErr)
-				// Fall through to CombinedOutput
 			}
 		} else {
-			slog.Debug("lsar pipe setup failed, using fallback", "stdout_err", stdoutErr, "stderr_err", stderrErr)
+			slog.Debug("lsar Start failed, using fallback", "error", startErr)
 			// Fall through to CombinedOutput
 		}
 	}
