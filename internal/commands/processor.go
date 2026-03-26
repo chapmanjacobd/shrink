@@ -69,3 +69,12 @@ func (r *MediaRegistry) GetProcessor(m *models.ShrinkMedia) models.MediaProcesso
 	}
 	return nil
 }
+
+// Cleanup releases resources held by processors
+func (r *MediaRegistry) Cleanup() {
+	for _, p := range r.processors {
+		if tp, ok := p.(*TextProcessor); ok {
+			tp.Cleanup()
+		}
+	}
+}

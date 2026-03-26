@@ -57,6 +57,7 @@ func (c *ShrinkCmd) Run(ctx *kong.Context) error {
 	// Initialize components
 	ffmpegProc := ffmpeg.NewFFmpegProcessor(cfg)
 	registry := NewProcessorRegistry(ffmpegProc, cfg, c.VideoOnly, c.AudioOnly, c.ImageOnly, c.TextOnly)
+	defer registry.Cleanup()
 	metrics := NewShrinkMetrics()
 
 	// Wrap the default logger to coordinate with the progress bar
@@ -153,8 +154,12 @@ func (c *ShrinkCmd) Run(ctx *kong.Context) error {
 	}
 
 	// Confirm
-	if !c.NoConfirm && !c.Confirm() {
-		return nil
+	if !c.NoConfirm {
+		// Clear any progress display before showing the confirm prompt
+		engine.metrics.ClearProgress()
+		if !c.Confirm() {
+			return nil
+		}
 	}
 
 	// Setup context for graceful shutdown
@@ -436,7 +441,7 @@ func (c *ShrinkCmd) PrintUnknownExtensions() {
 }
 
 func (c *ShrinkCmd) Confirm() bool {
-	fmt.Print("Proceed with shrinking? [y/N] ")
+	fmt.Print("\nProceed with shrinking? [y/N] ")
 	var response string
 	fmt.Scanln(&response)
 	return strings.ToLower(response) == "y"

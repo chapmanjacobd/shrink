@@ -16,16 +16,88 @@ import (
 // TextProcessor handles text/ebook file processing
 type TextProcessor struct {
 	BaseProcessor
+	cssPath string
 }
 
 func NewTextProcessor() *TextProcessor {
+	// Optimized CSS for ebooks (matching Python implementation)
+	css := `.calibre, body {
+  font-family: Times New Roman,serif;
+  display: block;
+  font-size: 1em;
+  padding-left: 0;
+  padding-right: 0;
+  margin: 0 5pt;
+}
+@media (min-width: 40em) {
+  .calibre, body {
+    width: 38em;
+    margin: 0 auto;
+  }
+}
+.calibre1 {
+  font-size: 1.25em;
+  border-bottom: 0;
+  border-top: 0;
+  display: block;
+  padding-bottom: 0;
+  padding-top: 0;
+  margin: 0.5em 0;
+}
+.calibre2, img {
+  max-height:100%;
+  max-width:100%;
+}
+.calibre3 {
+  font-weight: bold;
+}
+.calibre4 {
+  font-style: italic;
+}
+p > .calibre3:not(:only-of-type) {
+  font-size: 1.5em;
+}
+.calibre5 {
+  display: block;
+  font-size: 2em;
+  font-weight: bold;
+  line-height: 1.05;
+  page-break-before: always;
+  margin: 0.67em 0;
+}
+.calibre6 {
+  display: block;
+  list-style-type: disc;
+  margin: 1em 0;
+}
+.calibre7 {
+  display: list-item;
+}
+`
+	// Write CSS to temp file
+	tmpFile, err := os.CreateTemp("", "calibre-*.css")
+	cssPath := ""
+	if err == nil {
+		cssPath = tmpFile.Name()
+		tmpFile.WriteString(css)
+		tmpFile.Close()
+	}
+
 	return &TextProcessor{
 		BaseProcessor: BaseProcessor{category: "Text", requiredTool: "calibre"},
+		cssPath:       cssPath,
 	}
 }
 
 func (p *TextProcessor) CanProcess(m *models.ShrinkMedia) bool {
 	return utils.TextExtensionMap[m.Ext]
+}
+
+// Cleanup releases resources held by the TextProcessor
+func (p *TextProcessor) Cleanup() {
+	if p.cssPath != "" {
+		os.Remove(p.cssPath)
+	}
 }
 
 func (p *TextProcessor) EstimateSize(m *models.ShrinkMedia, cfg *models.ProcessorConfig) models.ProcessableInfo {
@@ -96,17 +168,14 @@ func (p *TextProcessor) processText(ctx context.Context, m *models.ShrinkMedia, 
 		return models.ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("calibre output folder missing")}
 	}
 
-	// Step 3: Replace CSS with optimized version
-	p.replaceCSS(outputDir)
-
-	// Step 4: Process images inside ebook (convert to AVIF) and update content.opf
+	// Step 3: Process images inside ebook (convert to AVIF) and update content.opf
 	converted := p.processEbookImagesWithManifest(ctx, outputDir, cfg)
 
 	// Step 5: Update references in HTML files
 	p.updateImageReferences(outputDir, converted)
 
 	// Step 6: Repackage to EPUB
-	epubPath := strings.TrimSuffix(m.Path, ext) + ".epub"
+	epubPath := strings.TrimSuffix(m.Path, ext) + ".OEB.epub"
 	if err := p.packageToEPUB(ctx, outputDir, epubPath, cfg); err != nil {
 		os.RemoveAll(outputDir)
 		return models.ProcessResult{SourcePath: m.Path, Error: err}
@@ -236,66 +305,6 @@ func (p *TextProcessor) getCalibreVersion() (int, int, int) {
 		}
 	}
 	return 0, 0, 0
-}
-
-// replaceCSS replaces the stylesheet with an optimized version
-func (p *TextProcessor) replaceCSS(outputDir string) {
-	cssPath := filepath.Join(outputDir, "stylesheet.css")
-	// Optimized CSS for ebooks (matching Python implementation)
-	css := `.calibre, body {
-  font-family: Times New Roman,serif;
-  display: block;
-  font-size: 1em;
-  padding-left: 0;
-  padding-right: 0;
-  margin: 0 5pt;
-}
-@media (min-width: 40em) {
-  .calibre, body {
-    width: 38em;
-    margin: 0 auto;
-  }
-}
-.calibre1 {
-  font-size: 1.25em;
-  border-bottom: 0;
-  border-top: 0;
-  display: block;
-  padding-bottom: 0;
-  padding-top: 0;
-  margin: 0.5em 0;
-}
-.calibre2, img {
-  max-height:100%;
-  max-width:100%;
-}
-.calibre3 {
-  font-weight: bold;
-}
-.calibre4 {
-  font-style: italic;
-}
-p > .calibre3:not(:only-of-type) {
-  font-size: 1.5em;
-}
-.calibre5 {
-  display: block;
-  font-size: 2em;
-  font-weight: bold;
-  line-height: 1.05;
-  page-break-before: always;
-  margin: 0.67em 0;
-}
-.calibre6 {
-  display: block;
-  list-style-type: disc;
-  margin: 1em 0;
-}
-.calibre7 {
-  display: list-item;
-}
-`
-	os.WriteFile(cssPath, []byte(css), 0o644)
 }
 
 // processEbookImagesWithManifest converts images to AVIF and updates content.opf manifest
@@ -588,6 +597,12 @@ func (p *TextProcessor) packageToEPUB(ctx context.Context, folderPath, epubPath 
 		"--no-default-epub-cover",
 		"--epub-inline-toc",
 		"--dont-split-on-page-breaks",
+		"--epub-max-image-size=none",
+		"--output-profile=tablet",
+	}
+
+	if p.cssPath != "" {
+		args = append(args, "--extra-css="+p.cssPath)
 	}
 
 	// Setup systemd-run wrapper if configured (Linux only)
