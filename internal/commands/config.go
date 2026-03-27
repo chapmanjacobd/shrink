@@ -117,7 +117,7 @@ type ParallelFlags struct {
 }
 
 type MemoryFlags struct {
-	MemoryLimit    string `default:"" help:"Maximum memory usage per process (e.g., 4G, 512M). Default: min(12GB, RAM - 2GB). Set to 0 for no limit" env:"SHRINK_MEMORY_LIMIT"`
+	MemoryLimit    string `default:"" help:"Maximum memory usage per process (e.g., 4G, 512M). Default: 8GB. Set to 0 for no limit" env:"SHRINK_MEMORY_LIMIT"`
 	MemorySwapMax  string `default:"" help:"Maximum swap usage per process (e.g., 2G, 0 to disable). Default: half of MemoryLimit" env:"SHRINK_MEMORY_SWAP_MAX"`
 	UseJournald    bool   `help:"Use journald-compatible mode for systemd-run" env:"SHRINK_USE_JOURNALD"`
 	DisableSystemd bool   `help:"Disable systemd-run wrapper even if available" env:"SHRINK_DISABLE_SYSTEMD"`
@@ -171,8 +171,8 @@ func (c *Config) BuildProcessorConfig() *models.ProcessorConfig {
 func (c *Config) buildCommonConfig() models.CommonConfig {
 	limit := utils.ParseSize(c.MemoryLimit)
 	if limit == 0 && c.MemoryLimit == "" {
-		// Default to 12GB limit
-		limit = 12 * 1024 * 1024 * 1024
+		// Default to 8GB limit
+		limit = 8 * 1024 * 1024 * 1024
 	}
 
 	// Parse swap limit
