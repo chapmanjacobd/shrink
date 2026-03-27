@@ -2,16 +2,20 @@
 
 A high-performance media optimization tool written in Go. `shrink` automatically transcodes video, audio, images, and ebooks into modern, space-efficient formats like AV1, Opus, and AVIF. It can also recursively extract and process files within archives.
 
-## Features
+## Supported formats
 
 - Video: Transcodes to AV1 (using SVT-AV1) in an MKV container.
 - Audio: Transcodes to Opus.
 - Images: Converts to AVIF (using ImageMagick).
 - Ebooks: Optimizes EPUB/PDF files by compressing internal images and cleaning CSS (using Calibre).
 - Archives: Recursively extracts and processes contents of ZIP, RAR, 7z, and more (using unar).
+
+## Features
+
 - Smart Filtering: Only processes files if the estimated savings meet your configured thresholds.
 - Parallelism: Concurrent processing of different media types.
 - Database Support: Integrates with SQLite databases to track and manage media state.
+- Video game / EXE mangler: This will help you cut down on your video game habit by mangling your EXE archives that contain video game resources in common formats by converting them into something that the video game doesn't expect and so it will probably crash!
 
 ## Installation
 
