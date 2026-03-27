@@ -22,6 +22,8 @@ func TestSortByEfficiency(t *testing.T) {
 
 func TestGetTimeout(t *testing.T) {
 	engCfg := EngineConfig{
+		VideoThreads:     2,
+		Video4KThreads:   1,
 		Timeout: TimeoutFlags{
 			VideoTimeoutMult: 2.0,
 			VideoTimeout:     "10m",

@@ -35,12 +35,13 @@ type UI interface {
 
 // EngineConfig contains concurrency and timeout settings for the engine.
 type EngineConfig struct {
-	VideoThreads    int
-	AudioThreads    int
-	ImageThreads    int
-	TextThreads     int
-	AnalysisThreads int
-	Timeout         TimeoutFlags
+	VideoThreads     int
+	Video4KThreads   int
+	AudioThreads     int
+	ImageThreads     int
+	TextThreads      int
+	AnalysisThreads  int
+	Timeout          TimeoutFlags
 }
 
 // Engine coordinates the media analysis and processing lifecycle.
@@ -126,6 +127,10 @@ func (e *Engine) analyzeMedia(media []models.ShrinkMedia) []models.ShrinkMedia {
 				} else {
 					// Get processor's category
 					m.Category = processor.Category()
+					// Check for 4K+ resolution videos and assign to separate category
+					if m.Category == "Video" && (m.Width >= 2400 || m.Height >= 2400) {
+						m.Category = "Video4K"
+					}
 					e.metrics.RecordStarted(m.DisplayCategory(), m.Path)
 
 					// Estimate size and time
@@ -380,7 +385,7 @@ func (e *Engine) processMedia(ctx context.Context, media []models.ShrinkMedia) {
 	}()
 
 	// Define queues and categories
-	categories := []string{"Video", "Audio", "Image", "Text", "Archived"}
+	categories := []string{"Video", "Video4K", "Audio", "Image", "Text", "Archived"}
 	queues := make(map[string]chan models.ShrinkMedia)
 	for _, cat := range categories {
 		queues[cat] = make(chan models.ShrinkMedia)
@@ -392,6 +397,8 @@ func (e *Engine) processMedia(ctx context.Context, media []models.ShrinkMedia) {
 		switch cat {
 		case "Video":
 			threads = e.engCfg.VideoThreads
+		case "Video4K":
+			threads = e.engCfg.Video4KThreads
 		case "Audio":
 			threads = e.engCfg.AudioThreads
 		case "Image":

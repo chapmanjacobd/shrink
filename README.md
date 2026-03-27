@@ -77,6 +77,7 @@ shrink --simulate /path/to/media
 | --simulate | Dry run; don't actually modify files | `false` |
 | -y, --no-confirm | Don't ask for confirmation before starting | `false` |
 | --video-threads | Maximum concurrent video transcodes | `2` |
+| --video-4k-threads | Maximum concurrent video transcodes for 4K+ resolution videos | `1` |
 | --audio-threads | Maximum concurrent audio transcodes | `4` |
 | --image-threads | Maximum concurrent image conversions | `8` |
 | --text-threads | Maximum concurrent text conversions | `2` |
