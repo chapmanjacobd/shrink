@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -18,6 +19,8 @@ import (
 	"github.com/chapmanjacobd/shrink/internal/models"
 	"github.com/chapmanjacobd/shrink/internal/utils"
 )
+
+var splitArchiveRegex = regexp.MustCompile(`^\.(z|r|c|part)?\d{1,4}$`)
 
 // globWithTimeout performs a filepath.Glob with a timeout to prevent hanging
 func globWithTimeout(pattern string, timeout time.Duration) ([]string, error) {
@@ -81,24 +84,7 @@ func (p *ArchiveProcessor) CanProcess(m *models.ShrinkMedia) bool {
 // isMultiPartArchiveExt checks if an extension is a multi-part archive pattern
 // Returns true for .zNN, .rNN, .NNN patterns (e.g., .z01, .r00, .001)
 func isMultiPartArchiveExt(ext string) bool {
-	if len(ext) < 3 || ext[0] != '.' {
-		return false
-	}
-	// .zNN or .zNNN pattern
-	if ext[1] == 'z' && ext[2] >= '0' && ext[2] <= '9' {
-		return true
-	}
-	// .rNN or .rNNN pattern
-	if ext[1] == 'r' && ext[2] >= '0' && ext[2] <= '9' {
-		return true
-	}
-	// .NNN pattern (all digits)
-	for i := 1; i < len(ext); i++ {
-		if ext[i] < '0' || ext[i] > '9' {
-			return false
-		}
-	}
-	return true
+	return splitArchiveRegex.MatchString(strings.ToLower(ext))
 }
 
 // ExtractAndProcess extracts archive contents and processes media recursively
@@ -571,7 +557,7 @@ func isBrokenSequence(mainPath string, partFiles []string) bool {
 		for _, p := range partFiles {
 			pext := strings.ToLower(filepath.Ext(p))
 			// Check for .zNN pattern
-			if len(pext) >= 3 && pext[1] == 'z' {
+			if strings.HasPrefix(pext, ".z") {
 				if n, err := strconv.Atoi(pext[2:]); err == nil && n > 0 {
 					found[n] = true
 					if n > maxN {
@@ -627,7 +613,7 @@ func isSecondaryPart(path string) bool {
 	nameWithoutExt := strings.TrimSuffix(base, filepath.Ext(base))
 
 	// Zip: .z01, .z02... are secondary if .zip exists
-	if len(ext) >= 3 && ext[1] == 'z' {
+	if strings.HasPrefix(ext, ".z") {
 		if _, err := strconv.Atoi(ext[2:]); err == nil {
 			// It's a .zNN file. Check if .zip exists
 			if _, err := os.Stat(filepath.Join(dir, nameWithoutExt+".zip")); err == nil {
@@ -655,7 +641,7 @@ func isSecondaryPart(path string) bool {
 				}
 			}
 		}
-	} else if len(ext) >= 3 && ext[1] == 'r' {
+	} else if strings.HasPrefix(ext, ".r") {
 		if n, err := strconv.Atoi(ext[2:]); err == nil {
 			// .r00, .r01...
 			// Check if .rar exists
@@ -669,7 +655,7 @@ func isSecondaryPart(path string) bool {
 	}
 
 	// 7z / Generic: .002, .003... are secondary if .001 exists
-	if len(ext) >= 3 {
+	if isMultiPartArchiveExt(ext) {
 		if n, err := strconv.Atoi(ext[1:]); err == nil {
 			if n > 1 {
 				// Check if .001 or .000 or .0 exists
@@ -823,20 +809,11 @@ func (p *ArchiveProcessor) getPartFilesImpl(path string) []string {
 				break
 			}
 		}
-		// Check for .zNN or .NNN pattern
+		// Check for split archive patterns (.N, .zNN, .rNN, .partNNN, etc.)
 		if !isArchiveExt {
-			// .zNN pattern: exactly 3 chars, starts with 'z', followed by 2 digits
-			if len(e) == 3 && e[1] == 'z' && e[2] >= '0' && e[2] <= '9' && e[3] >= '0' && e[3] <= '9' {
+			if isMultiPartArchiveExt(e) {
 				isArchiveExt = true
-				slog.Debug("Found .zNN pattern", "ext", e)
-			} else if len(e) == 4 && e[1] == 'z' && e[2] >= '0' && e[2] <= '9' && e[3] >= '0' && e[3] <= '9' {
-				// .zNNN pattern (4 chars total including dot)
-				isArchiveExt = true
-				slog.Debug("Found .zNNN pattern", "ext", e)
-			} else if len(e) == 4 && e[1] >= '0' && e[1] <= '9' && e[2] >= '0' && e[2] <= '9' && e[3] >= '0' && e[3] <= '9' {
-				// .NNN pattern (exactly 3 digits)
-				isArchiveExt = true
-				slog.Debug("Found .NNN pattern", "ext", e)
+				slog.Debug("Found split archive part pattern", "ext", e)
 			}
 		}
 
