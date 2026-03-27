@@ -317,7 +317,7 @@ func TestBuildSystemdCommandSwapDefaultLogic(t *testing.T) {
 }
 
 // TestParseSizeToSystemdCommandE2E tests the full end-to-end flow from CLI string
-// parsing to systemd-run command building, including the default 12GB value.
+// parsing to systemd-run command building, including the default 8GB value.
 func TestParseSizeToSystemdCommandE2E(t *testing.T) {
 	systemdRun := GetCommandPath("systemd-run")
 	if systemdRun == "" {
@@ -333,11 +333,11 @@ func TestParseSizeToSystemdCommandE2E(t *testing.T) {
 		wantNoSystemd     bool // true if systemd-run should not be used
 	}{
 		{
-			name:              "default empty (12GB default)",
+			name:              "default empty (8GB default)",
 			cliMemoryLimit:    "",
 			cliMemorySwapMax:  "",
-			wantMemoryMax:     "MemoryMax=12884901888",    // 12 * 1024 * 1024 * 1024
-			wantMemorySwapMax: "MemorySwapMax=6442450944", // half of 12GB
+			wantMemoryMax:     "MemoryMax=8589934592",     // 8 * 1024 * 1024 * 1024
+			wantMemorySwapMax: "MemorySwapMax=4294967296", // half of 8GB
 		},
 		{
 			name:              "4G memory limit",
@@ -401,8 +401,8 @@ func TestParseSizeToSystemdCommandE2E(t *testing.T) {
 			// Parse CLI strings to int64 (simulating config.go logic)
 			memoryLimit := ParseSize(tt.cliMemoryLimit)
 			if memoryLimit == 0 && tt.cliMemoryLimit == "" {
-				// Default to 12GB when empty
-				memoryLimit = 12 * 1024 * 1024 * 1024
+				// Default to 8GB when empty
+				memoryLimit = 8 * 1024 * 1024 * 1024
 			}
 
 			var memorySwapMax int64
