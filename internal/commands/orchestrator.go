@@ -35,13 +35,13 @@ type UI interface {
 
 // EngineConfig contains concurrency and timeout settings for the engine.
 type EngineConfig struct {
-	VideoThreads     int
-	Video4KThreads   int
-	AudioThreads     int
-	ImageThreads     int
-	TextThreads      int
-	AnalysisThreads  int
-	Timeout          TimeoutFlags
+	VideoThreads    int
+	Video4KThreads  int
+	AudioThreads    int
+	ImageThreads    int
+	TextThreads     int
+	AnalysisThreads int
+	Timeout         TimeoutFlags
 }
 
 // Engine coordinates the media analysis and processing lifecycle.
@@ -218,7 +218,7 @@ func (e *Engine) analyzeMedia(media []models.ShrinkMedia) []models.ShrinkMedia {
 				}
 
 				newTarget := min(
-					max(current+(direction*2), 1), 1000)
+					max(current+(direction*2), 1), 300)
 
 				concurrency.Store(newTarget)
 
