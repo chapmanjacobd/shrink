@@ -753,11 +753,13 @@ func (e *Engine) updateMetadata(m models.ShrinkMedia, result models.ProcessResul
 func (e *Engine) preserveTimestamps(m *models.ShrinkMedia, result models.ProcessResult, originalAtime, originalMtime time.Time) {
 	if len(result.Outputs) > 0 && !originalAtime.IsZero() {
 		outPath := result.Outputs[0].Path
-		applyTimestamps(outPath, originalAtime, originalMtime)
-		// Update duration if needed
-		if m.Category == "Audio" || m.Category == "Video" {
-			if newDuration := e.getActualDuration(outPath); newDuration > 0 {
-				m.Duration = newDuration
+		if outPath != "" {
+			applyTimestamps(outPath, originalAtime, originalMtime)
+			// Update duration if needed
+			if m.Category == "Audio" || m.Category == "Video" {
+				if newDuration := e.getActualDuration(outPath); newDuration > 0 {
+					m.Duration = newDuration
+				}
 			}
 		}
 	}

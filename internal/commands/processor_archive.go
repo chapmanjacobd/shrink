@@ -344,7 +344,7 @@ func (p *ArchiveProcessor) EstimateSizeForArchive(m *models.ShrinkMedia, cfg *mo
 
 	// Get archive contents and check for multi-part volumes
 	contents, lsarFailed := p.lsarWithStatus(m.Path)
-	slog.Info("lsar returned", "path", m.Path, "count", len(contents), "lsarFailed", lsarFailed)
+	slog.Debug("Archive contents retrieved", "path", m.Path, "count", len(contents), "lsarFailed", lsarFailed)
 
 	// Check for multi-part archives and verify all parts exist
 	result.TotalArchiveSize = m.Size
@@ -743,9 +743,12 @@ func (p *ArchiveProcessor) getPartFilesImpl(path string) []string {
 			lsarOutput, err = fallbackCmd.CombinedOutput()
 		}
 
-		if ctx.Err() == context.DeadlineExceeded && err == nil {
+		// Handle context timeout - err may not be set if systemd-run wrapper swallowed it
+		if ctx.Err() == context.DeadlineExceeded {
 			slog.Warn("lsar XADVolumes call timed out", "path", path)
-			err = fmt.Errorf("lsar timeout")
+			if err == nil {
+				err = fmt.Errorf("lsar timeout")
+			}
 		}
 
 		if err == nil || len(lsarOutput) > 0 {
@@ -791,7 +794,6 @@ func (p *ArchiveProcessor) getPartFilesImpl(path string) []string {
 	// baseWithoutExt should be the name before the first archive-related extension
 	// e.g., "test.zip" -> "test", "test.tar.gz" -> "test"
 	baseWithoutExt := baseName
-	slog.Debug("Starting extension stripping loop", "baseWithoutExt", baseWithoutExt)
 	loopCount := 0
 	prevBaseWithoutExt := ""
 	for {
@@ -808,93 +810,63 @@ func (p *ArchiveProcessor) getPartFilesImpl(path string) []string {
 		prevBaseWithoutExt = baseWithoutExt
 
 		e := strings.ToLower(filepath.Ext(baseWithoutExt))
-		slog.Debug("Extension loop iteration", "iteration", loopCount, "baseWithoutExt", baseWithoutExt, "ext", e)
 		if e == "" {
-			slog.Debug("Extension loop: no extension found, breaking")
 			break
 		}
 		// If it's a known archive extension or a part extension (like .z01, .001), trim it
-		isArchiveExt := false
-		for _, ae := range utils.ArchiveExtensions {
-			if e == "."+ae {
-				isArchiveExt = true
-				slog.Debug("Found matching archive extension", "ext", e, "archiveExt", ae)
-				break
-			}
-		}
-		// Check for split archive patterns (.N, .zNN, .rNN, .partNNN, etc.)
-		if !isArchiveExt {
-			if isMultiPartArchiveExt(e) {
-				isArchiveExt = true
-				slog.Debug("Found split archive part pattern", "ext", e)
-			}
-		}
+		isArchiveExt := utils.ArchiveExtensionMap[e] || isMultiPartArchiveExt(e)
 
 		if isArchiveExt {
 			// Use the original case extension for trimming, not the lowercased version
 			originalExt := filepath.Ext(baseWithoutExt)
 			newBase := strings.TrimSuffix(baseWithoutExt, originalExt)
-			slog.Debug("Trimmed extension", "oldBase", baseWithoutExt, "ext", originalExt, "newBase", newBase)
 			// Safety: ensure we actually removed something
 			if newBase == baseWithoutExt {
-				slog.Warn("TrimSuffix did not remove extension, breaking", "path", path, "ext", originalExt)
+				slog.Debug("TrimSuffix did not remove extension, breaking", "path", path, "ext", originalExt)
 				break
 			}
 			baseWithoutExt = newBase
 		} else {
-			slog.Debug("Not an archive extension, breaking", "ext", e)
 			break
 		}
 	}
-	slog.Debug("Extension stripping loop complete", "iterations", loopCount, "baseWithoutExt", baseWithoutExt)
+	slog.Debug("Extension stripping complete", "iterations", loopCount, "baseWithoutExt", baseWithoutExt)
 	slog.Debug("Globbing for parts", "baseWithoutExt", baseWithoutExt, "dir", dir)
 
 	globTimeout := 5 * time.Second
 
 	// Pattern 1: .zNN parts (Zip split files)
 	pattern1 := filepath.Join(dir, baseWithoutExt+".z*")
-	slog.Debug("Glob pattern 1 (.z*)", "pattern", pattern1)
 	if pattern, err := globWithTimeout(pattern1, globTimeout); err == nil {
-		slog.Debug("Glob pattern 1 complete", "found", len(pattern))
 		for _, p := range pattern {
 			if info, err := os.Stat(p); err == nil && !info.IsDir() {
 				absP, _ := filepath.Abs(p)
 				absPath, _ := filepath.Abs(path)
 				if !pathsEqual(absP, absPath) {
 					partFilesMap[absP] = true
-					slog.Debug("Found multi-part archive part (glob-z)", "path", absP)
 				}
 			}
 		}
-	} else {
-		slog.Debug("Glob pattern 1 failed or timed out", "err", err)
 	}
 
 	// Pattern 2: .NNN parts (generic split files)
 	pattern2 := filepath.Join(dir, baseWithoutExt+".???")
-	slog.Debug("Glob pattern 2 (.???)", "pattern", pattern2)
 	if pattern, err := globWithTimeout(pattern2, globTimeout); err == nil {
-		slog.Debug("Glob pattern 2 complete", "found", len(pattern))
 		for _, p := range pattern {
 			if info, err := os.Stat(p); err == nil && !info.IsDir() {
 				absP, _ := filepath.Abs(p)
 				absPath, _ := filepath.Abs(path)
 				if !pathsEqual(absP, absPath) {
 					partFilesMap[absP] = true
-					slog.Debug("Found multi-part archive part (glob-NNN)", "path", absP)
 				}
 			}
 		}
-	} else {
-		slog.Debug("Glob pattern 2 failed or timed out", "err", err)
 	}
 
 	// Pattern 3: .partNN.rar or .rNN.rar (RAR split files)
 	if strings.HasSuffix(ext, ".rar") {
 		pattern3 := filepath.Join(dir, baseWithoutExt+".part*.rar")
-		slog.Debug("Glob pattern 3 (.part*.rar)", "pattern", pattern3)
 		if pattern, err := globWithTimeout(pattern3, globTimeout); err == nil {
-			slog.Debug("Glob pattern 3 complete", "found", len(pattern))
 			for _, p := range pattern {
 				if _, err := os.Stat(p); err == nil {
 					absP, _ := filepath.Abs(p)
@@ -904,13 +876,9 @@ func (p *ArchiveProcessor) getPartFilesImpl(path string) []string {
 					}
 				}
 			}
-		} else {
-			slog.Debug("Glob pattern 3 failed or timed out", "err", err)
 		}
 		pattern4 := filepath.Join(dir, baseWithoutExt+".r??")
-		slog.Debug("Glob pattern 4 (.r??)", "pattern", pattern4)
 		if pattern, err := globWithTimeout(pattern4, globTimeout); err == nil {
-			slog.Debug("Glob pattern 4 complete", "found", len(pattern))
 			for _, p := range pattern {
 				if _, err := os.Stat(p); err == nil {
 					absP, _ := filepath.Abs(p)
@@ -920,12 +888,8 @@ func (p *ArchiveProcessor) getPartFilesImpl(path string) []string {
 					}
 				}
 			}
-		} else {
-			slog.Debug("Glob pattern 4 failed or timed out", "err", err)
 		}
 	}
-
-	slog.Debug("All glob patterns complete", "path", path)
 
 	// Convert map to slice
 	var partFiles []string
@@ -935,8 +899,6 @@ func (p *ArchiveProcessor) getPartFilesImpl(path string) []string {
 
 	// Sort for consistent ordering
 	sort.Strings(partFiles)
-
-	slog.Debug("getPartFiles complete", "path", path, "parts", len(partFiles))
 	return partFiles
 }
 

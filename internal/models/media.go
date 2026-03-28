@@ -29,6 +29,9 @@ func (m *ShrinkMedia) DisplayCategory() string {
 	if ext == "" {
 		ext = "unknown"
 	}
+	if m.Category == "" {
+		return ext
+	}
 	return m.Category + ": " + ext
 }
 

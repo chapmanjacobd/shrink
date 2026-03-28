@@ -192,11 +192,16 @@ func FormatSize(bytes int64) string {
 		return fmt.Sprintf("%d B", bytes)
 	}
 	div, exp := int64(unit), 0
-	for n := bytes / unit; n >= unit; n /= unit {
+	units := []byte("KMGTPE")
+	for n := bytes / unit; n >= unit && exp < len(units); n /= unit {
 		div *= unit
 		exp++
 	}
-	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
+	// Safety: if we exceeded known units, use the largest unit
+	if exp >= len(units) {
+		exp = len(units) - 1
+	}
+	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), units[exp])
 }
 
 // ParseDurationString parses duration strings like "10s", "20m", "1h"
@@ -222,14 +227,20 @@ func ParseBitrate(s string) int64 {
 		return 0
 	}
 	multiplier := int64(1)
-	if strings.HasSuffix(s, "kbps") || strings.HasSuffix(s, "k") {
+	if before, ok := strings.CutSuffix(s, "kbps"); ok {
+		s = before
 		multiplier = 1000
-		s = strings.TrimSuffix(strings.TrimSuffix(s, "kbps"), "k")
-	} else if strings.HasSuffix(s, "mbps") || strings.HasSuffix(s, "m") {
+	} else if before, ok := strings.CutSuffix(s, "mbps"); ok {
+		s = before
 		multiplier = 1000000
-		s = strings.TrimSuffix(strings.TrimSuffix(s, "mbps"), "m")
 	} else if before, ok := strings.CutSuffix(s, "bps"); ok {
 		s = before
+	} else if before, ok := strings.CutSuffix(s, "k"); ok {
+		s = before
+		multiplier = 1000
+	} else if before, ok := strings.CutSuffix(s, "m"); ok {
+		s = before
+		multiplier = 1000000
 	}
 	n, err := strconv.ParseInt(s, 10, 64)
 	if err != nil {
@@ -245,15 +256,43 @@ func ParseSize(s string) int64 {
 		return 0
 	}
 	multiplier := int64(1)
-	if strings.HasSuffix(s, "KiB") || strings.HasSuffix(s, "KB") || strings.HasSuffix(s, "k") || strings.HasSuffix(s, "K") {
+	// Check longer suffixes first to avoid partial matches
+	if before, ok := strings.CutSuffix(s, "KiB"); ok {
+		s = before
 		multiplier = 1024
-		s = strings.TrimSuffix(strings.TrimSuffix(strings.TrimSuffix(strings.TrimSuffix(s, "KiB"), "KB"), "k"), "K")
-	} else if strings.HasSuffix(s, "MiB") || strings.HasSuffix(s, "MB") || strings.HasSuffix(s, "m") || strings.HasSuffix(s, "M") {
+	} else if before, ok := strings.CutSuffix(s, "KB"); ok {
+		s = before
+		multiplier = 1024
+	} else if before, ok := strings.CutSuffix(s, "MiB"); ok {
+		s = before
 		multiplier = 1024 * 1024
-		s = strings.TrimSuffix(strings.TrimSuffix(strings.TrimSuffix(strings.TrimSuffix(s, "MiB"), "MB"), "m"), "M")
-	} else if strings.HasSuffix(s, "GiB") || strings.HasSuffix(s, "GB") || strings.HasSuffix(s, "g") || strings.HasSuffix(s, "G") {
+	} else if before, ok := strings.CutSuffix(s, "MB"); ok {
+		s = before
+		multiplier = 1024 * 1024
+	} else if before, ok := strings.CutSuffix(s, "GiB"); ok {
+		s = before
 		multiplier = 1024 * 1024 * 1024
-		s = strings.TrimSuffix(strings.TrimSuffix(strings.TrimSuffix(strings.TrimSuffix(s, "GiB"), "GB"), "g"), "G")
+	} else if before, ok := strings.CutSuffix(s, "GB"); ok {
+		s = before
+		multiplier = 1024 * 1024 * 1024
+	} else if before, ok := strings.CutSuffix(s, "k"); ok {
+		s = before
+		multiplier = 1024
+	} else if before, ok := strings.CutSuffix(s, "K"); ok {
+		s = before
+		multiplier = 1024
+	} else if before, ok := strings.CutSuffix(s, "m"); ok {
+		s = before
+		multiplier = 1024 * 1024
+	} else if before, ok := strings.CutSuffix(s, "M"); ok {
+		s = before
+		multiplier = 1024 * 1024
+	} else if before, ok := strings.CutSuffix(s, "g"); ok {
+		s = before
+		multiplier = 1024 * 1024 * 1024
+	} else if before, ok := strings.CutSuffix(s, "G"); ok {
+		s = before
+		multiplier = 1024 * 1024 * 1024
 	} else if before, ok := strings.CutSuffix(s, "B"); ok {
 		s = before
 	}
@@ -264,7 +303,14 @@ func ParseSize(s string) int64 {
 	return n * multiplier
 }
 
-// ParsePercentOrBytes parses percentage or byte values
+// ParsePercentOrBytes parses percentage or byte values.
+// Returns:
+//   - For percentages (e.g., "5%"): returns decimal fraction (0.05)
+//   - For size strings (e.g., "1MB", "100KB"): returns bytes as float64
+//   - For plain numbers: returns the number as float64
+//
+// Note: The caller must know the expected type based on context.
+// Values < 1.0 are typically percentages, values >= 1.0 are typically bytes.
 func ParsePercentOrBytes(s string) float64 {
 	s = strings.TrimSpace(s)
 	if before, ok := strings.CutSuffix(s, "%"); ok {

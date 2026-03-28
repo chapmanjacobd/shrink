@@ -173,13 +173,16 @@ func (c *Config) BuildProcessorConfig() *models.ProcessorConfig {
 }
 
 func (c *Config) buildCommonConfig() models.CommonConfig {
+	// Parse memory limit - "0" means no limit, empty string uses default
 	limit := utils.ParseSize(c.MemoryLimit)
-	if limit == 0 && c.MemoryLimit == "" {
-		// Default to 8GB limit
+	if c.MemoryLimit == "0" {
+		limit = 0 // No memory limit
+	} else if limit == 0 && c.MemoryLimit == "" {
+		// Default to 8GB limit when not specified
 		limit = 8 * 1024 * 1024 * 1024
 	}
 
-	// Parse swap limit
+	// Parse swap limit - "0" means explicitly disable swap
 	swapMax := utils.ParseSize(c.MemorySwapMax)
 	if c.MemorySwapMax == "0" {
 		swapMax = -1 // Explicitly disable swap

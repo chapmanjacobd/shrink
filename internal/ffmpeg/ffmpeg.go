@@ -274,7 +274,7 @@ func (p *FFmpegProcessor) buildAudioOptions(outIdx int, channels int, bitrate st
 		sampleRateVal = 44100
 	}
 
-	// Channel config
+	// Channel config: mono stays mono, everything else is downmixed to stereo
 	if channels == 1 {
 		args = append(args, fmt.Sprintf("-ac:a:%d", outIdx), "1")
 	} else {
