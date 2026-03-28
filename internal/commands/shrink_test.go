@@ -624,3 +624,85 @@ func copyFile(t *testing.T, src, dst string) {
 		t.Fatal(err)
 	}
 }
+
+func TestShrinkSkipWithMove(t *testing.T) {
+	tests := []struct {
+		name        string
+		srcArchive  string
+		description string
+	}{
+		{
+			name:        "NoSavings",
+			srcArchive:  "../testutils/testdata/test_archive_keep.zip",
+			description: "archive with no processable content",
+		},
+		{
+			name:        "AlreadyOptimized",
+			srcArchive:  "../testutils/testdata/test_archive_already_optimized.zip",
+			description: "archive with already-optimized content",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tempDir := t.TempDir()
+			moveDir := filepath.Join(tempDir, "moved")
+
+			// Copy archive
+			archiveName := filepath.Base(tt.srcArchive)
+			copyFile(t, tt.srcArchive, filepath.Join(tempDir, archiveName))
+
+			// Create database
+			dbPath := filepath.Join(tempDir, "test.db")
+			db, err := db.Connect(dbPath)
+			if err != nil {
+				t.Fatalf("failed to open db: %v", err)
+			}
+
+			_, err = db.Exec(`CREATE TABLE media (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				path TEXT UNIQUE NOT NULL,
+				size INTEGER,
+				duration REAL,
+				video_count INTEGER,
+				audio_count INTEGER,
+				video_codecs TEXT,
+				audio_codecs TEXT,
+				subtitle_codecs TEXT,
+				media_type TEXT,
+				time_deleted INTEGER DEFAULT 0,
+				is_shrinked INTEGER DEFAULT 0,
+				width INTEGER DEFAULT 0,
+				height INTEGER DEFAULT 0
+			)`)
+			if err != nil {
+				t.Fatalf("failed to create table: %v", err)
+			}
+
+			archivePath := filepath.Join(tempDir, archiveName)
+			info, _ := os.Stat(archivePath)
+			_, err = db.Exec(`INSERT INTO media (path, size, media_type) VALUES (?, ?, ?)`,
+				archivePath, info.Size(), "archive")
+			if err != nil {
+				t.Fatalf("failed to insert media: %v", err)
+			}
+			db.Close()
+
+			// Run shrink with --move
+			args := []string{"--no-confirm", "--move", moveDir}
+			_ = runShrinkCmd(dbPath, tempDir, args)
+
+			// Check that the archive was moved (with parent folder structure)
+			parentFolder := filepath.Base(tempDir)
+			movedPath := filepath.Join(moveDir, parentFolder, archiveName)
+			if _, err := os.Stat(movedPath); os.IsNotExist(err) {
+				t.Errorf("expected %s to be moved to: %s", tt.description, movedPath)
+			}
+
+			// Original should not exist
+			if _, err := os.Stat(archivePath); err == nil {
+				t.Errorf("expected original %s to be removed: %s", tt.description, archivePath)
+			}
+		})
+	}
+}

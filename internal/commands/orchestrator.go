@@ -38,6 +38,7 @@ type UI interface {
 	Confirm() bool
 	MoveTo(path string)
 	MoveToBroken(path string, partFiles []string)
+	MoveToSkipped(path string, partFiles []string)
 }
 
 // EngineConfig contains concurrency and timeout settings for the engine.
@@ -49,6 +50,7 @@ type EngineConfig struct {
 	TextThreads     int
 	AnalysisThreads int
 	Timeout         TimeoutFlags
+	Move            string
 }
 
 // Engine coordinates the media analysis and processing lifecycle.
@@ -92,11 +94,12 @@ func (e *Engine) analyzeMedia(media []models.ShrinkMedia) []models.ShrinkMedia {
 	// Use bounded buffer to prevent memory issues with large directories
 	jobs := make(chan int, min(len(media), 1000))
 	results := make(chan struct {
-		index  int
-		media  models.ShrinkMedia
-		skip   bool
-		broken bool
-		failed bool
+		index    int
+		media    models.ShrinkMedia
+		skip     bool
+		broken   bool
+		failed   bool
+		skipMove bool
 	}, min(len(media), 1000))
 
 	var wg sync.WaitGroup
@@ -126,6 +129,7 @@ func (e *Engine) analyzeMedia(media []models.ShrinkMedia) []models.ShrinkMedia {
 				m := &media[idx]
 				processor := e.registry.GetProcessor(m)
 				skip := false
+				skipMove := false
 				broken := false
 				failed := false
 
@@ -152,8 +156,10 @@ func (e *Engine) analyzeMedia(media []models.ShrinkMedia) []models.ShrinkMedia {
 						m.PartFiles = info.PartFiles
 						broken = true
 					} else if !info.IsProcessable {
+						// Case 1: Not processable (e.g., archive with no shrinkable content)
 						e.metrics.RecordSkipped(m.DisplayCategory())
 						skip = true
+						skipMove = e.engCfg.Move != ""
 					} else {
 						// Use actual size if provided (e.g. multi-part archives)
 						if info.ActualSize > 0 {
@@ -162,8 +168,10 @@ func (e *Engine) analyzeMedia(media []models.ShrinkMedia) []models.ShrinkMedia {
 
 						// Check if we should shrink
 						if !m.ShouldShrink(info.FutureSize, e.cfg) {
+							// Case 2: No savings expected
 							e.metrics.RecordSkipped(m.DisplayCategory())
 							skip = true
+							skipMove = e.engCfg.Move != ""
 						} else {
 							m.FutureSize = info.FutureSize
 							m.ProcessingTime = info.ProcessingTime
@@ -174,7 +182,8 @@ func (e *Engine) analyzeMedia(media []models.ShrinkMedia) []models.ShrinkMedia {
 
 				// Check if estimation failed (archive timeout, etc.)
 				// Failed analyses should not be counted as completed
-				if m.Category == "Archived" && m.FutureSize == 0 && m.Size > 0 && !broken {
+				// Note: Don't mark as failed if already marked as skip (e.g., no processable content)
+				if m.Category == "Archived" && m.FutureSize == 0 && m.Size > 0 && !broken && !skip {
 					// Archive analysis failed (likely timeout) - skip but don't count as completed
 					failed = true
 					atomic.AddInt64(&failedJobs, 1)
@@ -182,12 +191,13 @@ func (e *Engine) analyzeMedia(media []models.ShrinkMedia) []models.ShrinkMedia {
 				}
 
 				results <- struct {
-					index  int
-					media  models.ShrinkMedia
-					skip   bool
-					broken bool
-					failed bool
-				}{idx, *m, skip, broken, failed}
+					index    int
+					media    models.ShrinkMedia
+					skip     bool
+					broken   bool
+					failed   bool
+					skipMove bool
+				}{idx, *m, skip, broken, failed, skipMove}
 
 				if !failed {
 					atomic.AddInt64(&completedJobs, 1)
@@ -326,14 +336,24 @@ func (e *Engine) analyzeMedia(media []models.ShrinkMedia) []models.ShrinkMedia {
 	var toShrink []models.ShrinkMedia
 	resultMap := make(map[int]models.ShrinkMedia)
 	skipMap := make(map[int]bool)
+	skipMoveMap := make(map[int]bool)
 	brokenMap := make(map[int]bool)
 	failedMap := make(map[int]bool)
 
 	for res := range results {
 		resultMap[res.index] = res.media
 		skipMap[res.index] = res.skip
+		skipMoveMap[res.index] = res.skipMove
 		brokenMap[res.index] = res.broken
 		failedMap[res.index] = res.failed
+	}
+
+	// Move skipped files if --move is provided (cases 1 & 2: not processable, no savings)
+	for i, shouldMove := range skipMoveMap {
+		if shouldMove && skipMap[i] {
+			m := resultMap[i]
+			e.ui.MoveToSkipped(m.Path, m.PartFiles)
+		}
 	}
 
 	// Build final slice in original order

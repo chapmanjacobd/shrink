@@ -105,6 +105,7 @@ func (c *ShrinkCmd) Run(ctx *kong.Context) error {
 		TextThreads:     c.TextThreads,
 		AnalysisThreads: c.AnalysisThreads,
 		Timeout:         c.TimeoutFlags,
+		Move:            c.Move,
 	}
 	engine := NewEngine(c, cfg, engCfg, c.sqlDBs, registry, metrics)
 
@@ -271,8 +272,13 @@ func (c *ShrinkCmd) filterByTools(media []models.ShrinkMedia, registry *MediaReg
 
 		// Skip if already optimized
 		if utils.IsOptimized(m.Ext) {
+			// Case 3: Already optimized format (.avif, .webp, .heic, AV1 containers)
 			// Mark as skipped in all DBs if it came from a DB (file still exists)
 			db.MarkSkipped(c.sqlDBs, m.Path)
+			// Move to destination if --move is provided
+			if c.Move != "" {
+				c.MoveToSkipped(m.Path, nil)
+			}
 			continue
 		}
 
@@ -541,6 +547,58 @@ func (c *ShrinkCmd) MoveTo(path string) {
 		}
 		if err := utils.MoveFile(path, dest); err != nil {
 			slog.Warn("Failed to move file", "from", path, "to", dest, "error", err)
+		}
+	}
+}
+
+// MoveToSkipped moves files that were skipped (no savings, already optimized, etc.)
+func (c *ShrinkCmd) MoveToSkipped(path string, partFiles []string) {
+	if c.Move == "" || path == "" {
+		return
+	}
+
+	dest, ok := c.getDestPath(path, c.Move)
+	if !ok {
+		// Get the parent folder name for tidy organization
+		parentFolder := filepath.Base(filepath.Dir(path))
+		dest = filepath.Join(c.Move, parentFolder, filepath.Base(path))
+		// Ensure destination directory exists
+		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+			slog.Warn("Failed to create destination directory", "path", dest, "error", err)
+			return
+		}
+	}
+
+	// Move the main file
+	if _, err := os.Stat(path); err == nil {
+		if err := utils.MoveFile(path, dest); err != nil {
+			slog.Warn("Failed to move skipped file", "from", path, "to", dest, "error", err)
+		} else {
+			slog.Info("Moved skipped file", "from", path, "to", dest)
+		}
+	}
+
+	// Move multi-part archive files if present
+	for _, partFile := range partFiles {
+		if !filepath.IsAbs(partFile) {
+			partFile = filepath.Join(filepath.Dir(path), partFile)
+		}
+		if _, err := os.Stat(partFile); err == nil {
+			partDest, ok := c.getDestPath(partFile, c.Move)
+			if !ok {
+				parentFolder := filepath.Base(filepath.Dir(path))
+				partDest = filepath.Join(c.Move, parentFolder, filepath.Base(partFile))
+				// Ensure destination directory exists
+				if err := os.MkdirAll(filepath.Dir(partDest), 0o755); err != nil {
+					slog.Warn("Failed to create destination directory", "path", partDest, "error", err)
+					continue
+				}
+			}
+			if err := utils.MoveFile(partFile, partDest); err != nil {
+				slog.Warn("Failed to move skipped archive part", "from", partFile, "to", partDest, "error", err)
+			} else {
+				slog.Info("Moved skipped archive part", "from", partFile, "to", partDest)
+			}
 		}
 	}
 }
