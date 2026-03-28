@@ -207,6 +207,7 @@ func (e *Engine) analyzeMedia(media []models.ShrinkMedia) []models.ShrinkMedia {
 		defer ticker.Stop()
 
 		var lastCompleted int64
+		var lastFailed int64
 		var lastThroughput int64
 		direction := int32(1)
 
@@ -214,19 +215,34 @@ func (e *Engine) analyzeMedia(media []models.ShrinkMedia) []models.ShrinkMedia {
 			select {
 			case <-ticker.C:
 				completed := atomic.LoadInt64(&completedJobs)
+				failed := atomic.LoadInt64(&failedJobs)
 				throughput := completed - lastCompleted
+				failedCount := failed - lastFailed
 				lastCompleted = completed
+				lastFailed = failed
 
 				current := concurrency.Load()
 
-				if throughput < lastThroughput {
-					direction = -direction // Reverse direction if throughput drops
-				} else if throughput == lastThroughput && throughput > 0 {
+				// Use effective throughput: failures count as negative throughput (weighted 2x)
+				// This discourages scaling up when analysis failures occur
+				effectiveThroughput := throughput - (failedCount * 2)
+
+				if effectiveThroughput < lastThroughput {
+					direction = -direction // Reverse direction if effective throughput drops
+				} else if effectiveThroughput == lastThroughput && effectiveThroughput > 0 {
 					direction = 1 // Gently push up if stable
+				} else if failedCount > 0 {
+					direction = -1 // Scale down when failures occur
 				}
 
-				newTarget := min(
-					max(current+(direction*2), 1), 300)
+				// Cap max workers based on failure history to prevent over-scaling during issues
+				maxWorkers := int32(300)
+				if failed > 0 {
+					// Reduce max workers as failures accumulate (min 50 workers)
+					maxWorkers = max(50, 300-int32(failed)*10)
+				}
+
+				newTarget := min(max(current+(direction*2), 1), maxWorkers)
 
 				concurrency.Store(newTarget)
 
@@ -238,7 +254,7 @@ func (e *Engine) analyzeMedia(media []models.ShrinkMedia) []models.ShrinkMedia {
 				// Track worker statistics
 				atomic.AddInt64(&workerSum, int64(active))
 				atomic.AddInt64(&totalWorkerSamples, 1)
-				lastThroughput = throughput
+				lastThroughput = effectiveThroughput
 			case <-monitorDone:
 				return
 			}
