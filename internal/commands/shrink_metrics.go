@@ -36,6 +36,10 @@ func (h *ProgressLogHandler) Enabled(ctx context.Context, level slog.Level) bool
 func (h *ProgressLogHandler) Handle(ctx context.Context, r slog.Record) error {
 	if h.metrics.IsTTY() {
 		h.metrics.ClearProgress()
+		// Add newline before ERROR and WARN to separate from progress line
+		if r.Level >= slog.LevelWarn {
+			fmt.Print("\n")
+		}
 	}
 	return h.handler.Handle(ctx, r)
 }

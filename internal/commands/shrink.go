@@ -435,7 +435,8 @@ func (c *ShrinkCmd) PrintUnknownExtensions() {
 		if es.count == 0 {
 			countStr = "-"
 		}
-		rows = append(rows, []string{es.ext, countStr, utils.FormatSize(es.size)})
+		ext := utils.TruncateMiddle(es.ext, 40)
+		rows = append(rows, []string{ext, countStr, utils.FormatSize(es.size)})
 	}
 	utils.PrintTable(headers, rows)
 	fmt.Println()
