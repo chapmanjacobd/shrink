@@ -124,7 +124,7 @@ func (p *TextProcessor) processText(ctx context.Context, m *models.ShrinkMedia, 
 
 	// Step 1: OCR for PDFs if needed
 	if ext == "pdf" && utils.CommandExists("ocrmypdf") {
-		ocrPath := p.runOCR(m.Path, cfg)
+		ocrPath := p.runOCR(ctx, m.Path, cfg)
 		if ocrPath != "" && ocrPath != m.Path {
 			m.Path = ocrPath
 		}
@@ -198,7 +198,7 @@ func (p *TextProcessor) processText(ctx context.Context, m *models.ShrinkMedia, 
 }
 
 // runOCR runs OCR on a PDF file using ocrmypdf
-func (p *TextProcessor) runOCR(path string, cfg *models.ProcessorConfig) string {
+func (p *TextProcessor) runOCR(ctx context.Context, path string, cfg *models.ProcessorConfig) string {
 	ocrmypdf := utils.GetCommandPath("ocrmypdf")
 	if ocrmypdf == "" {
 		return ""
@@ -260,7 +260,7 @@ func (p *TextProcessor) runOCR(path string, cfg *models.ProcessorConfig) string 
 		Enabled:       !cfg.Common.DisableSystemd,
 	}
 
-	output, err := utils.RunCommandWithSystemd(context.Background(), ocrmypdf, args, systemdCfg)
+	output, err := utils.RunCommandWithSystemd(ctx, ocrmypdf, args, systemdCfg)
 	outputStr := string(output)
 	if err != nil {
 		// Check if it's a "skip-text" message (not really an error)

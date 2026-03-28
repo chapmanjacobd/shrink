@@ -56,10 +56,12 @@ type TimeFilterFlags struct {
 }
 
 type DeletedFlags struct {
+	// HideDeleted defaults to true: most users don't want to see deleted files in listings
 	HideDeleted bool `default:"true" help:"Exclude deleted files" env:"SHRINK_HIDE_DELETED"`
 	OnlyDeleted bool `help:"Include only deleted files" env:"SHRINK_ONLY_DELETED"`
-	Valid       bool `default:"true" help:"Attempt to process files with valid metadata" env:"SHRINK_VALID"`
-	Invalid     bool `help:"Attempt to process files with invalid metadata" env:"SHRINK_INVALID"`
+	// Valid defaults to true: prefer processing files with valid metadata
+	Valid   bool `default:"true" help:"Attempt to process files with valid metadata" env:"SHRINK_VALID"`
+	Invalid bool `help:"Attempt to process files with invalid metadata" env:"SHRINK_INVALID"`
 }
 
 type SavingsFlags struct {
@@ -90,7 +92,8 @@ type VideoFlags struct {
 	Keyframes       bool   `help:"Extract keyframes only" env:"SHRINK_KEYFRAMES"`
 	NoPreserveVideo bool   `help:"Don't preserve video when audio-only" env:"SHRINK_NO_PRESERVE_VIDEO"`
 	IncludeTimecode bool   `help:"Include timecode streams in output" env:"SHRINK_INCLUDE_TIMECODE"`
-	DeleteLarger    bool   `default:"true" help:"Delete larger of transcode or original files" env:"SHRINK_DELETE_LARGER"`
+	// DeleteLarger defaults to true: keep the smaller file (usually the transcoded output)
+	DeleteLarger bool `default:"true" help:"Delete larger of transcode or original files" env:"SHRINK_DELETE_LARGER"`
 }
 
 type ImageFlags struct {

@@ -11,6 +11,13 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
+// SQLite configuration constants
+const (
+	sqliteBusyTimeout = 30000      // 30 seconds busy timeout for concurrent writes
+	sqliteMmapSize    = 2147483648 // 2GB memory-mapped I/O size
+	sqliteCacheSize   = -256000    // 250MB cache size (negative = KB)
+)
+
 // expectedColumns defines the required columns in the media table that are actually used by the application
 var expectedColumns = []string{
 	"id", "path", "size", "duration", "video_count", "audio_count",
@@ -25,13 +32,13 @@ func Connect(dbPath string) (*sql.DB, error) {
 	if dbPath != ":memory:" {
 		// Use URI format if not already or append if it has query parameters
 		if !strings.Contains(dbPath, "?") {
-			dsn = dbPath + "?_busy_timeout=30000"
+			dsn = dbPath + fmt.Sprintf("?_busy_timeout=%d", sqliteBusyTimeout)
 		} else {
-			dsn = dbPath + "&_busy_timeout=30000"
+			dsn = dbPath + fmt.Sprintf("&_busy_timeout=%d", sqliteBusyTimeout)
 		}
 	} else {
 		// For in-memory, we use shared cache and busy timeout
-		dsn = "file::memory:?cache=shared&_busy_timeout=30000"
+		dsn = fmt.Sprintf("file::memory:?cache=shared&_busy_timeout=%d", sqliteBusyTimeout)
 	}
 
 	db, err := sql.Open("sqlite3", dsn)
@@ -49,10 +56,10 @@ func Connect(dbPath string) (*sql.DB, error) {
 	tuning := []string{
 		"PRAGMA journal_mode=WAL",
 		"PRAGMA synchronous=NORMAL",
-		"PRAGMA cache_size=-256000",
+		fmt.Sprintf("PRAGMA cache_size=%d", sqliteCacheSize),
 		"PRAGMA temp_store=MEMORY",
 		"PRAGMA foreign_keys=ON",
-		"PRAGMA mmap_size=2147483648",
+		fmt.Sprintf("PRAGMA mmap_size=%d", sqliteMmapSize),
 	}
 
 	for _, pragma := range tuning {

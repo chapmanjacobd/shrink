@@ -39,7 +39,7 @@ func TestInterruptionPreservesOriginal(t *testing.T) {
 
 		// This will call runOCR which we want to NOT delete the original if it fails
 		// But runOCR actually handles its own failure and returns ""
-		res := p.runOCR(pdfPath, cfg)
+		res := p.runOCR(t.Context(), pdfPath, cfg)
 
 		if res != "" {
 			t.Errorf("expected empty result on OCR failure")

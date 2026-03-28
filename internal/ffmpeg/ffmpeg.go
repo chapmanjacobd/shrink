@@ -416,7 +416,7 @@ func (p *FFmpegProcessor) detectSilence(path string) []string {
 		"-hide_banner", "-v", "warning",
 		"-i", path,
 		"-af", "silencedetect=-55dB:d=0.3,ametadata=mode=print:file=-:key=lavfi.silence_start",
-		"-vn", "-sn", "-f", "s16le", "-y", "/dev/null",
+		"-vn", "-sn", "-f", "s16le", "-y", os.DevNull,
 	}
 
 	output, err := exec.Command(ffmpeg, args...).CombinedOutput()

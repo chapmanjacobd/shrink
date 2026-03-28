@@ -21,6 +21,13 @@ import (
 	"github.com/chapmanjacobd/shrink/internal/utils"
 )
 
+// Processing timeout constants
+const (
+	defaultTimeout       = 30 * time.Minute // Default timeout for unknown media types
+	minArchiveTimeoutSec = 600              // Minimum 10 minutes for archive processing
+	archiveTimeoutPerGB  = 100              // 100 seconds per GB for archive processing
+)
+
 // ============================================================================
 // Engine
 // ============================================================================
@@ -82,14 +89,15 @@ func (e *Engine) analyzeMedia(media []models.ShrinkMedia) []models.ShrinkMedia {
 	slog.Info("Analysis parallelism configured", "workers", targetConcurrency)
 
 	// Channel for distributing work
-	jobs := make(chan int, len(media))
+	// Use bounded buffer to prevent memory issues with large directories
+	jobs := make(chan int, min(len(media), 1000))
 	results := make(chan struct {
 		index  int
 		media  models.ShrinkMedia
 		skip   bool
 		broken bool
 		failed bool
-	}, len(media))
+	}, min(len(media), 1000))
 
 	var wg sync.WaitGroup
 	var completedJobs int64
@@ -425,9 +433,10 @@ func (e *Engine) processMedia(ctx context.Context, media []models.ShrinkMedia) {
 		wg.Add(1)
 		go func(targetCat string, q chan models.ShrinkMedia) {
 			defer wg.Done()
+			defer close(q) // Always close channel on exit
 			for i := range media {
 				if stopAll.Load() || ctx.Err() != nil {
-					break
+					return
 				}
 				m := &media[i]
 				mCat := m.Category
@@ -438,11 +447,10 @@ func (e *Engine) processMedia(ctx context.Context, media []models.ShrinkMedia) {
 					select {
 					case q <- *m:
 					case <-ctx.Done():
-						break
+						return
 					}
 				}
 			}
-			close(q)
 		}(cat, queues[cat])
 	}
 
@@ -784,13 +792,13 @@ func (e *Engine) getTimeout(m models.ShrinkMedia) time.Duration {
 		return utils.ParseDurationString(e.engCfg.Timeout.TextTimeout)
 	case "Archived":
 		// 100 seconds per GB, with a minimum of 10 minutes
-		timeout := float64(m.Size) / (1024 * 1024 * 1024) * 100
-		if timeout < 600 {
-			timeout = 600
+		timeout := float64(m.Size) / (1024 * 1024 * 1024) * archiveTimeoutPerGB
+		if timeout < minArchiveTimeoutSec {
+			timeout = minArchiveTimeoutSec
 		}
 		return time.Duration(timeout) * time.Second
 	default:
-		return 30 * time.Minute
+		return defaultTimeout
 	}
 }
 

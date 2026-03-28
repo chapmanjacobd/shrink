@@ -20,9 +20,18 @@ import (
 	"github.com/chapmanjacobd/shrink/internal/utils"
 )
 
+// Archive processing timeout constants
+const (
+	globTimeout         = 30 * time.Second // Timeout for glob operations
+	lsarTimeout         = 60 * time.Second // Timeout for lsar commands
+	getPartFilesTimeout = 30 * time.Second // Timeout for getPartFiles operation
+)
+
 var splitArchiveRegex = regexp.MustCompile(`^\.(z|r|c|part)?\d{1,4}$`)
 
-// globWithTimeout performs a filepath.Glob with a timeout to prevent hanging
+// globWithTimeout performs a filepath.Glob with a timeout to prevent hanging.
+// Note: If filepath.Glob hangs indefinitely (e.g., on a hung network mount),
+// the goroutine will complete in the background but the result will be discarded.
 func globWithTimeout(pattern string, timeout time.Duration) ([]string, error) {
 	resultChan := make(chan struct {
 		matches []string
@@ -41,6 +50,7 @@ func globWithTimeout(pattern string, timeout time.Duration) ([]string, error) {
 	case result := <-resultChan:
 		return result.matches, result.err
 	case <-time.After(timeout):
+		slog.Warn("Glob operation timed out", "pattern", pattern, "timeout", timeout)
 		return nil, fmt.Errorf("glob timeout after %v", timeout)
 	}
 }
@@ -268,6 +278,9 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *models.Shri
 				} else {
 					slog.Warn("Failed to extract nested archive", "path", path, "error", res.Error)
 				}
+				// Extraction failed - keep the original archive file and track it as output
+				outputFiles = append(outputFiles, models.ProcessOutputFile{Path: path, Size: info.Size()})
+				return nil
 			}
 			if res.Success {
 				// Skip the output directory of the nested archive in the current walk
@@ -690,8 +703,8 @@ func (p *ArchiveProcessor) getPartFiles(path string) []string {
 	select {
 	case result := <-resultChan:
 		return result
-	case <-time.After(30 * time.Second):
-		slog.Warn("getPartFiles timed out after 30 seconds", "path", path)
+	case <-time.After(getPartFilesTimeout):
+		slog.Warn("getPartFiles timed out", "path", path, "timeout", getPartFilesTimeout)
 		return nil
 	}
 }
@@ -707,8 +720,8 @@ func (p *ArchiveProcessor) getPartFilesImpl(path string) []string {
 	if lsar != "" {
 		slog.Debug("Calling lsar for XADVolumes", "path", path)
 
-		// Add timeout to prevent hanging - use 60 seconds for large archives
-		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		// Add timeout to prevent hanging for large archives
+		ctx, cancel := context.WithTimeout(context.Background(), lsarTimeout)
 		defer cancel()
 
 		// Use systemd-run wrapper if configured (Linux only)
@@ -935,8 +948,8 @@ func (p *ArchiveProcessor) lsarWithStatus(path string) ([]models.ShrinkMedia, bo
 		return nil, true
 	}
 
-	// Add timeout to prevent hanging - use 60 seconds for large archives
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	// Add timeout to prevent hanging for large archives
+	ctx, cancel := context.WithTimeout(context.Background(), lsarTimeout)
 	defer cancel()
 
 	// Use systemd-run wrapper if configured (Linux only)
