@@ -63,7 +63,9 @@ func RunScenario(t *testing.T, s Scenario, runCmd func(dbPath, tempDir string, a
 		subtitle_codecs TEXT,
 		media_type TEXT,
 		time_deleted INTEGER DEFAULT 0,
-		is_shrinked INTEGER DEFAULT 0
+		is_shrinked INTEGER DEFAULT 0,
+		width INTEGER DEFAULT 0,
+		height INTEGER DEFAULT 0
 	)`)
 	if err != nil {
 		t.Fatalf("failed to create table: %v", err)

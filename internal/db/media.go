@@ -36,6 +36,8 @@ type MediaRecord struct {
 	Duration       float64
 	VideoCount     int
 	AudioCount     int
+	Width          int
+	Height         int
 	IsShrinked     int // Status code: 0=not processed, 1=success, >1=various states
 }
 
@@ -50,7 +52,9 @@ func LoadMediaFromDB(db *sql.DB, forceShrink bool, videoOnly, audioOnly, imageOn
             COALESCE(video_codecs, ''),
             COALESCE(audio_codecs, ''),
             COALESCE(subtitle_codecs, ''),
-            COALESCE(media_type, '')
+            COALESCE(media_type, ''),
+            COALESCE(width, 0),
+            COALESCE(height, 0)
 		FROM media
 		WHERE COALESCE(time_deleted, 0) = 0
             AND size > 0
@@ -70,7 +74,8 @@ func LoadMediaFromDB(db *sql.DB, forceShrink bool, videoOnly, audioOnly, imageOn
 	for rows.Next() {
 		var m MediaRecord
 		err := rows.Scan(&m.Path, &m.Size, &m.Duration, &m.VideoCount, &m.AudioCount,
-			&m.VideoCodecs, &m.AudioCodecs, &m.SubtitleCodecs, &m.MediaType)
+			&m.VideoCodecs, &m.AudioCodecs, &m.SubtitleCodecs, &m.MediaType,
+			&m.Width, &m.Height)
 		if err != nil {
 			slog.Error("Scan error", "error", err)
 			continue
@@ -93,17 +98,22 @@ func MarkDeleted(databases []*sql.DB, path string) {
 
 // UpdateMedia replaces an old path with a new one and updates its size/duration
 func UpdateMedia(databases []*sql.DB, oldPath, newPath string, newSize int64, duration float64) {
+	UpdateMediaWithDimensions(databases, oldPath, newPath, newSize, duration, 0, 0)
+}
+
+// UpdateMediaWithDimensions replaces an old path with a new one and updates its size/duration/dimensions
+func UpdateMediaWithDimensions(databases []*sql.DB, oldPath, newPath string, newSize int64, duration float64, width, height int) {
 	for _, sqlDB := range databases {
 		_, _ = sqlDB.Exec("DELETE FROM media WHERE path = ?", newPath)
 		var execErr error
 		if duration > 0 {
 			_, execErr = sqlDB.Exec(
-				"UPDATE media SET path = ?, size = ?, duration = ?, time_deleted = 0, is_shrinked = ? WHERE path = ?",
-				newPath, newSize, int64(math.Round(duration)), ShrinkStatusSuccess, oldPath)
+				"UPDATE media SET path = ?, size = ?, duration = ?, width = ?, height = ?, time_deleted = 0, is_shrinked = ? WHERE path = ?",
+				newPath, newSize, int64(math.Round(duration)), width, height, ShrinkStatusSuccess, oldPath)
 		} else {
 			_, execErr = sqlDB.Exec(
-				"UPDATE media SET path = ?, size = ?, time_deleted = 0, is_shrinked = ? WHERE path = ?",
-				newPath, newSize, ShrinkStatusSuccess, oldPath)
+				"UPDATE media SET path = ?, size = ?, width = ?, height = ?, time_deleted = 0, is_shrinked = ? WHERE path = ?",
+				newPath, newSize, width, height, ShrinkStatusSuccess, oldPath)
 		}
 		if execErr != nil {
 			slog.Warn("Failed to update database entry", "oldPath", oldPath, "newPath", newPath, "error", execErr)
@@ -113,6 +123,11 @@ func UpdateMedia(databases []*sql.DB, oldPath, newPath string, newSize int64, du
 
 // AddMediaEntry adds a new media entry to the database with a specific status
 func AddMediaEntry(databases []*sql.DB, path string, size int64, duration float64, status int) {
+	AddMediaEntryWithDimensions(databases, path, size, duration, 0, 0, status)
+}
+
+// AddMediaEntryWithDimensions adds a new media entry to the database with dimensions and status
+func AddMediaEntryWithDimensions(databases []*sql.DB, path string, size int64, duration float64, width, height int, status int) {
 	for _, sqlDB := range databases {
 		_, err := sqlDB.Exec("DELETE FROM media WHERE path = ?", path)
 		if err != nil {
@@ -121,12 +136,12 @@ func AddMediaEntry(databases []*sql.DB, path string, size int64, duration float6
 		var execErr error
 		if duration > 0 {
 			_, execErr = sqlDB.Exec(
-				"INSERT INTO media (path, size, duration, time_deleted, is_shrinked) VALUES (?, ?, ?, 0, ?)",
-				path, size, int64(math.Round(duration)), status)
+				"INSERT INTO media (path, size, duration, width, height, time_deleted, is_shrinked) VALUES (?, ?, ?, ?, ?, 0, ?)",
+				path, size, int64(math.Round(duration)), width, height, status)
 		} else {
 			_, execErr = sqlDB.Exec(
-				"INSERT INTO media (path, size, time_deleted, is_shrinked) VALUES (?, ?, 0, ?)",
-				path, size, status)
+				"INSERT INTO media (path, size, width, height, time_deleted, is_shrinked) VALUES (?, ?, ?, ?, 0, ?)",
+				path, size, width, height, status)
 		}
 		if execErr != nil {
 			slog.Warn("Failed to add database entry", "path", path, "error", execErr)

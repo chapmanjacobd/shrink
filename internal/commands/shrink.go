@@ -224,15 +224,22 @@ func (c *ShrinkCmd) loadAllMedia() ([]models.ShrinkMedia, error) {
 		}
 
 		for _, r := range records {
-			allMedia = append(allMedia, models.ShrinkMedia{
+			m := models.ShrinkMedia{
 				Path:       r.Path,
 				Size:       r.Size,
 				Duration:   r.Duration,
 				VideoCount: r.VideoCount,
 				AudioCount: r.AudioCount,
+				Width:      r.Width,
+				Height:     r.Height,
 				MediaType:  r.MediaType,
 				Ext:        strings.ToLower(filepath.Ext(r.Path)),
-			})
+			}
+			// Enrich metadata for video/audio files missing dimensions (backwards compatibility)
+			if (r.Width == 0 || r.Height == 0) && (utils.VideoExtensionMap[m.Ext]) {
+				c.enrichMetadata(&m)
+			}
+			allMedia = append(allMedia, m)
 		}
 	}
 

@@ -136,7 +136,8 @@ func (e *Engine) analyzeMedia(media []models.ShrinkMedia) []models.ShrinkMedia {
 					// Get processor's category
 					m.Category = processor.Category()
 					// Check for 4K+ resolution videos and assign to separate category
-					if m.Category == "Video" && (m.Width >= 2400 || m.Height >= 2400) {
+					// 4K UHD is 3840×2160, so we check for any dimension >= 2160
+					if m.Category == "Video" && (m.Height >= 2160 || m.Width >= 2160) {
 						m.Category = "Video4K"
 					}
 					e.metrics.RecordStarted(m.DisplayCategory(), m.Path)
@@ -757,9 +758,9 @@ func (e *Engine) updateMetadata(m models.ShrinkMedia, result models.ProcessResul
 		// to preserve metadata like play_count, etc.
 		// Except for archives, where we want to keep the archive record as deleted.
 		if len(result.Outputs) == 1 && !pathsEqual(out.Path, m.Path) && m.Category != "Archived" {
-			db.UpdateMedia(e.sqlDBs, m.Path, out.Path, out.Size, m.Duration)
+			db.UpdateMediaWithDimensions(e.sqlDBs, m.Path, out.Path, out.Size, m.Duration, m.Width, m.Height)
 		} else if !pathsEqual(out.Path, m.Path) {
-			db.AddMediaEntry(e.sqlDBs, out.Path, out.Size, m.Duration, db.ShrinkStatusSuccess)
+			db.AddMediaEntryWithDimensions(e.sqlDBs, out.Path, out.Size, m.Duration, m.Width, m.Height, db.ShrinkStatusSuccess)
 		} else {
 			db.MarkSuccess(e.sqlDBs, out.Path)
 		}

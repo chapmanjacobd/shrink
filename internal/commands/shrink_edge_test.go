@@ -190,7 +190,9 @@ func TestFileDisappears(t *testing.T) {
 		size INTEGER,
 		media_type TEXT,
 		time_deleted INTEGER DEFAULT 0,
-		is_shrinked INTEGER DEFAULT 0
+		is_shrinked INTEGER DEFAULT 0,
+		width INTEGER DEFAULT 0,
+		height INTEGER DEFAULT 0
 	)`)
 	db.Exec(`INSERT INTO media (path, size, media_type) VALUES (?, ?, ?)`,
 		filepath.Join(tempDir, "ghost.avi"), 1000, "video")

@@ -22,7 +22,7 @@ const (
 var expectedColumns = []string{
 	"id", "path", "size", "duration", "video_count", "audio_count",
 	"video_codecs", "audio_codecs", "subtitle_codecs", "media_type",
-	"time_deleted", "is_shrinked",
+	"time_deleted", "is_shrinked", "width", "height",
 }
 
 // Connect connects to a SQLite database

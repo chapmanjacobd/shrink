@@ -32,7 +32,9 @@ func TestDatabaseLifecycle(t *testing.T) {
 			subtitle_codecs TEXT,
 			media_type TEXT,
 			time_deleted INTEGER DEFAULT 0,
-			is_shrinked INTEGER DEFAULT 0
+			is_shrinked INTEGER DEFAULT 0,
+			width INTEGER DEFAULT 0,
+			height INTEGER DEFAULT 0
 		) STRICT;
 		CREATE INDEX idx_media_path ON media(path);
 		CREATE INDEX idx_media_type ON media(media_type);
