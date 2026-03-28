@@ -127,19 +127,20 @@ func TestGetDestPath(t *testing.T) {
 	target := ":/processed"
 	expected := filepath.Join(mountPoint, "processed", relPath)
 
-	dest, ok := cmd.getDestPath(absPath, target)
-	if !ok {
-		t.Errorf("expected ok=true")
-	}
+	dest := cmd.getDestPath(absPath, target)
 	if dest != expected {
 		t.Errorf("expected %s, got %s", expected, dest)
 	}
 
 	// Test fallback for non-mountpoint-relative target
+	// When mount point works, full relative path is preserved
 	target2 := "/tmp/moved"
-	_, ok = cmd.getDestPath(absPath, target2)
-	if ok {
-		t.Errorf("expected ok=false for non-mountpoint target")
+	dest2 := cmd.getDestPath(absPath, target2)
+	// The path should be /tmp/moved + relative path from mount point
+	relPath2, _ := filepath.Rel(mountPoint, absPath)
+	expected2 := filepath.Join(target2, relPath2)
+	if dest2 != expected2 {
+		t.Errorf("expected %s, got %s", expected2, dest2)
 	}
 }
 
@@ -468,14 +469,21 @@ func TestShrinkBrokenArchive(t *testing.T) {
 	args := []string{"--no-confirm", "--move-broken", moveBrokenDir}
 	_ = runShrinkCmd(dbPath, tempDir, args)
 
-	// Check that the archive was moved to broken directory with tidy structure
-	parentFolder := filepath.Base(tempDir)
-	brokenSubdir := filepath.Join(moveBrokenDir, parentFolder)
+	// Check that the archive was moved to broken directory (preserving full relative path)
+	mountPoint, _ := utils.GetMountPoint(tempDir)
+	relPathZip, _ := filepath.Rel(mountPoint, archivePath)
+	relPathZ02, _ := filepath.Rel(mountPoint, filepath.Join(tempDir, "test_archive_multi.z02"))
 
 	// The .zip and .z02 should be moved to broken
-	parts := []string{"test_archive_multi.zip", "test_archive_multi.z02"}
+	parts := []struct {
+		relPath string
+		name    string
+	}{
+		{relPathZip, "test_archive_multi.zip"},
+		{relPathZ02, "test_archive_multi.z02"},
+	}
 	for _, part := range parts {
-		movedPath := filepath.Join(brokenSubdir, part)
+		movedPath := filepath.Join(moveBrokenDir, part.relPath)
 		if _, err := os.Stat(movedPath); os.IsNotExist(err) {
 			t.Errorf("expected broken archive part in broken dir: %s", movedPath)
 		}
@@ -692,9 +700,11 @@ func TestShrinkSkipWithMove(t *testing.T) {
 			args := []string{"--no-confirm", "--move", moveDir}
 			_ = runShrinkCmd(dbPath, tempDir, args)
 
-			// Check that the archive was moved (with parent folder structure)
-			parentFolder := filepath.Base(tempDir)
-			movedPath := filepath.Join(moveDir, parentFolder, archiveName)
+			// Check that the archive was moved (preserving full relative path from mount point)
+			// Use the same logic as getDestPath
+			mountPoint, _ := utils.GetMountPoint(archivePath)
+			relPath, _ := filepath.Rel(mountPoint, archivePath)
+			movedPath := filepath.Join(moveDir, relPath)
 			if _, err := os.Stat(movedPath); os.IsNotExist(err) {
 				t.Errorf("expected %s to be moved to: %s", tt.description, movedPath)
 			}

@@ -482,20 +482,40 @@ func (c *ShrinkCmd) ApplyContinueFrom(media []models.ShrinkMedia) []models.Shrin
 // File Operations
 // ============================================================================
 
-func (c *ShrinkCmd) getDestPath(path, target string) (string, bool) {
-	if !strings.HasPrefix(target, ":/") {
-		return "", false
-	}
+// getDestPath calculates destination path preserving full relative directory structure
+// from the source mount point.
+//
+// Examples:
+//   - Source: /mnt/d8/dump/audio/test/a/b/c.mp3
+//   - With --move /mnt/d9/out  → /mnt/d9/out/dump/audio/test/a/b/c.mka
+//   - With --move :/out        → /mnt/d8/out/dump/audio/test/a/b/c.mka
+func (c *ShrinkCmd) getDestPath(path, target string) string {
 	mountPoint, err := utils.GetMountPoint(path)
 	if err != nil {
-		return "", false
+		// Fallback: use parent folder + filename to avoid flat dump
+		parentFolder := filepath.Base(filepath.Dir(path))
+		return filepath.Join(target, parentFolder, filepath.Base(path))
 	}
+
+	// Get relative path from mount point
 	relPath, err := filepath.Rel(mountPoint, path)
 	if err != nil {
-		return "", false
+		// Fallback: use parent folder + filename
+		parentFolder := filepath.Base(filepath.Dir(path))
+		return filepath.Join(target, parentFolder, filepath.Base(path))
 	}
-	// Result: mountPoint + targetDir + relPath
-	return filepath.Join(mountPoint, target[2:], relPath), true
+
+	// Determine target directory
+	var targetDir string
+	if strings.HasPrefix(target, ":/") {
+		// :/path syntax - use same mount point with new prefix
+		targetDir = filepath.Join(mountPoint, target[2:])
+	} else {
+		// Absolute path - use as-is
+		targetDir = target
+	}
+
+	return filepath.Join(targetDir, relPath)
 }
 
 func (c *ShrinkCmd) MoveToBroken(path string, partFiles []string) {
@@ -503,11 +523,11 @@ func (c *ShrinkCmd) MoveToBroken(path string, partFiles []string) {
 		return
 	}
 
-	dest, ok := c.getDestPath(path, c.MoveBroken)
-	if !ok {
-		// Get the parent folder name for tidy organization (original behavior)
-		parentFolder := filepath.Base(filepath.Dir(path))
-		dest = filepath.Join(c.MoveBroken, parentFolder, filepath.Base(path))
+	dest := c.getDestPath(path, c.MoveBroken)
+	// Ensure destination directory exists
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		slog.Warn("Failed to create destination directory", "path", dest, "error", err)
+		return
 	}
 
 	// Move the main file
@@ -525,10 +545,11 @@ func (c *ShrinkCmd) MoveToBroken(path string, partFiles []string) {
 			partFile = filepath.Join(filepath.Dir(path), partFile)
 		}
 		if _, err := os.Stat(partFile); err == nil {
-			partDest, ok := c.getDestPath(partFile, c.MoveBroken)
-			if !ok {
-				parentFolder := filepath.Base(filepath.Dir(path))
-				partDest = filepath.Join(c.MoveBroken, parentFolder, filepath.Base(partFile))
+			partDest := c.getDestPath(partFile, c.MoveBroken)
+			// Ensure destination directory exists
+			if err := os.MkdirAll(filepath.Dir(partDest), 0o755); err != nil {
+				slog.Warn("Failed to create destination directory", "path", partDest, "error", err)
+				continue
 			}
 			if err := utils.MoveFile(partFile, partDest); err != nil {
 				slog.Warn("Failed to move broken archive part", "from", partFile, "to", partDest, "error", err)
@@ -541,9 +562,11 @@ func (c *ShrinkCmd) MoveToBroken(path string, partFiles []string) {
 
 func (c *ShrinkCmd) MoveTo(path string) {
 	if c.Move != "" && path != "" {
-		dest, ok := c.getDestPath(path, c.Move)
-		if !ok {
-			dest = filepath.Join(c.Move, filepath.Base(path))
+		dest := c.getDestPath(path, c.Move)
+		// Ensure destination directory exists
+		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+			slog.Warn("Failed to create destination directory", "path", dest, "error", err)
+			return
 		}
 		if err := utils.MoveFile(path, dest); err != nil {
 			slog.Warn("Failed to move file", "from", path, "to", dest, "error", err)
@@ -557,16 +580,11 @@ func (c *ShrinkCmd) MoveToSkipped(path string, partFiles []string) {
 		return
 	}
 
-	dest, ok := c.getDestPath(path, c.Move)
-	if !ok {
-		// Get the parent folder name for tidy organization
-		parentFolder := filepath.Base(filepath.Dir(path))
-		dest = filepath.Join(c.Move, parentFolder, filepath.Base(path))
-		// Ensure destination directory exists
-		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
-			slog.Warn("Failed to create destination directory", "path", dest, "error", err)
-			return
-		}
+	dest := c.getDestPath(path, c.Move)
+	// Ensure destination directory exists
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		slog.Warn("Failed to create destination directory", "path", dest, "error", err)
+		return
 	}
 
 	// Move the main file
@@ -584,15 +602,11 @@ func (c *ShrinkCmd) MoveToSkipped(path string, partFiles []string) {
 			partFile = filepath.Join(filepath.Dir(path), partFile)
 		}
 		if _, err := os.Stat(partFile); err == nil {
-			partDest, ok := c.getDestPath(partFile, c.Move)
-			if !ok {
-				parentFolder := filepath.Base(filepath.Dir(path))
-				partDest = filepath.Join(c.Move, parentFolder, filepath.Base(partFile))
-				// Ensure destination directory exists
-				if err := os.MkdirAll(filepath.Dir(partDest), 0o755); err != nil {
-					slog.Warn("Failed to create destination directory", "path", partDest, "error", err)
-					continue
-				}
+			partDest := c.getDestPath(partFile, c.Move)
+			// Ensure destination directory exists
+			if err := os.MkdirAll(filepath.Dir(partDest), 0o755); err != nil {
+				slog.Warn("Failed to create destination directory", "path", partDest, "error", err)
+				continue
 			}
 			if err := utils.MoveFile(partFile, partDest); err != nil {
 				slog.Warn("Failed to move skipped archive part", "from", partFile, "to", partDest, "error", err)

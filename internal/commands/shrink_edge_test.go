@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/chapmanjacobd/shrink/internal/db"
+	"github.com/chapmanjacobd/shrink/internal/utils"
 )
 
 func TestEdgeCases(t *testing.T) {
@@ -43,16 +44,31 @@ func TestEdgeCases(t *testing.T) {
 	}
 
 	// Check if corrupt file was moved to broken
-	brokenPath := filepath.Join(moveBrokenDir, filepath.Base(tempDir), "corrupt.avi")
-	if _, err := os.Stat(brokenPath); os.IsNotExist(err) {
-		t.Errorf("expected corrupt file to be moved to %s", brokenPath)
+	// GetMountPoint now works even after files are moved
+	mountPoint, _ := utils.GetMountPoint(corruptVid)
+	var expectedBrokenPath string
+	if mountPoint == "" {
+		expectedBrokenPath = filepath.Join(moveBrokenDir, filepath.Base(filepath.Dir(corruptVid)), filepath.Base(corruptVid))
+	} else {
+		relPath, _ := filepath.Rel(mountPoint, corruptVid)
+		expectedBrokenPath = filepath.Join(moveBrokenDir, relPath)
+	}
+	if _, err := os.Stat(expectedBrokenPath); os.IsNotExist(err) {
+		t.Errorf("expected corrupt file to be moved to %s", expectedBrokenPath)
 	}
 
 	// Check if valid file was processed and original deleted
-	movedPath := filepath.Join(moveDir, "valid.av1.mkv")
-	info, err := os.Stat(movedPath)
+	mountPointValid, _ := utils.GetMountPoint(validVid)
+	var expectedMovedPath string
+	if mountPointValid == "" {
+		expectedMovedPath = filepath.Join(moveDir, filepath.Base(filepath.Dir(validVid)), "valid.av1.mkv")
+	} else {
+		relPathValid, _ := filepath.Rel(mountPointValid, validVid)
+		expectedMovedPath = filepath.Join(moveDir, strings.TrimSuffix(relPathValid, filepath.Ext(validVid))+".av1.mkv")
+	}
+	info, err := os.Stat(expectedMovedPath)
 	if os.IsNotExist(err) {
-		t.Errorf("expected valid file to be transcoded and moved to %s", movedPath)
+		t.Errorf("expected valid file to be transcoded and moved to %s", expectedMovedPath)
 	} else if err == nil {
 		// Timestamp preservation
 		if !info.ModTime().Equal(modTime) {

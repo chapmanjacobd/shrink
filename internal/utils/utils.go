@@ -16,7 +16,9 @@ func FileExists(path string) bool {
 	return err == nil
 }
 
-// GetMountPoint returns the mount point for a given path
+// GetMountPoint returns the mount point for a given path.
+// It works even if the file doesn't exist by walking up the directory tree
+// to find an existing parent directory.
 func GetMountPoint(path string) (string, error) {
 	absPath, err := filepath.Abs(path)
 	if err != nil {
@@ -33,9 +35,45 @@ func GetMountPoint(path string) (string, error) {
 		return vol, nil
 	}
 
+	// Try to stat the path directly first
 	info, err := os.Stat(absPath)
 	if err != nil {
-		return "", err
+		// File doesn't exist - walk up the directory tree to find an existing parent
+		dir := absPath
+		for {
+			dir = filepath.Dir(dir)
+			if dir == "/" || dir == "." {
+				// Reached root, just return "/"
+				return "/", nil
+			}
+			info, err = os.Stat(dir)
+			if err == nil {
+				// Found an existing directory, start from here
+				break
+			}
+		}
+		// Use the existing directory we found, not the original non-existent path
+		absPath = dir
+	}
+
+	// If path was a file, get the directory
+	if info != nil && !info.IsDir() {
+		dir := filepath.Dir(absPath)
+		info, err = os.Stat(dir)
+		if err != nil {
+			// Directory doesn't exist either, walk up
+			for {
+				dir = filepath.Dir(dir)
+				if dir == "/" || dir == "." {
+					return "/", nil
+				}
+				info, err = os.Stat(dir)
+				if err == nil {
+					break
+				}
+			}
+		}
+		absPath = dir
 	}
 
 	dev, ok := GetDeviceID(info)
@@ -47,13 +85,6 @@ func GetMountPoint(path string) (string, error) {
 	dir := absPath
 	if !info.IsDir() {
 		dir = filepath.Dir(absPath)
-		info, err = os.Stat(dir)
-		if err != nil {
-			return "", err
-		}
-		if d, ok := GetDeviceID(info); ok {
-			dev = d
-		}
 	}
 
 	for {

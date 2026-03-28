@@ -155,6 +155,17 @@ func TestGetMountPoint(t *testing.T) {
 			t.Errorf("expected non-empty mount point for %s", p)
 		}
 	}
+
+	// Test with non-existent file - should still work by walking up to existing parent
+	tempDir := t.TempDir()
+	nonExistentFile := filepath.Join(tempDir, "does_not_exist", "file.txt")
+	mp, err := GetMountPoint(nonExistentFile)
+	if err != nil {
+		t.Errorf("GetMountPoint failed for non-existent file %s: %v", nonExistentFile, err)
+	}
+	if mp == "" {
+		t.Errorf("expected non-empty mount point for non-existent file %s", nonExistentFile)
+	}
 }
 
 func TestFolderSize(t *testing.T) {
