@@ -130,17 +130,19 @@ type MemoryFlags struct {
 }
 
 type TimeoutFlags struct {
-	VideoTimeout     string  `default:"90m" help:"Video timeout when duration is unknown" env:"SHRINK_VIDEO_TIMEOUT"`
-	AudioTimeout     string  `default:"10m" help:"Audio timeout when duration is unknown" env:"SHRINK_AUDIO_TIMEOUT"`
-	ImageTimeout     string  `default:"10m" help:"Image timeout" env:"SHRINK_IMAGE_TIMEOUT"`
-	TextTimeout      string  `default:"20m" help:"Text timeout" env:"SHRINK_TEXT_TIMEOUT"`
-	ArchiveTimeout   string  `default:"5m" help:"Archive (lsar/glob) timeout" env:"SHRINK_ARCHIVE_TIMEOUT"`
-	VideoTimeoutMult float64 `default:"3.0" help:"Video timeout multiplier (timeout = duration * multiplier)" env:"SHRINK_VIDEO_TIMEOUT_MULT"`
-	AudioTimeoutMult float64 `default:"0.5" help:"Audio timeout multiplier (timeout = duration * multiplier)" env:"SHRINK_AUDIO_TIMEOUT_MULT"`
-	SplitLongerThan  float64 `help:"Split audio longer than N seconds" env:"SHRINK_SPLIT_LONGER_THAN"`
-	MinSplitSegment  float64 `default:"60" help:"Minimum split segment duration in seconds" env:"SHRINK_MIN_SPLIT_SEGMENT"`
-	DeleteUnplayable bool    `help:"Delete unplayable files" env:"SHRINK_DELETE_UNPLAYABLE"`
-	AlwaysSplit      bool    `help:"Always split audio on silence" env:"SHRINK_ALWAYS_SPLIT"`
+	VideoTimeout          string  `default:"90m" help:"Video timeout when duration is unknown" env:"SHRINK_VIDEO_TIMEOUT"`
+	AudioTimeout          string  `default:"10m" help:"Audio timeout when duration is unknown" env:"SHRINK_AUDIO_TIMEOUT"`
+	ImageTimeout          string  `default:"10m" help:"Image timeout" env:"SHRINK_IMAGE_TIMEOUT"`
+	TextTimeout           string  `default:"20m" help:"Text timeout" env:"SHRINK_TEXT_TIMEOUT"`
+	ArchiveAnalyzeTimeout string  `default:"5m" help:"Archive analysis (lsar) timeout" env:"SHRINK_ARCHIVE_ANALYZE_TIMEOUT"`
+	ArchiveGlobTimeout    string  `default:"2m" help:"Archive glob operations timeout" env:"SHRINK_ARCHIVE_GLOB_TIMEOUT"`
+	ArchiveExtractTimeout string  `default:"30m" help:"Archive extraction (unar) timeout" env:"SHRINK_ARCHIVE_EXTRACT_TIMEOUT"`
+	VideoTimeoutMult      float64 `default:"3.0" help:"Video timeout multiplier (timeout = duration * multiplier)" env:"SHRINK_VIDEO_TIMEOUT_MULT"`
+	AudioTimeoutMult      float64 `default:"0.5" help:"Audio timeout multiplier (timeout = duration * multiplier)" env:"SHRINK_AUDIO_TIMEOUT_MULT"`
+	SplitLongerThan       float64 `help:"Split audio longer than N seconds" env:"SHRINK_SPLIT_LONGER_THAN"`
+	MinSplitSegment       float64 `default:"60" help:"Minimum split segment duration in seconds" env:"SHRINK_MIN_SPLIT_SEGMENT"`
+	DeleteUnplayable      bool    `help:"Delete unplayable files" env:"SHRINK_DELETE_UNPLAYABLE"`
+	AlwaysSplit           bool    `help:"Always split audio on silence" env:"SHRINK_ALWAYS_SPLIT"`
 }
 
 func (c *Config) ApplyProfile() {
@@ -191,32 +193,47 @@ func (c *Config) buildCommonConfig() models.CommonConfig {
 		swapMax = -1 // Explicitly disable swap
 	}
 
-	// Parse archive timeout
-	archiveTimeoutSec := int64(300) // default 5m
-	if c.ArchiveTimeout != "" {
-		if d, err := time.ParseDuration(c.ArchiveTimeout); err == nil {
-			archiveTimeoutSec = int64(d.Seconds())
+	// Parse archive timeouts
+	archiveAnalyzeTimeoutSec := int64(300)  // default 5m
+	archiveGlobTimeoutSec := int64(120)     // default 2m
+	archiveExtractTimeoutSec := int64(1800) // default 30m
+
+	if c.ArchiveAnalyzeTimeout != "" {
+		if d, err := time.ParseDuration(c.ArchiveAnalyzeTimeout); err == nil {
+			archiveAnalyzeTimeoutSec = int64(d.Seconds())
+		}
+	}
+	if c.ArchiveGlobTimeout != "" {
+		if d, err := time.ParseDuration(c.ArchiveGlobTimeout); err == nil {
+			archiveGlobTimeoutSec = int64(d.Seconds())
+		}
+	}
+	if c.ArchiveExtractTimeout != "" {
+		if d, err := time.ParseDuration(c.ArchiveExtractTimeout); err == nil {
+			archiveExtractTimeoutSec = int64(d.Seconds())
 		}
 	}
 
 	return models.CommonConfig{
-		SourceAudioBitrate: utils.ParseBitrate(c.SourceAudioBitrate),
-		SourceVideoBitrate: utils.ParseBitrate(c.SourceVideoBitrate),
-		DeleteUnplayable:   c.DeleteUnplayable,
-		DeleteLarger:       c.DeleteLarger,
-		MoveBroken:         c.MoveBroken,
-		Valid:              c.Valid,
-		Invalid:            c.Invalid,
-		ForceShrink:        c.ForceShrink,
-		VerboseFFmpeg:      c.VerboseFFmpeg,
-		IncludeTimecode:    c.IncludeTimecode,
-		MaxWidthBuffer:     c.MaxWidthBuffer,
-		MaxHeightBuffer:    c.MaxHeightBuffer,
-		MemoryLimit:        limit,
-		MemorySwapMax:      swapMax,
-		UseJournald:        c.UseJournald,
-		DisableSystemd:     c.DisableSystemd,
-		ArchiveTimeoutSec:  archiveTimeoutSec,
+		SourceAudioBitrate:       utils.ParseBitrate(c.SourceAudioBitrate),
+		SourceVideoBitrate:       utils.ParseBitrate(c.SourceVideoBitrate),
+		DeleteUnplayable:         c.DeleteUnplayable,
+		DeleteLarger:             c.DeleteLarger,
+		MoveBroken:               c.MoveBroken,
+		Valid:                    c.Valid,
+		Invalid:                  c.Invalid,
+		ForceShrink:              c.ForceShrink,
+		VerboseFFmpeg:            c.VerboseFFmpeg,
+		IncludeTimecode:          c.IncludeTimecode,
+		MaxWidthBuffer:           c.MaxWidthBuffer,
+		MaxHeightBuffer:          c.MaxHeightBuffer,
+		MemoryLimit:              limit,
+		MemorySwapMax:            swapMax,
+		UseJournald:              c.UseJournald,
+		DisableSystemd:           c.DisableSystemd,
+		ArchiveAnalyzeTimeoutSec: archiveAnalyzeTimeoutSec,
+		ArchiveGlobTimeoutSec:    archiveGlobTimeoutSec,
+		ArchiveExtractTimeoutSec: archiveExtractTimeoutSec,
 	}
 }
 
