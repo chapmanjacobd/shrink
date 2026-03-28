@@ -2,6 +2,8 @@
 package commands
 
 import (
+	"time"
+
 	"github.com/chapmanjacobd/shrink/internal/models"
 	"github.com/chapmanjacobd/shrink/internal/utils"
 )
@@ -132,6 +134,7 @@ type TimeoutFlags struct {
 	AudioTimeout     string  `default:"10m" help:"Audio timeout when duration is unknown" env:"SHRINK_AUDIO_TIMEOUT"`
 	ImageTimeout     string  `default:"10m" help:"Image timeout" env:"SHRINK_IMAGE_TIMEOUT"`
 	TextTimeout      string  `default:"20m" help:"Text timeout" env:"SHRINK_TEXT_TIMEOUT"`
+	ArchiveTimeout   string  `default:"5m" help:"Archive (lsar/glob) timeout" env:"SHRINK_ARCHIVE_TIMEOUT"`
 	VideoTimeoutMult float64 `default:"3.0" help:"Video timeout multiplier (timeout = duration * multiplier)" env:"SHRINK_VIDEO_TIMEOUT_MULT"`
 	AudioTimeoutMult float64 `default:"0.5" help:"Audio timeout multiplier (timeout = duration * multiplier)" env:"SHRINK_AUDIO_TIMEOUT_MULT"`
 	SplitLongerThan  float64 `help:"Split audio longer than N seconds" env:"SHRINK_SPLIT_LONGER_THAN"`
@@ -188,6 +191,14 @@ func (c *Config) buildCommonConfig() models.CommonConfig {
 		swapMax = -1 // Explicitly disable swap
 	}
 
+	// Parse archive timeout
+	archiveTimeoutSec := int64(300) // default 5m
+	if c.ArchiveTimeout != "" {
+		if d, err := time.ParseDuration(c.ArchiveTimeout); err == nil {
+			archiveTimeoutSec = int64(d.Seconds())
+		}
+	}
+
 	return models.CommonConfig{
 		SourceAudioBitrate: utils.ParseBitrate(c.SourceAudioBitrate),
 		SourceVideoBitrate: utils.ParseBitrate(c.SourceVideoBitrate),
@@ -205,6 +216,7 @@ func (c *Config) buildCommonConfig() models.CommonConfig {
 		MemorySwapMax:      swapMax,
 		UseJournald:        c.UseJournald,
 		DisableSystemd:     c.DisableSystemd,
+		ArchiveTimeoutSec:  archiveTimeoutSec,
 	}
 }
 

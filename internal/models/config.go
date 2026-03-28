@@ -81,6 +81,8 @@ type CommonConfig struct {
 	MemorySwapMax  int64 // Swap limit in bytes (0 = auto, -1 = disable swap)
 	UseJournald    bool  // Use journald-compatible mode for systemd-run
 	DisableSystemd bool  // Disable systemd-run wrapper even if available
+	// Archive processing timeout
+	ArchiveTimeoutSec int64 // Archive (lsar/glob) timeout in seconds
 }
 
 // ProcessorConfig contains comprehensive configuration for all media processing

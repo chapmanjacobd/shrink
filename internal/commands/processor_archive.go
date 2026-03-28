@@ -22,10 +22,34 @@ import (
 
 // Archive processing timeout constants
 const (
-	globTimeout         = 30 * time.Second // Timeout for glob operations
-	lsarTimeout         = 60 * time.Second // Timeout for lsar commands
-	getPartFilesTimeout = 30 * time.Second // Timeout for getPartFiles operation
+	defaultLsarTimeout         = 5 * time.Minute // Default timeout for lsar commands
+	defaultGetPartFilesTimeout = 10 * time.Minute // Default timeout for getPartFiles operation
 )
+
+// getGlobTimeout calculates timeout based on file size for glob operations.
+// Uses base timeout from config (default 5m), with additional time for large archives.
+func getGlobTimeout(filePath string, cfg *models.CommonConfig) time.Duration {
+	baseTimeout := time.Duration(cfg.ArchiveTimeoutSec) * time.Second
+	if baseTimeout <= 0 {
+		baseTimeout = 5 * time.Minute
+	}
+
+	// Add extra time for large files (2s per 10MB, max additional 5m)
+	if info, err := os.Stat(filePath); err == nil {
+		extraTime := min(time.Duration(info.Size()/5/1024/1024)*time.Second, 5*time.Minute)
+		return baseTimeout + extraTime
+	}
+	return baseTimeout
+}
+
+// getLsarTimeout returns the lsar timeout based on config
+func getLsarTimeout(cfg *models.CommonConfig) time.Duration {
+	timeout := time.Duration(cfg.ArchiveTimeoutSec) * time.Second
+	if timeout <= 0 {
+		timeout = 5 * time.Minute
+	}
+	return timeout
+}
 
 var splitArchiveRegex = regexp.MustCompile(`^\.(z|r|c|part)?\d{1,4}$`)
 
@@ -101,6 +125,12 @@ func isMultiPartArchiveExt(ext string) bool {
 func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *models.ShrinkMedia, cfg *models.ProcessorConfig,
 	imageProc *ImageProcessor, ffmpegProc *ffmpeg.FFmpegProcessor, registry models.ProcessorRegistry,
 ) models.ProcessResult {
+	// Skip secondary part files - only process the primary archive
+	if isSecondaryPart(m.Path) {
+		slog.Debug("Skipping secondary archive part", "path", m.Path)
+		return models.ProcessResult{SourcePath: m.Path, Success: true} // Treat as successfully handled (no action needed)
+	}
+
 	lsar := utils.GetCommandPath("lsar")
 	unar := utils.GetCommandPath("unar")
 	if lsar == "" || unar == "" {
@@ -703,8 +733,8 @@ func (p *ArchiveProcessor) getPartFiles(path string) []string {
 	select {
 	case result := <-resultChan:
 		return result
-	case <-time.After(getPartFilesTimeout):
-		slog.Warn("getPartFiles timed out", "path", path, "timeout", getPartFilesTimeout)
+	case <-time.After(defaultGetPartFilesTimeout):
+		slog.Warn("getPartFiles timed out", "path", path, "timeout", defaultGetPartFilesTimeout)
 		return nil
 	}
 }
@@ -721,6 +751,7 @@ func (p *ArchiveProcessor) getPartFilesImpl(path string) []string {
 		slog.Debug("Calling lsar for XADVolumes", "path", path)
 
 		// Add timeout to prevent hanging for large archives
+		lsarTimeout := getLsarTimeout(&p.cfg.Common)
 		ctx, cancel := context.WithTimeout(context.Background(), lsarTimeout)
 		defer cancel()
 
@@ -833,7 +864,7 @@ func (p *ArchiveProcessor) getPartFilesImpl(path string) []string {
 	slog.Debug("Extension stripping complete", "iterations", loopCount, "baseWithoutExt", baseWithoutExt)
 	slog.Debug("Globbing for parts", "baseWithoutExt", baseWithoutExt, "dir", dir)
 
-	globTimeout := 5 * time.Second
+	globTimeout := getGlobTimeout(path, &p.cfg.Common)
 
 	// Pattern 1: .zNN parts (Zip split files)
 	pattern1 := filepath.Join(dir, baseWithoutExt+".z*")
@@ -911,6 +942,7 @@ func (p *ArchiveProcessor) lsarWithStatus(path string) ([]models.ShrinkMedia, bo
 	}
 
 	// Add timeout to prevent hanging for large archives
+	lsarTimeout := getLsarTimeout(&p.cfg.Common)
 	ctx, cancel := context.WithTimeout(context.Background(), lsarTimeout)
 	defer cancel()
 
