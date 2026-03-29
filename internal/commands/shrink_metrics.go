@@ -274,7 +274,7 @@ func (m *ShrinkMetrics) PrintProgress() {
 	}
 
 	// Print summary table
-	headers := []string{"Media Type", "Queued", "Skip", "Fail", "OK", "Saved", "Compression", "Speed", "ETA"}
+	headers := []string{"Media Type", "Queued", "Skip", "Fail", "OK", "Saved", "Size", "Speed", "ETA"}
 	var rows [][]string
 
 	// Sort media types by Queue (descending) for consistent ordering
@@ -349,10 +349,14 @@ func (m *ShrinkMetrics) PrintProgress() {
 		if mt.stats.SpeedRatio() > 0 {
 			speed = fmt.Sprintf("%.1fx", mt.stats.SpeedRatio())
 		}
-		compression := ""
+		size := ""
 		if mt.stats.FutureSize > 0 {
-			ratio := float64(mt.stats.TotalSize) / float64(mt.stats.FutureSize)
-			compression = fmt.Sprintf("%.1fx", ratio)
+			ratio := float64(mt.stats.FutureSize) / float64(mt.stats.TotalSize)
+			if ratio < 0.01 {
+				size = "<0.01x"
+			} else {
+				size = fmt.Sprintf("%.2fx", ratio)
+			}
 		}
 		eta := ""
 		remainingTime := mt.stats.RemainingTimeEst()
@@ -366,7 +370,7 @@ func (m *ShrinkMetrics) PrintProgress() {
 			strconv.Itoa(mt.stats.Failed),
 			strconv.Itoa(mt.stats.Success),
 			utils.FormatSize(mt.stats.SpaceSaved()),
-			compression,
+			size,
 			speed,
 			eta,
 		})
@@ -387,10 +391,14 @@ func (m *ShrinkMetrics) PrintProgress() {
 		totalFutureSize += stats.FutureSize
 		totalRemainingTime += stats.RemainingTimeEst()
 	}
-	compression := ""
+	size := ""
 	if totalFutureSize > 0 {
-		ratio := float64(totalSavings+totalFutureSize) / float64(totalFutureSize)
-		compression = fmt.Sprintf("%.1fx", ratio)
+		ratio := float64(totalFutureSize) / float64(totalSavings+totalFutureSize)
+		if ratio < 0.01 {
+			size = "<0.01x"
+		} else {
+			size = fmt.Sprintf("%.2fx", ratio)
+		}
 	}
 	totalETA := ""
 	if totalRemainingTime > 0 {
@@ -403,7 +411,7 @@ func (m *ShrinkMetrics) PrintProgress() {
 		strconv.Itoa(totalFailed),
 		strconv.Itoa(totalSuccess),
 		utils.FormatSize(totalSavings),
-		compression,
+		size,
 		overallSpeed,
 		totalETA,
 	})
@@ -524,7 +532,7 @@ func (m *ShrinkMetrics) LogSummary() {
 	fmt.Println("PROCESSING COMPLETE")
 	fmt.Println(strings.Repeat("=", 78))
 
-	headers := []string{"Media Type", "Success", "Failed", "Skipped", "Saved", "Compression", "Speed"}
+	headers := []string{"Media Type", "Skip", "Fail", "OK", "Saved", "Size", "Speed"}
 	var rows [][]string
 
 	for _, mt := range sortedTypes {
@@ -536,18 +544,22 @@ func (m *ShrinkMetrics) LogSummary() {
 		if mt.stats.SpeedRatio() > 0 {
 			speed = fmt.Sprintf("%.1fx", mt.stats.SpeedRatio())
 		}
-		compression := ""
+		size := ""
 		if mt.stats.FutureSize > 0 {
-			ratio := float64(mt.stats.TotalSize) / float64(mt.stats.FutureSize)
-			compression = fmt.Sprintf("%.1fx", ratio)
+			ratio := float64(mt.stats.FutureSize) / float64(mt.stats.TotalSize)
+			if ratio < 0.01 {
+				size = "<0.01x"
+			} else {
+				size = fmt.Sprintf("%.2fx", ratio)
+			}
 		}
 		rows = append(rows, []string{
 			mt.name,
-			strconv.Itoa(mt.stats.Success),
-			strconv.Itoa(mt.stats.Failed),
 			strconv.Itoa(mt.stats.Skipped),
+			strconv.Itoa(mt.stats.Failed),
+			strconv.Itoa(mt.stats.Success),
 			utils.FormatSize(mt.stats.SpaceSaved()),
-			compression,
+			size,
 			speed,
 		})
 	}
@@ -556,18 +568,22 @@ func (m *ShrinkMetrics) LogSummary() {
 	if totalTime > 0 && totalDuration > 0 {
 		overallSpeed = fmt.Sprintf("%.1fx", float64(totalDuration)/totalTime)
 	}
-	compression := ""
+	size := ""
 	if totalFutureSize > 0 {
-		ratio := float64(totalSavings+totalFutureSize) / float64(totalFutureSize)
-		compression = fmt.Sprintf("%.1fx", ratio)
+		ratio := float64(totalFutureSize) / float64(totalSavings+totalFutureSize)
+		if ratio < 0.01 {
+			size = "<0.01x"
+		} else {
+			size = fmt.Sprintf("%.2fx", ratio)
+		}
 	}
 	rows = append(rows, []string{
 		"TOTAL",
-		strconv.Itoa(totalSuccess),
-		strconv.Itoa(totalFailed),
 		strconv.Itoa(totalSkipped),
+		strconv.Itoa(totalFailed),
+		strconv.Itoa(totalSuccess),
 		utils.FormatSize(totalSavings),
-		compression,
+		size,
 		overallSpeed,
 	})
 

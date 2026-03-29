@@ -360,7 +360,7 @@ func (c *ShrinkCmd) PrintSummary(media []models.ShrinkMedia) {
 
 	// Print summary table
 	fmt.Println()
-	headers := []string{"Media Type", "Count", "Current", "Future", "Savings", "Future Compression"}
+	headers := []string{"Media Type", "Count", "Current", "Future", "Savings", "Future Size"}
 	var rows [][]string
 
 	// Sort keys for consistent output
@@ -372,13 +372,17 @@ func (c *ShrinkCmd) PrintSummary(media []models.ShrinkMedia) {
 
 	for _, key := range keys {
 		b := typeBreakdown[key]
-		var speed string
+		var size string
 		if b.future > 0 {
-			ratio := float64(b.size) / float64(b.future)
-			speed = fmt.Sprintf("%.1fx", ratio)
+			ratio := float64(b.future) / float64(b.size)
+			if ratio < 0.01 {
+				size = "<0.01x"
+			} else {
+				size = fmt.Sprintf("%.2fx", ratio)
+			}
 		} else {
 			// No future size available (e.g., analysis failed, empty archive)
-			speed = "-"
+			size = "-"
 		}
 		rows = append(rows, []string{
 			key,
@@ -386,18 +390,27 @@ func (c *ShrinkCmd) PrintSummary(media []models.ShrinkMedia) {
 			utils.FormatSize(b.size),
 			utils.FormatSize(b.future),
 			utils.FormatSize(b.savings),
-			speed,
+			size,
 		})
 	}
 
 	// Add TOTAL row
+	totalSizeRatio := ""
+	if totalFuture > 0 {
+		ratio := float64(totalFuture) / float64(totalSize)
+		if ratio < 0.01 {
+			totalSizeRatio = "<0.01x"
+		} else {
+			totalSizeRatio = fmt.Sprintf("%.2fx", ratio)
+		}
+	}
 	rows = append(rows, []string{
 		"TOTAL",
 		"",
 		utils.FormatSize(totalSize),
 		utils.FormatSize(totalFuture),
 		utils.FormatSize(totalSavings),
-		"",
+		totalSizeRatio,
 	})
 
 	utils.PrintTable(headers, rows)
