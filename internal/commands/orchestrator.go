@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"maps"
 	"math"
 	"os"
 	"os/exec"
@@ -131,9 +132,7 @@ func (e *Engine) analyzeMedia(media []models.ShrinkMedia) []models.ShrinkMedia {
 
 		slog.Info("Analyzing category", "category", cat, "count", len(indices))
 		categoryResults := e.analyzeCategory(media, indices, &globalFailedJobs)
-		for idx, result := range categoryResults {
-			allResults[idx] = result
-		}
+		maps.Copy(allResults, categoryResults)
 	}
 
 	// Move skipped files if --move is provided (cases 1 & 2: not processable, no savings)
@@ -330,7 +329,7 @@ func (e *Engine) analyzeCategory(media []models.ShrinkMedia, indices []int, glob
 		var lastFailed int64
 		var lastThroughput int64
 		direction := int32(1)
-		const failureHalfLife = 5.0 * 60.0 // 5 minutes in seconds
+		const failureHalfLife = 5.0 * 60.0          // 5 minutes in seconds
 		const decayFactor = 0.693 / failureHalfLife // ln(2) / halfLife for exponential decay
 
 		for {
