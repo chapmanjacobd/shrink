@@ -22,7 +22,7 @@ A high-performance media optimization tool written in Go. `shrink` automatically
 Ensure you have Go installed, then run:
 
 ```bash
-go install github.com/chapmanjacobd/shrink/cmd/shrink@latest
+go install -tags fts5 github.com/chapmanjacobd/shrink/cmd/shrink@latest
 ```
 
 ## External Dependencies
