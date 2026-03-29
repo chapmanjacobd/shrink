@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -80,9 +81,100 @@ func NewEngine(ui UI, cfg *models.ProcessorConfig, engCfg EngineConfig, sqlDBs [
 // ============================================================================
 
 // analyzeMedia evaluates each media item to determine if it should be processed.
+// It processes files grouped by media type: Images, Text, Video, Audio, Archives.
 func (e *Engine) analyzeMedia(media []models.ShrinkMedia) []models.ShrinkMedia {
 	slog.Info("Starting media analysis", "total_files", len(media))
 
+	// Group media by type for sequential processing
+	// Order: Images, Text, Video, Video4K, Audio, Archives
+	categories := []string{"Image", "Text", "Video", "Video4K", "Audio", "Archived"}
+	mediaByCategory := make(map[string][]int)
+	for i, m := range media {
+		// Determine category from extension before processing
+		ext := m.Ext
+		if utils.ImageExtensionMap[ext] {
+			mediaByCategory["Image"] = append(mediaByCategory["Image"], i)
+		} else if utils.TextExtensionMap[ext] {
+			mediaByCategory["Text"] = append(mediaByCategory["Text"], i)
+		} else if utils.VideoExtensionMap[ext] {
+			if m.Height >= 2160 || m.Width >= 2160 {
+				mediaByCategory["Video4K"] = append(mediaByCategory["Video4K"], i)
+			} else {
+				mediaByCategory["Video"] = append(mediaByCategory["Video"], i)
+			}
+		} else if utils.AudioExtensionMap[ext] {
+			mediaByCategory["Audio"] = append(mediaByCategory["Audio"], i)
+		} else if utils.ArchiveExtensionMap[ext] || isMultiPartArchiveExt(ext) {
+			mediaByCategory["Archived"] = append(mediaByCategory["Archived"], i)
+		} else {
+			// Unknown - put in a general bucket
+			mediaByCategory["Archived"] = append(mediaByCategory["Archived"], i)
+		}
+	}
+
+	// Results collection
+	allResults := make(map[int]struct {
+		media    models.ShrinkMedia
+		skip     bool
+		broken   bool
+		failed   bool
+		skipMove bool
+	})
+	var globalFailedJobs int64
+
+	// Process each category sequentially
+	for _, cat := range categories {
+		indices := mediaByCategory[cat]
+		if len(indices) == 0 {
+			continue
+		}
+
+		slog.Info("Analyzing category", "category", cat, "count", len(indices))
+		categoryResults := e.analyzeCategory(media, indices, &globalFailedJobs)
+		for idx, result := range categoryResults {
+			allResults[idx] = result
+		}
+	}
+
+	// Move skipped files if --move is provided (cases 1 & 2: not processable, no savings)
+	for _, result := range allResults {
+		if result.skipMove && result.skip {
+			m := result.media
+			e.ui.MoveToSkipped(m.Path, m.PartFiles)
+		}
+	}
+
+	// Build final slice in original order
+	// Failed analyses are skipped (not added to toShrink)
+	var toShrink []models.ShrinkMedia
+	for i := range media {
+		result, exists := allResults[i]
+		if !exists {
+			continue
+		}
+		if result.failed {
+			// Analysis failed (e.g., lsar timeout) - skip this file
+			continue
+		}
+		if result.broken {
+			toShrink = append(toShrink, result.media)
+		} else if !result.skip {
+			toShrink = append(toShrink, result.media)
+		}
+	}
+
+	slog.Info("Media analysis complete", "to_shrink", len(toShrink))
+	return toShrink
+}
+
+// analyzeCategory analyzes a group of files of the same media type.
+func (e *Engine) analyzeCategory(media []models.ShrinkMedia, indices []int, globalFailedJobs *int64) map[int]struct {
+	media    models.ShrinkMedia
+	skip     bool
+	broken   bool
+	failed   bool
+	skipMove bool
+} {
 	// Determine analysis parallelism
 	targetConcurrency := e.engCfg.AnalysisThreads
 	if targetConcurrency <= 0 {
@@ -92,7 +184,7 @@ func (e *Engine) analyzeMedia(media []models.ShrinkMedia) []models.ShrinkMedia {
 
 	// Channel for distributing work
 	// Use bounded buffer to prevent memory issues with large directories
-	jobs := make(chan int, min(len(media), 1000))
+	jobs := make(chan int, min(len(indices), 1000))
 	results := make(chan struct {
 		index    int
 		media    models.ShrinkMedia
@@ -100,7 +192,7 @@ func (e *Engine) analyzeMedia(media []models.ShrinkMedia) []models.ShrinkMedia {
 		broken   bool
 		failed   bool
 		skipMove bool
-	}, min(len(media), 1000))
+	}, min(len(indices), 1000))
 
 	var wg sync.WaitGroup
 	var completedJobs int64
@@ -110,6 +202,10 @@ func (e *Engine) analyzeMedia(media []models.ShrinkMedia) []models.ShrinkMedia {
 	var workerSum int64
 	var concurrency atomic.Int32
 	concurrency.Store(int32(targetConcurrency))
+
+	// Track recent failures with decay (for dynamic worker scaling)
+	// Failures decay by half every 5 minutes to avoid permanently penalizing
+	var recentFailures atomic.Uint64 // stores float64 bits
 
 	// Worker function
 	startWorker := func() {
@@ -147,8 +243,14 @@ func (e *Engine) analyzeMedia(media []models.ShrinkMedia) []models.ShrinkMedia {
 					e.metrics.RecordStarted(m.DisplayCategory(), m.Path)
 
 					// Estimate size and time
+					// For archives, check cache first for faster reloading
 					slog.Debug("Estimating size", "path", m.Path)
-					info := processor.EstimateSize(m, e.cfg)
+					var info models.ProcessableInfo
+					if m.Category == "Archived" && len(e.sqlDBs) > 0 {
+						info = e.getArchiveEstimateWithCache(m, processor)
+					} else {
+						info = processor.EstimateSize(m, e.cfg)
+					}
 					slog.Debug("Estimate complete", "path", m.Path, "processable", info.IsProcessable)
 
 					if info.IsBroken {
@@ -189,6 +291,11 @@ func (e *Engine) analyzeMedia(media []models.ShrinkMedia) []models.ShrinkMedia {
 					// Archive analysis failed (likely timeout) - skip but don't count as completed
 					failed = true
 					atomic.AddInt64(&failedJobs, 1)
+					atomic.AddInt64(globalFailedJobs, 1)
+					// Increment recentFailures (stored as float64 bits)
+					oldBits := recentFailures.Load()
+					oldVal := math.Float64frombits(oldBits)
+					recentFailures.Store(math.Float64bits(oldVal + 1.0))
 					slog.Debug("Archive analysis failed, skipping", "path", m.Path)
 				}
 
@@ -223,6 +330,8 @@ func (e *Engine) analyzeMedia(media []models.ShrinkMedia) []models.ShrinkMedia {
 		var lastFailed int64
 		var lastThroughput int64
 		direction := int32(1)
+		const failureHalfLife = 5.0 * 60.0 // 5 minutes in seconds
+		const decayFactor = 0.693 / failureHalfLife // ln(2) / halfLife for exponential decay
 
 		for {
 			select {
@@ -246,12 +355,24 @@ func (e *Engine) analyzeMedia(media []models.ShrinkMedia) []models.ShrinkMedia {
 					direction = 1
 				}
 
-				// Strictly cap max workers based on failure count
+				// Decay recent failures (exponential decay with 5-minute half-life)
+				// This prevents old errors from permanently limiting throughput
+				oldBits := recentFailures.Load()
+				recentFailCount := math.Float64frombits(oldBits)
+				if recentFailCount > 0 {
+					decay := math.Exp(-decayFactor * 4.5) // 4.5 seconds since last tick
+					recentFailures.Store(math.Float64bits(recentFailCount * decay))
+				}
+
+				// Clamp down max workers based on recent (decayed) failure count
+				// Use decayed count so old errors gradually lose impact
 				maxWorkers := int32(300)
-				if failed > 0 {
+				effectiveFailures := int(recentFailCount + 0.5) // Round to nearest int
+				if effectiveFailures > 0 {
 					// Aggressively reduce max workers as failures accumulate
 					// Each failure reduces max by 20, minimum 10 workers
-					maxWorkers = max(10, 300-int32(failed)*20)
+					// 1 failure = 280, 5 failures = 200, 10 failures = 100, 15 failures = 10
+					maxWorkers = max(10, 300-int32(effectiveFailures)*20)
 				}
 
 				newTarget := min(max(current+(direction*2), 1), maxWorkers)
@@ -286,7 +407,7 @@ func (e *Engine) analyzeMedia(media []models.ShrinkMedia) []models.ShrinkMedia {
 				failed := atomic.LoadInt64(&failedJobs)
 				workers := atomic.LoadInt32(&activeWorkers)
 				if completed > 0 || workers > 0 || failed > 0 {
-					status := fmt.Sprintf("\rAnalyzing %d/%d files", completed, len(media))
+					status := fmt.Sprintf("\rAnalyzing %d/%d files", completed, len(indices))
 					if failed > 0 {
 						status += fmt.Sprintf(" (%d failed)", failed)
 					}
@@ -303,7 +424,7 @@ func (e *Engine) analyzeMedia(media []models.ShrinkMedia) []models.ShrinkMedia {
 				completed := atomic.LoadInt64(&completedJobs)
 				failed := atomic.LoadInt64(&failedJobs)
 				workers := atomic.LoadInt32(&activeWorkers)
-				status := fmt.Sprintf("\rAnalyzed %d/%d files", completed, len(media))
+				status := fmt.Sprintf("\rAnalyzed %d/%d files", completed, len(indices))
 				if failed > 0 {
 					status += fmt.Sprintf(" (%d failed)", failed)
 				}
@@ -319,8 +440,8 @@ func (e *Engine) analyzeMedia(media []models.ShrinkMedia) []models.ShrinkMedia {
 
 	// Submit jobs
 	go func() {
-		for i := range media {
-			jobs <- i
+		for _, idx := range indices {
+			jobs <- idx
 		}
 		close(jobs)
 	}()
@@ -334,45 +455,25 @@ func (e *Engine) analyzeMedia(media []models.ShrinkMedia) []models.ShrinkMedia {
 	}()
 
 	// Collect results
-	var toShrink []models.ShrinkMedia
-	resultMap := make(map[int]models.ShrinkMedia)
-	skipMap := make(map[int]bool)
-	skipMoveMap := make(map[int]bool)
-	brokenMap := make(map[int]bool)
-	failedMap := make(map[int]bool)
+	resultMap := make(map[int]struct {
+		media    models.ShrinkMedia
+		skip     bool
+		broken   bool
+		failed   bool
+		skipMove bool
+	})
 
 	for res := range results {
-		resultMap[res.index] = res.media
-		skipMap[res.index] = res.skip
-		skipMoveMap[res.index] = res.skipMove
-		brokenMap[res.index] = res.broken
-		failedMap[res.index] = res.failed
+		resultMap[res.index] = struct {
+			media    models.ShrinkMedia
+			skip     bool
+			broken   bool
+			failed   bool
+			skipMove bool
+		}{res.media, res.skip, res.broken, res.failed, res.skipMove}
 	}
 
-	// Move skipped files if --move is provided (cases 1 & 2: not processable, no savings)
-	for i, shouldMove := range skipMoveMap {
-		if shouldMove && skipMap[i] {
-			m := resultMap[i]
-			e.ui.MoveToSkipped(m.Path, m.PartFiles)
-		}
-	}
-
-	// Build final slice in original order
-	// Failed analyses are skipped (not added to toShrink)
-	for i := range media {
-		if failedMap[i] {
-			// Analysis failed (e.g., lsar timeout) - skip this file
-			continue
-		}
-		if brokenMap[i] {
-			toShrink = append(toShrink, resultMap[i])
-		} else if !skipMap[i] {
-			toShrink = append(toShrink, resultMap[i])
-		}
-	}
-
-	slog.Info("Media analysis complete", "to_shrink", len(toShrink))
-	return toShrink
+	return resultMap
 }
 
 // ============================================================================
@@ -868,4 +969,57 @@ func (e *Engine) getActualDuration(path string) float64 {
 		return 0
 	}
 	return duration
+}
+
+// getArchiveEstimateWithCache retrieves archive estimation with caching support.
+// It checks the database cache first, and if not found or stale, performs
+// the estimation and updates the cache.
+func (e *Engine) getArchiveEstimateWithCache(m *models.ShrinkMedia, processor models.MediaProcessor) models.ProcessableInfo {
+	// Try to get from cache (use first available DB)
+	if len(e.sqlDBs) > 0 {
+		cached, err := db.GetArchiveCache(e.sqlDBs[0], m.Path)
+		if err == nil && cached != nil {
+			// Use cache if less than 24 hours old
+			if time.Since(time.Unix(cached.AnalysisTimestamp, 0)) < 24*time.Hour {
+				slog.Debug("Using cached archive analysis", "path", m.Path)
+				return models.ProcessableInfo{
+					FutureSize:     cached.FutureSize,
+					ProcessingTime: cached.ProcessingTime,
+					IsProcessable:  cached.HasProcessable,
+					ActualSize:     cached.TotalArchiveSize,
+					IsBroken:       cached.IsBroken,
+					PartFiles:      strings.Split(cached.PartFiles, "|"),
+				}
+			}
+		}
+	}
+
+	// Perform estimation
+	info := processor.EstimateSize(m, e.cfg)
+
+	// Update cache (use first available DB)
+	if len(e.sqlDBs) > 0 {
+		// Convert part files to pipe-separated string for storage
+		partFilesStr := ""
+		if len(info.PartFiles) > 0 {
+			partFilesStr = strings.Join(info.PartFiles, "|")
+		}
+
+		entry := &db.ArchiveCacheEntry{
+			Path:              m.Path,
+			TotalArchiveSize:  info.ActualSize,
+			FutureSize:        info.FutureSize,
+			ProcessingTime:    info.ProcessingTime,
+			HasProcessable:    info.IsProcessable,
+			IsBroken:          info.IsBroken,
+			PartFiles:         partFilesStr,
+			AnalysisTimestamp: time.Now().Unix(),
+		}
+
+		if err := db.SetArchiveCache(e.sqlDBs[0], entry); err != nil {
+			slog.Debug("Failed to cache archive analysis", "path", m.Path, "error", err)
+		}
+	}
+
+	return info
 }

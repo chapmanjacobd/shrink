@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/alecthomas/kong"
 	"github.com/chapmanjacobd/shrink/internal/db"
@@ -197,9 +198,18 @@ func (c *ShrinkCmd) initDatabases() error {
 		}
 	}
 
-	// Bulk mark files with already-optimized extensions as shrinked
-	// This prevents loading them for processing
+	// Initialize and cleanup archive cache
 	if len(c.sqlDBs) > 0 {
+		// Initialize archive cache table
+		if err := db.InitArchiveCache(c.sqlDBs[0]); err != nil {
+			slog.Warn("Failed to initialize archive cache", "error", err)
+		}
+		// Cleanup old cache entries (older than 7 days)
+		if err := db.CleanupOldArchiveCache(c.sqlDBs[0], 7*24*time.Hour); err != nil {
+			slog.Warn("Failed to cleanup old archive cache", "error", err)
+		}
+		// Bulk mark files with already-optimized extensions as shrinked
+		// This prevents loading them for processing
 		db.BulkMarkOptimizedExtensions(c.sqlDBs)
 	}
 
