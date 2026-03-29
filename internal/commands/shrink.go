@@ -522,10 +522,34 @@ func (c *ShrinkCmd) getDestPath(path, target string) string {
 	var targetDir string
 	if strings.HasPrefix(target, ":/") {
 		// :/path syntax - use same mount point with new prefix
-		targetDir = filepath.Join(mountPoint, target[2:])
+		// But protect system directories
+		targetPath := target[2:]
+		if targetPath == "/" || targetPath == "home" || targetPath == "var/home" ||
+			strings.HasPrefix(targetPath, "home/") || strings.HasPrefix(targetPath, "var/home/") {
+			// Redirect to user's home
+			relTarget := strings.TrimPrefix(targetPath, "home/")
+			relTarget = strings.TrimPrefix(relTarget, "var/home/")
+			if relTarget == targetPath || relTarget == "" {
+				relTarget = ""
+			}
+			targetDir = filepath.Join(os.ExpandEnv("$HOME"), relTarget)
+		} else {
+			targetDir = filepath.Join(mountPoint, targetPath)
+		}
 	} else {
-		// Absolute path - use as-is
-		targetDir = target
+		// Absolute path - use as-is, but protect system directories
+		if target == "/" || target == "/home" || target == "/var/home" ||
+			strings.HasPrefix(target, "/home/") || strings.HasPrefix(target, "/var/home/") {
+			// Redirect to user's home, stripping /home or /var/home prefix
+			relTarget := strings.TrimPrefix(target, "/home/")
+			relTarget = strings.TrimPrefix(relTarget, "/var/home/")
+			if relTarget == target || relTarget == "" {
+				relTarget = ""
+			}
+			targetDir = filepath.Join(os.ExpandEnv("$HOME"), relTarget)
+		} else {
+			targetDir = target
+		}
 	}
 
 	return filepath.Join(targetDir, relPath)

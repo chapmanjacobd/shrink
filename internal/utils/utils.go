@@ -26,7 +26,8 @@ func GetMountPoint(path string) (string, error) {
 	}
 
 	// Protect system directories - return home directory instead
-	if absPath == "/" || absPath == "/home" || absPath == "/var/home" {
+	if absPath == "/" || strings.HasPrefix(absPath, "/home/") || absPath == "/home" ||
+		strings.HasPrefix(absPath, "/var/home/") || absPath == "/var/home" {
 		return os.ExpandEnv("$HOME"), nil
 	}
 
