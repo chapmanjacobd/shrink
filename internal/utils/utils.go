@@ -25,6 +25,11 @@ func GetMountPoint(path string) (string, error) {
 		return "", err
 	}
 
+	// Protect system directories - return home directory instead
+	if absPath == "/" || absPath == "/home" || absPath == "/var/home" {
+		return os.ExpandEnv("$HOME"), nil
+	}
+
 	// For Windows, use VolumeName
 	if vol := filepath.VolumeName(absPath); vol != "" {
 		// On Windows, VolumeName returns "C:" or "\\server\share"
