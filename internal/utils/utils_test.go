@@ -17,6 +17,7 @@ func TestFormatDuration(t *testing.T) {
 		{65, "1m 5s"},
 		{3665, "1h 1m"},
 		{90000, "1d 1h"},
+		{31622400, "1y 1d"},
 	}
 	for _, tt := range tests {
 		got := FormatDuration(float64(tt.sec))

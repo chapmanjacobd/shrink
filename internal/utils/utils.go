@@ -193,12 +193,16 @@ func FormatDuration(seconds float64) string {
 	if sInt == 0 {
 		return "0s"
 	}
-	d := sInt / 86400
+	y := sInt / 31536000
+	d := (sInt % 31536000) / 86400
 	h := (sInt % 86400) / 3600
 	m := (sInt % 3600) / 60
 	s := sInt % 60
 
 	var parts []string
+	if y > 0 {
+		parts = append(parts, fmt.Sprintf("%dy", y))
+	}
 	if d > 0 {
 		parts = append(parts, fmt.Sprintf("%dd", d))
 	}
