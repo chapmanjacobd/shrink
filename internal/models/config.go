@@ -39,8 +39,8 @@ type AudioConfig struct {
 	TargetAudioBitrate   int64
 	MinSavingsAudio      float64
 	TranscodingAudioRate float64
-	SplitLongerThan      float64
-	MinSplitSegment      float64
+	SplitLongerThan      float64 // Parsed from string (seconds)
+	MinSplitSegment      float64 // Parsed from string (seconds)
 	AudioOnly            bool
 	AlwaysSplit          bool
 }

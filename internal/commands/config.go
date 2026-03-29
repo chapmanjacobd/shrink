@@ -139,8 +139,8 @@ type TimeoutFlags struct {
 	ArchiveExtractTimeout string  `default:"30m" help:"Archive extraction (unar) timeout" env:"SHRINK_ARCHIVE_EXTRACT_TIMEOUT"`
 	VideoTimeoutMult      float64 `default:"3.0" help:"Video timeout multiplier (timeout = duration * multiplier)" env:"SHRINK_VIDEO_TIMEOUT_MULT"`
 	AudioTimeoutMult      float64 `default:"0.5" help:"Audio timeout multiplier (timeout = duration * multiplier)" env:"SHRINK_AUDIO_TIMEOUT_MULT"`
-	SplitLongerThan       float64 `help:"Split audio longer than N seconds" env:"SHRINK_SPLIT_LONGER_THAN"`
-	MinSplitSegment       float64 `default:"60" help:"Minimum split segment duration in seconds" env:"SHRINK_MIN_SPLIT_SEGMENT"`
+	SplitLongerThan       string  `default:"37mins" help:"Split audio longer than this duration" env:"SHRINK_SPLIT_LONGER_THAN"`
+	MinSplitSegment       string  `default:"90s" help:"Minimum split segment duration" env:"SHRINK_MIN_SPLIT_SEGMENT"`
 	DeleteUnplayable      bool    `help:"Delete unplayable files" env:"SHRINK_DELETE_UNPLAYABLE"`
 	AlwaysSplit           bool    `help:"Always split audio on silence" env:"SHRINK_ALWAYS_SPLIT"`
 }
@@ -259,8 +259,8 @@ func (c *Config) buildAudioConfig() models.AudioConfig {
 		TranscodingAudioRate: c.TranscodingAudioRate,
 		AudioOnly:            c.AudioOnly,
 		AlwaysSplit:          c.AlwaysSplit,
-		SplitLongerThan:      c.SplitLongerThan,
-		MinSplitSegment:      c.MinSplitSegment,
+		SplitLongerThan:      utils.ParseDurationString(c.SplitLongerThan).Seconds(),
+		MinSplitSegment:      utils.ParseDurationString(c.MinSplitSegment).Seconds(),
 	}
 }
 
