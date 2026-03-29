@@ -176,6 +176,8 @@ func (e *Engine) analyzeMedia(media []models.ShrinkMedia) []models.ShrinkMedia {
 							m.FutureSize = info.FutureSize
 							m.ProcessingTime = info.ProcessingTime
 							m.Savings = m.Size - info.FutureSize
+							// Record queued time for ETA calculation
+							e.metrics.RecordQueuedTime(m.DisplayCategory(), info.ProcessingTime)
 						}
 					}
 				}
@@ -383,7 +385,7 @@ func (e *Engine) analyzeMedia(media []models.ShrinkMedia) []models.ShrinkMedia {
 func (e *Engine) processWorker(ctx context.Context, m models.ShrinkMedia, stopAll *atomic.Bool, cancel context.CancelFunc) {
 	displayCat := m.DisplayCategory()
 	path := m.Path
-	e.metrics.RecordRunning(displayCat, path)
+	e.metrics.RecordRunning(displayCat, path, m.ProcessingTime)
 
 	// Ensure Running count is decremented even on cancel
 	stopped := false

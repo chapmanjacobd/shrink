@@ -60,16 +60,23 @@ func (h *ProgressLogHandler) WithGroup(name string) slog.Handler {
 
 // MediaTypeStats tracks processing statistics for a specific media type
 type MediaTypeStats struct {
-	Total         int
-	Processed     int
-	Success       int
-	Failed        int
-	Skipped       int
-	Running       int
-	TotalSize     int64
-	FutureSize    int64
-	TotalTime     float64 // processing time in seconds
-	TotalDuration int64   // total media duration in seconds (for speed ratio)
+	Total            int
+	Processed        int
+	Success          int
+	Failed           int
+	Skipped          int
+	Running          int
+	TotalSize        int64
+	FutureSize       int64
+	TotalTime        float64 // processing time in seconds
+	TotalDuration    int64   // total media duration in seconds (for speed ratio)
+	QueuedTimeEst    float64 // estimated time for queued items in seconds
+	RunningTimeEst   float64 // estimated time for running items in seconds
+}
+
+// RemainingTimeEst returns total estimated remaining time (queued + running)
+func (s *MediaTypeStats) RemainingTimeEst() float64 {
+	return s.QueuedTimeEst + s.RunningTimeEst
 }
 
 // SpaceSaved returns bytes saved
@@ -87,8 +94,9 @@ func (s *MediaTypeStats) SpeedRatio() float64 {
 
 // RunningFile tracks a file currently being processed
 type RunningFile struct {
-	MediaType string
-	Path      string
+	MediaType      string
+	Path           string
+	EstimatedTime  int // estimated processing time in seconds
 }
 
 // ShrinkMetrics aggregates statistics across all media types
@@ -151,16 +159,24 @@ func (m *ShrinkMetrics) RecordFailure(mediaType string, processingTime float64) 
 }
 
 // RecordRunning records that a media item is starting to be processed
-func (m *ShrinkMetrics) RecordRunning(mediaType string, path string) {
+func (m *ShrinkMetrics) RecordRunning(mediaType string, path string, estimatedTime int) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	stats := m.getOrCreateType(mediaType)
 	stats.Running++
 	m.runningFiles = append(m.runningFiles, RunningFile{
-		MediaType: mediaType,
-		Path:      path,
+		MediaType:     mediaType,
+		Path:          path,
+		EstimatedTime: estimatedTime,
 	})
+	
+	// Move time from queued to running (item was already counted in queued)
+	queuedTime := float64(estimatedTime)
+	if stats.QueuedTimeEst >= queuedTime {
+		stats.QueuedTimeEst -= queuedTime
+	}
+	stats.RunningTimeEst += queuedTime
 }
 
 // RecordStopped records that a media item has finished processing
@@ -171,9 +187,13 @@ func (m *ShrinkMetrics) RecordStopped(mediaType string, path string) {
 	stats := m.getOrCreateType(mediaType)
 	stats.Running--
 
-	// Remove the file from running files
+	// Remove the file from running files and subtract its estimated time
 	for i, rf := range m.runningFiles {
 		if rf.MediaType == mediaType && rf.Path == path {
+			stats.RunningTimeEst -= float64(rf.EstimatedTime)
+			if stats.RunningTimeEst < 0 {
+				stats.RunningTimeEst = 0
+			}
 			m.runningFiles = append(m.runningFiles[:i], m.runningFiles[i+1:]...)
 			break
 		}
@@ -187,6 +207,15 @@ func (m *ShrinkMetrics) RecordSkipped(mediaType string) {
 
 	stats := m.getOrCreateType(mediaType)
 	stats.Skipped++
+}
+
+// RecordQueuedTime adds estimated processing time for a queued item
+func (m *ShrinkMetrics) RecordQueuedTime(mediaType string, estimatedTime int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	stats := m.getOrCreateType(mediaType)
+	stats.QueuedTimeEst += float64(estimatedTime)
 }
 
 // getOrCreateType gets or creates stats for a media type
@@ -245,7 +274,7 @@ func (m *ShrinkMetrics) PrintProgress() {
 	}
 
 	// Print summary table
-	headers := []string{"Media Type", "Queued", "Running", "Skip", "Fail", "OK", "Saved", "Compression", "Speed"}
+	headers := []string{"Media Type", "Queued", "Skip", "Fail", "OK", "Saved", "Compression", "Speed", "ETA"}
 	var rows [][]string
 
 	// Sort media types by Queue (descending) for consistent ordering
@@ -278,6 +307,8 @@ func (m *ShrinkMetrics) PrintProgress() {
 			cStats.FutureSize += stats.FutureSize
 			cStats.TotalTime += stats.TotalTime
 			cStats.TotalDuration += stats.TotalDuration
+			cStats.QueuedTimeEst += stats.QueuedTimeEst
+			cStats.RunningTimeEst += stats.RunningTimeEst
 		}
 		for category, stats := range collapsed {
 			queue := stats.Total - stats.Processed - stats.Skipped
@@ -323,16 +354,21 @@ func (m *ShrinkMetrics) PrintProgress() {
 			ratio := float64(mt.stats.TotalSize) / float64(mt.stats.FutureSize)
 			compression = fmt.Sprintf("%.1fx", ratio)
 		}
+		eta := ""
+		remainingTime := mt.stats.RemainingTimeEst()
+		if remainingTime > 0 {
+			eta = utils.FormatDuration(remainingTime)
+		}
 		rows = append(rows, []string{
 			mt.name,
 			strconv.Itoa(mt.queue),
-			strconv.Itoa(mt.stats.Running),
 			strconv.Itoa(mt.stats.Skipped),
 			strconv.Itoa(mt.stats.Failed),
 			strconv.Itoa(mt.stats.Success),
 			utils.FormatSize(mt.stats.SpaceSaved()),
 			compression,
 			speed,
+			eta,
 		})
 	}
 
@@ -346,24 +382,30 @@ func (m *ShrinkMetrics) PrintProgress() {
 		overallSpeed = fmt.Sprintf("%.1fx", float64(totalDuration)/totalTime)
 	}
 	var totalFutureSize int64
+	var totalRemainingTime float64
 	for _, stats := range m.types {
 		totalFutureSize += stats.FutureSize
+		totalRemainingTime += stats.RemainingTimeEst()
 	}
 	compression := ""
 	if totalFutureSize > 0 {
 		ratio := float64(totalSavings+totalFutureSize) / float64(totalFutureSize)
 		compression = fmt.Sprintf("%.1fx", ratio)
 	}
+	totalETA := ""
+	if totalRemainingTime > 0 {
+		totalETA = utils.FormatDuration(totalRemainingTime)
+	}
 	rows = append(rows, []string{
 		"TOTAL",
 		strconv.Itoa(totalQueued),
-		strconv.Itoa(totalRunning),
 		strconv.Itoa(totalSkipped),
 		strconv.Itoa(totalFailed),
 		strconv.Itoa(totalSuccess),
 		utils.FormatSize(totalSavings),
 		compression,
 		overallSpeed,
+		totalETA,
 	})
 
 	tableOutput := utils.PrintTableToString(headers, rows)
@@ -486,6 +528,10 @@ func (m *ShrinkMetrics) LogSummary() {
 	var rows [][]string
 
 	for _, mt := range sortedTypes {
+		// Hide rows with no Success and no Failed
+		if mt.stats.Success == 0 && mt.stats.Failed == 0 {
+			continue
+		}
 		speed := ""
 		if mt.stats.SpeedRatio() > 0 {
 			speed = fmt.Sprintf("%.1fx", mt.stats.SpeedRatio())
