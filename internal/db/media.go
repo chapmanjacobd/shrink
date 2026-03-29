@@ -96,27 +96,50 @@ func MarkDeleted(databases []*sql.DB, path string) {
 	}
 }
 
-// UpdateMedia replaces an old path with a new one and updates its size/duration
-func UpdateMedia(databases []*sql.DB, oldPath, newPath string, newSize int64, duration float64) {
-	UpdateMediaWithDimensions(databases, oldPath, newPath, newSize, duration, 0, 0)
-}
-
-// UpdateMediaWithDimensions replaces an old path with a new one and updates its size/duration/dimensions
-func UpdateMediaWithDimensions(databases []*sql.DB, oldPath, newPath string, newSize int64, duration float64, width, height int) {
+// UpdateMedia replaces an old path with a new one and updates its size/duration/dimensions
+func UpdateMedia(databases []*sql.DB, oldPath, newPath string, newSize int64, duration float64, width, height int) {
 	for _, sqlDB := range databases {
-		_, _ = sqlDB.Exec("DELETE FROM media WHERE path = ?", newPath)
 		var execErr error
-		if duration > 0 {
-			_, execErr = sqlDB.Exec(
-				"UPDATE media SET path = ?, size = ?, duration = ?, width = ?, height = ?, time_deleted = 0, is_shrinked = ? WHERE path = ?",
-				newPath, newSize, int64(math.Round(duration)), width, height, ShrinkStatusSuccess, oldPath)
-		} else {
-			_, execErr = sqlDB.Exec(
-				"UPDATE media SET path = ?, size = ?, width = ?, height = ?, time_deleted = 0, is_shrinked = ? WHERE path = ?",
-				newPath, newSize, width, height, ShrinkStatusSuccess, oldPath)
+		// Check if newPath already exists
+		var exists int
+		err := sqlDB.QueryRow("SELECT COUNT(*) FROM media WHERE path = ?", newPath).Scan(&exists)
+		if err != nil {
+			slog.Warn("Failed to check existing path", "newPath", newPath, "error", err)
+			continue
 		}
-		if execErr != nil {
-			slog.Warn("Failed to update database entry", "oldPath", oldPath, "newPath", newPath, "error", execErr)
+
+		if exists > 0 {
+			// newPath exists: update it with new values, then delete oldPath
+			if duration > 0 {
+				_, execErr = sqlDB.Exec(
+					"UPDATE media SET size = ?, duration = ?, width = ?, height = ?, time_deleted = 0, is_shrinked = ? WHERE path = ?",
+					newSize, int64(math.Round(duration)), width, height, ShrinkStatusSuccess, newPath)
+			} else {
+				_, execErr = sqlDB.Exec(
+					"UPDATE media SET size = ?, width = ?, height = ?, time_deleted = 0, is_shrinked = ? WHERE path = ?",
+					newSize, width, height, ShrinkStatusSuccess, newPath)
+			}
+			if execErr != nil {
+				slog.Warn("Failed to update database entry", "oldPath", oldPath, "newPath", newPath, "error", execErr)
+				continue
+			}
+			// Delete the old row
+			_, _ = sqlDB.Exec("DELETE FROM media WHERE path = ?", oldPath)
+		} else {
+			// newPath doesn't exist: update oldPath to newPath
+			_, _ = sqlDB.Exec("DELETE FROM media WHERE path = ?", newPath)
+			if duration > 0 {
+				_, execErr = sqlDB.Exec(
+					"UPDATE media SET path = ?, size = ?, duration = ?, width = ?, height = ?, time_deleted = 0, is_shrinked = ? WHERE path = ?",
+					newPath, newSize, int64(math.Round(duration)), width, height, ShrinkStatusSuccess, oldPath)
+			} else {
+				_, execErr = sqlDB.Exec(
+					"UPDATE media SET path = ?, size = ?, width = ?, height = ?, time_deleted = 0, is_shrinked = ? WHERE path = ?",
+					newPath, newSize, width, height, ShrinkStatusSuccess, oldPath)
+			}
+			if execErr != nil {
+				slog.Warn("Failed to update database entry", "oldPath", oldPath, "newPath", newPath, "error", execErr)
+			}
 		}
 	}
 }

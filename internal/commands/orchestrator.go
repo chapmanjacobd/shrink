@@ -778,7 +778,7 @@ func (e *Engine) updateMetadata(m models.ShrinkMedia, result models.ProcessResul
 		// to preserve metadata like play_count, etc.
 		// Except for archives, where we want to keep the archive record as deleted.
 		if len(result.Outputs) == 1 && !pathsEqual(out.Path, m.Path) && m.Category != "Archived" {
-			db.UpdateMediaWithDimensions(e.sqlDBs, m.Path, out.Path, out.Size, m.Duration, m.Width, m.Height)
+			db.UpdateMedia(e.sqlDBs, m.Path, out.Path, out.Size, m.Duration, m.Width, m.Height)
 		} else if !pathsEqual(out.Path, m.Path) {
 			db.AddMediaEntryWithDimensions(e.sqlDBs, out.Path, out.Size, m.Duration, m.Width, m.Height, db.ShrinkStatusSuccess)
 		} else {
