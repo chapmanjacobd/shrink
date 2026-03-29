@@ -60,18 +60,18 @@ func (h *ProgressLogHandler) WithGroup(name string) slog.Handler {
 
 // MediaTypeStats tracks processing statistics for a specific media type
 type MediaTypeStats struct {
-	Total            int
-	Processed        int
-	Success          int
-	Failed           int
-	Skipped          int
-	Running          int
-	TotalSize        int64
-	FutureSize       int64
-	TotalTime        float64 // processing time in seconds
-	TotalDuration    int64   // total media duration in seconds (for speed ratio)
-	QueuedTimeEst    float64 // estimated time for queued items in seconds
-	RunningTimeEst   float64 // estimated time for running items in seconds
+	Total          int
+	Processed      int
+	Success        int
+	Failed         int
+	Skipped        int
+	Running        int
+	TotalSize      int64
+	FutureSize     int64
+	TotalTime      float64 // processing time in seconds
+	TotalDuration  int64   // total media duration in seconds (for speed ratio)
+	QueuedTimeEst  float64 // estimated time for queued items in seconds
+	RunningTimeEst float64 // estimated time for running items in seconds
 }
 
 // RemainingTimeEst returns total estimated remaining time (queued + running)
@@ -94,9 +94,9 @@ func (s *MediaTypeStats) SpeedRatio() float64 {
 
 // RunningFile tracks a file currently being processed
 type RunningFile struct {
-	MediaType      string
-	Path           string
-	EstimatedTime  int // estimated processing time in seconds
+	MediaType     string
+	Path          string
+	EstimatedTime int // estimated processing time in seconds
 }
 
 // ShrinkMetrics aggregates statistics across all media types
@@ -170,7 +170,7 @@ func (m *ShrinkMetrics) RecordRunning(mediaType string, path string, estimatedTi
 		Path:          path,
 		EstimatedTime: estimatedTime,
 	})
-	
+
 	// Move time from queued to running (item was already counted in queued)
 	queuedTime := float64(estimatedTime)
 	if stats.QueuedTimeEst >= queuedTime {
