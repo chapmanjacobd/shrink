@@ -236,23 +236,22 @@ func (e *Engine) analyzeMedia(media []models.ShrinkMedia) []models.ShrinkMedia {
 
 				current := concurrency.Load()
 
-				// Use effective throughput: failures count as negative throughput (weighted 2x)
-				// This discourages scaling up when analysis failures occur
-				effectiveThroughput := throughput - (failedCount * 2)
-
-				if effectiveThroughput < lastThroughput {
-					direction = -direction // Reverse direction if effective throughput drops
-				} else if effectiveThroughput == lastThroughput && effectiveThroughput > 0 {
-					direction = 1 // Gently push up if stable
-				} else if failedCount > 0 {
-					direction = -1 // Scale down when failures occur
+				// Factor failures into scaling decision - aggressively reduce workers on failures
+				if failedCount > 0 {
+					// Immediately scale down when failures occur
+					direction = -2
+				} else if throughput < lastThroughput {
+					direction = -direction
+				} else if throughput == lastThroughput && throughput > 0 {
+					direction = 1
 				}
 
-				// Cap max workers based on failure history to prevent over-scaling during issues
+				// Strictly cap max workers based on failure count
 				maxWorkers := int32(300)
 				if failed > 0 {
-					// Reduce max workers as failures accumulate (min 50 workers)
-					maxWorkers = max(50, 300-int32(failed)*10)
+					// Aggressively reduce max workers as failures accumulate
+					// Each failure reduces max by 20, minimum 10 workers
+					maxWorkers = max(10, 300-int32(failed)*20)
 				}
 
 				newTarget := min(max(current+(direction*2), 1), maxWorkers)
@@ -267,7 +266,7 @@ func (e *Engine) analyzeMedia(media []models.ShrinkMedia) []models.ShrinkMedia {
 				// Track worker statistics
 				atomic.AddInt64(&workerSum, int64(active))
 				atomic.AddInt64(&totalWorkerSamples, 1)
-				lastThroughput = effectiveThroughput
+				lastThroughput = throughput
 			case <-monitorDone:
 				return
 			}
