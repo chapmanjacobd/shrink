@@ -86,10 +86,19 @@ func TestEnsureSchemaValidation(t *testing.T) {
 		t.Fatalf("Failed to create table: %v", err)
 	}
 
-	// ensureSchema should fail due to missing columns
+	// ensureSchema should now migrate and add missing columns
 	err = ensureSchema(db)
-	if err == nil {
-		t.Error("ensureSchema should fail with missing columns")
+	if err != nil {
+		t.Errorf("ensureSchema should migrate and succeed, got error: %v", err)
+	}
+
+	// Verify that is_shrinked column was added
+	columns, err := getTableColumns(db, "media")
+	if err != nil {
+		t.Fatalf("Failed to get columns: %v", err)
+	}
+	if columns["IS_SHRINKED"] == "" {
+		t.Error("is_shrinked column should be added after migration")
 	}
 }
 

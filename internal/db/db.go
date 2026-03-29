@@ -95,6 +95,7 @@ func ConnectWithInit(dbPath string) (*sql.DB, string, error) {
 }
 
 // ensureSchema validates that the database schema matches our expectations
+// and performs migrations to add missing columns
 func ensureSchema(db *sql.DB) error {
 	columns, err := getTableColumns(db, "media")
 	if err != nil {
@@ -109,9 +110,43 @@ func ensureSchema(db *sql.DB) error {
 	}
 
 	if len(missingColumns) > 0 {
-		return fmt.Errorf("media table is missing columns: %v", missingColumns)
+		// Perform migration to add missing columns
+		if err := migrateAddColumns(db, missingColumns); err != nil {
+			return fmt.Errorf("failed to migrate schema: %w", err)
+		}
 	}
 
+	return nil
+}
+
+// migrateAddColumns adds missing columns to the media table
+func migrateAddColumns(db *sql.DB, columns []string) error {
+	for _, column := range columns {
+		var alterStmt string
+		switch column {
+		case "is_shrinked":
+			alterStmt = fmt.Sprintf("ALTER TABLE media ADD COLUMN %s INTEGER DEFAULT 0", column)
+		case "time_deleted":
+			alterStmt = fmt.Sprintf("ALTER TABLE media ADD COLUMN %s INTEGER DEFAULT 0", column)
+		case "width", "height", "video_count", "audio_count":
+			alterStmt = fmt.Sprintf("ALTER TABLE media ADD COLUMN %s INTEGER DEFAULT 0", column)
+		case "duration":
+			alterStmt = fmt.Sprintf("ALTER TABLE media ADD COLUMN %s REAL DEFAULT 0", column)
+		case "path", "video_codecs", "audio_codecs", "subtitle_codecs", "media_type":
+			alterStmt = fmt.Sprintf("ALTER TABLE media ADD COLUMN %s TEXT DEFAULT ''", column)
+		case "size":
+			alterStmt = fmt.Sprintf("ALTER TABLE media ADD COLUMN %s INTEGER DEFAULT 0", column)
+		case "id":
+			// id is typically the primary key, skip if missing (should not happen)
+			continue
+		default:
+			alterStmt = fmt.Sprintf("ALTER TABLE media ADD COLUMN %s TEXT", column)
+		}
+
+		if _, err := db.Exec(alterStmt); err != nil {
+			return fmt.Errorf("failed to add column %s: %w", column, err)
+		}
+	}
 	return nil
 }
 
