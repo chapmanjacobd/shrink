@@ -752,78 +752,102 @@ func (p *ArchiveProcessor) getPartFilesImpl(path string) []string {
 
 	// Get parts from lsar XADVolumes
 	lsar := utils.GetCommandPath("lsar")
-	if lsar != "" {
-		slog.Debug("Calling lsar for XADVolumes", "path", path)
+	if lsar == "" {
+		// lsar not available, skip multi-part handling
+		slog.Debug("lsar not found, skipping multi-part detection", "path", path)
+		return nil
+	}
 
-		// Add timeout to prevent hanging for large archives
-		lsarTimeout := getArchiveAnalyzeTimeout(&p.cfg.Common)
-		ctx, cancel := context.WithTimeout(context.Background(), lsarTimeout)
-		defer cancel()
+	slog.Debug("Calling lsar for XADVolumes", "path", path)
 
-		// Use systemd-run wrapper if configured (Linux only)
-		systemdCfg := utils.SystemdRunConfig{
-			MemoryLimit:   p.cfg.Common.MemoryLimit,
-			MemorySwapMax: p.cfg.Common.MemorySwapMax,
-			UseJournald:   p.cfg.Common.UseJournald,
-			Enabled:       !p.cfg.Common.DisableSystemd,
-			Dir:           dir,
-		}
+	// Add timeout to prevent hanging for large archives
+	lsarTimeout := getArchiveAnalyzeTimeout(&p.cfg.Common)
+	ctx, cancel := context.WithTimeout(context.Background(), lsarTimeout)
+	defer cancel()
 
-		lsarArgs := []string{"-json", path}
-		lsarOutput, err := utils.RunCommandWithSystemd(ctx, lsar, lsarArgs, systemdCfg)
+	// Use systemd-run wrapper if configured (Linux only)
+	systemdCfg := utils.SystemdRunConfig{
+		MemoryLimit:   p.cfg.Common.MemoryLimit,
+		MemorySwapMax: p.cfg.Common.MemorySwapMax,
+		UseJournald:   p.cfg.Common.UseJournald,
+		Enabled:       !p.cfg.Common.DisableSystemd,
+		Dir:           dir,
+	}
 
-		if len(lsarOutput) == 0 && err == nil {
-			// Fallback to CombinedOutput if systemd-run not used or failed
-			fallbackCmd := exec.CommandContext(ctx, lsar, "-json", path)
-			fallbackCmd.Dir = dir
-			lsarOutput, err = fallbackCmd.CombinedOutput()
-		}
+	lsarArgs := []string{"-json", path}
+	lsarOutput, err := utils.RunCommandWithSystemd(ctx, lsar, lsarArgs, systemdCfg)
 
-		// Handle context timeout - err may not be set if systemd-run wrapper swallowed it
-		if ctx.Err() == context.DeadlineExceeded {
-			slog.Warn("lsar XADVolumes call timed out", "path", path)
-			if err == nil {
-				err = fmt.Errorf("lsar timeout")
-			}
-		}
+	if len(lsarOutput) == 0 && err == nil {
+		// Fallback to CombinedOutput if systemd-run not used or failed
+		fallbackCmd := exec.CommandContext(ctx, lsar, "-json", path)
+		fallbackCmd.Dir = dir
+		lsarOutput, err = fallbackCmd.CombinedOutput()
+	}
 
-		if err == nil || len(lsarOutput) > 0 {
-			slog.Debug("lsar XADVolumes call returned", "path", path, "output_len", len(lsarOutput))
-			jsonBytes := extractLSARJSON(lsarOutput)
-			var lsarJSON struct {
-				LsarProperties struct {
-					XADVolumes []string `json:"XADVolumes"`
-				} `json:"lsarProperties"`
-			}
-			if json.Unmarshal(jsonBytes, &lsarJSON) == nil && len(lsarJSON.LsarProperties.XADVolumes) > 0 {
-				slog.Debug("lsar returned XADVolumes", "path", path, "count", len(lsarJSON.LsarProperties.XADVolumes))
-				for _, partFile := range lsarJSON.LsarProperties.XADVolumes {
-					if !filepath.IsAbs(partFile) {
-						partFile = filepath.Join(dir, partFile)
-					}
-					// Only include files that exist and are not the main archive
-					slog.Debug("Checking lsar part file existence", "part", partFile)
-					if info, err := os.Stat(partFile); err == nil && !info.IsDir() {
-						absPart, _ := filepath.Abs(partFile)
-						absMain, _ := filepath.Abs(path)
-						if !pathsEqual(absPart, absMain) {
-							partFilesMap[absPart] = true
-							slog.Debug("Found multi-part archive part (lsar)", "path", absPart)
-						}
-					} else {
-						slog.Debug("lsar part file not found or is directory", "part", partFile, "err", err)
-					}
-				}
-			} else {
-				slog.Debug("lsar returned no XADVolumes or parse failed", "path", path)
-			}
-		} else {
-			slog.Debug("lsar XADVolumes call failed or returned empty", "path", path, "err", err)
+	// Handle context timeout - err may not be set if systemd-run wrapper swallowed it
+	if ctx.Err() == context.DeadlineExceeded {
+		slog.Warn("lsar XADVolumes call timed out", "path", path)
+		if err == nil {
+			err = fmt.Errorf("lsar timeout")
 		}
 	}
 
-	// Also use glob to find any additional part files that lsar might have missed
-	// Common multi-part archive patterns: .z01, .z02, .zip, .001, .002, .rar, etc.
+	lsarFailed := false
+	if err == nil || len(lsarOutput) > 0 {
+		slog.Debug("lsar XADVolumes call returned", "path", path, "output_len", len(lsarOutput))
+		jsonBytes := extractLSARJSON(lsarOutput)
+		var lsarJSON struct {
+			LsarProperties struct {
+				XADVolumes []string `json:"XADVolumes"`
+			} `json:"lsarProperties"`
+		}
+		if json.Unmarshal(jsonBytes, &lsarJSON) == nil && len(lsarJSON.LsarProperties.XADVolumes) > 0 {
+			slog.Debug("lsar returned XADVolumes", "path", path, "count", len(lsarJSON.LsarProperties.XADVolumes))
+			for _, partFile := range lsarJSON.LsarProperties.XADVolumes {
+				if !filepath.IsAbs(partFile) {
+					partFile = filepath.Join(dir, partFile)
+				}
+				// Only include files that exist and are not the main archive
+				slog.Debug("Checking lsar part file existence", "part", partFile)
+				if info, err := os.Stat(partFile); err == nil && !info.IsDir() {
+					absPart, _ := filepath.Abs(partFile)
+					absMain, _ := filepath.Abs(path)
+					if !pathsEqual(absPart, absMain) {
+						partFilesMap[absPart] = true
+						slog.Debug("Found multi-part archive part (lsar)", "path", absPart)
+					}
+				} else {
+					slog.Debug("lsar part file not found or is directory", "part", partFile, "err", err)
+				}
+			}
+		} else {
+			slog.Debug("lsar returned no XADVolumes or parse failed", "path", path)
+			lsarFailed = true
+		}
+	} else {
+		slog.Debug("lsar XADVolumes call failed", "path", path, "err", err)
+		lsarFailed = true
+	}
+
+	// Only use glob as fallback if lsar failed
+	if lsarFailed {
+		slog.Debug("lsar failed, falling back to glob", "path", path)
+		partFilesMap = p.getPartFilesByGlob(partFilesMap, path, dir, baseName)
+	}
+
+	// Convert map to slice
+	var partFiles []string
+	for p := range partFilesMap {
+		partFiles = append(partFiles, p)
+	}
+
+	// Sort for consistent ordering
+	sort.Strings(partFiles)
+	return partFiles
+}
+
+// getPartFilesByGlob finds archive parts using glob patterns (fallback when lsar fails)
+func (p *ArchiveProcessor) getPartFilesByGlob(partFilesMap map[string]bool, path, dir, baseName string) map[string]bool {
 	ext := strings.ToLower(filepath.Ext(baseName))
 	slog.Debug("Starting glob search for archive parts", "path", path, "ext", ext)
 
@@ -927,15 +951,7 @@ func (p *ArchiveProcessor) getPartFilesImpl(path string) []string {
 		}
 	}
 
-	// Convert map to slice
-	var partFiles []string
-	for p := range partFilesMap {
-		partFiles = append(partFiles, p)
-	}
-
-	// Sort for consistent ordering
-	sort.Strings(partFiles)
-	return partFiles
+	return partFilesMap
 }
 
 // lsarWithStatus lists archive contents and returns whether lsar encountered an error
