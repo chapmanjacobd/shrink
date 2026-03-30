@@ -4,19 +4,17 @@ package db
 import (
 	"database/sql"
 	"log/slog"
-	"time"
 )
 
 // ArchiveCacheEntry represents a cached archive analysis result
 type ArchiveCacheEntry struct {
-	Path              string
-	TotalArchiveSize  int64
-	FutureSize        int64
-	ProcessingTime    int
-	HasProcessable    bool
-	IsBroken          bool
-	PartFiles         string // JSON-encoded list of part file paths
-	AnalysisTimestamp int64
+	Path             string
+	TotalArchiveSize int64
+	FutureSize       int64
+	ProcessingTime   int
+	HasProcessable   bool
+	IsBroken         bool
+	PartFiles        string // JSON-encoded list of part file paths
 }
 
 // InitArchiveCache creates the archive_cache table if it doesn't exist
@@ -29,10 +27,8 @@ func InitArchiveCache(db *sql.DB) error {
 		processing_time INTEGER DEFAULT 0,
 		has_processable INTEGER DEFAULT 0,
 		is_broken INTEGER DEFAULT 0,
-		part_files TEXT DEFAULT '',
-		analysis_timestamp INTEGER DEFAULT 0
+		part_files TEXT DEFAULT ''
 	);
-	CREATE INDEX IF NOT EXISTS idx_archive_cache_timestamp ON archive_cache(analysis_timestamp);
 	`
 	_, err := db.Exec(createTableSQL)
 	return err
@@ -42,7 +38,7 @@ func InitArchiveCache(db *sql.DB) error {
 func GetArchiveCache(db *sql.DB, path string) (*ArchiveCacheEntry, error) {
 	query := `
 	SELECT path, total_archive_size, future_size, processing_time, 
-           has_processable, is_broken, part_files, analysis_timestamp
+           has_processable, is_broken, part_files
 	FROM archive_cache
 	WHERE path = ?
 	`
@@ -54,7 +50,7 @@ func GetArchiveCache(db *sql.DB, path string) (*ArchiveCacheEntry, error) {
 	err := row.Scan(
 		&entry.Path, &entry.TotalArchiveSize, &entry.FutureSize,
 		&entry.ProcessingTime, &hasProc, &isBroken,
-		&entry.PartFiles, &entry.AnalysisTimestamp,
+		&entry.PartFiles,
 	)
 
 	if err == sql.ErrNoRows {
@@ -84,22 +80,21 @@ func SetArchiveCache(db *sql.DB, entry *ArchiveCacheEntry) error {
 	upsertSQL := `
 	INSERT INTO archive_cache (
 		path, total_archive_size, future_size, processing_time,
-		has_processable, is_broken, part_files, analysis_timestamp
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		has_processable, is_broken, part_files
+	) VALUES (?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(path) DO UPDATE SET
 		total_archive_size = excluded.total_archive_size,
 		future_size = excluded.future_size,
 		processing_time = excluded.processing_time,
 		has_processable = excluded.has_processable,
 		is_broken = excluded.is_broken,
-		part_files = excluded.part_files,
-		analysis_timestamp = excluded.analysis_timestamp
+		part_files = excluded.part_files
 	`
 
 	_, err := db.Exec(upsertSQL,
 		entry.Path, entry.TotalArchiveSize, entry.FutureSize,
 		entry.ProcessingTime, hasProc, isBroken,
-		entry.PartFiles, entry.AnalysisTimestamp,
+		entry.PartFiles,
 	)
 
 	return err
@@ -108,13 +103,6 @@ func SetArchiveCache(db *sql.DB, entry *ArchiveCacheEntry) error {
 // DeleteArchiveCache removes a cache entry for a specific archive
 func DeleteArchiveCache(db *sql.DB, path string) error {
 	_, err := db.Exec("DELETE FROM archive_cache WHERE path = ?", path)
-	return err
-}
-
-// CleanupOldArchiveCache removes cache entries older than the specified duration
-func CleanupOldArchiveCache(db *sql.DB, maxAge time.Duration) error {
-	cutoff := time.Now().Add(-maxAge).Unix()
-	_, err := db.Exec("DELETE FROM archive_cache WHERE analysis_timestamp < ?", cutoff)
 	return err
 }
 
@@ -129,16 +117,15 @@ func BulkSetArchiveCache(db *sql.DB, entries []ArchiveCacheEntry) error {
 	upsertSQL := `
 	INSERT INTO archive_cache (
 		path, total_archive_size, future_size, processing_time,
-		has_processable, is_broken, part_files, analysis_timestamp
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		has_processable, is_broken, part_files
+	) VALUES (?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(path) DO UPDATE SET
 		total_archive_size = excluded.total_archive_size,
 		future_size = excluded.future_size,
 		processing_time = excluded.processing_time,
 		has_processable = excluded.has_processable,
 		is_broken = excluded.is_broken,
-		part_files = excluded.part_files,
-		analysis_timestamp = excluded.analysis_timestamp
+		part_files = excluded.part_files
 	`
 
 	for _, entry := range entries {
@@ -154,7 +141,7 @@ func BulkSetArchiveCache(db *sql.DB, entries []ArchiveCacheEntry) error {
 		_, err := tx.Exec(upsertSQL,
 			entry.Path, entry.TotalArchiveSize, entry.FutureSize,
 			entry.ProcessingTime, hasProc, isBroken,
-			entry.PartFiles, entry.AnalysisTimestamp,
+			entry.PartFiles,
 		)
 		if err != nil {
 			slog.Warn("Failed to cache archive analysis", "path", entry.Path, "error", err)
@@ -163,43 +150,4 @@ func BulkSetArchiveCache(db *sql.DB, entries []ArchiveCacheEntry) error {
 	}
 
 	return tx.Commit()
-}
-
-// GetStaleArchiveCache returns cache entries older than the specified duration
-func GetStaleArchiveCache(db *sql.DB, maxAge time.Duration) ([]ArchiveCacheEntry, error) {
-	cutoff := time.Now().Add(-maxAge).Unix()
-	query := `
-	SELECT path, total_archive_size, future_size, processing_time, 
-           has_processable, is_broken, part_files, analysis_timestamp
-	FROM archive_cache
-	WHERE analysis_timestamp < ?
-	`
-
-	rows, err := db.Query(query, cutoff)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var entries []ArchiveCacheEntry
-	for rows.Next() {
-		var entry ArchiveCacheEntry
-		var hasProc, isBroken int64
-
-		err := rows.Scan(
-			&entry.Path, &entry.TotalArchiveSize, &entry.FutureSize,
-			&entry.ProcessingTime, &hasProc, &isBroken,
-			&entry.PartFiles, &entry.AnalysisTimestamp,
-		)
-		if err != nil {
-			slog.Warn("Failed to scan cache entry", "error", err)
-			continue
-		}
-
-		entry.HasProcessable = hasProc == 1
-		entry.IsBroken = isBroken == 1
-		entries = append(entries, entry)
-	}
-
-	return entries, rows.Err()
 }

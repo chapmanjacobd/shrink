@@ -131,7 +131,7 @@ func (e *Engine) analyzeMedia(media []models.ShrinkMedia) []models.ShrinkMedia {
 		}
 
 		slog.Info("Analyzing category", "category", cat, "count", len(indices))
-		categoryResults := e.analyzeCategory(media, indices, &globalFailedJobs)
+		categoryResults := e.analyzeCategory(media, indices, cat, &globalFailedJobs)
 		maps.Copy(allResults, categoryResults)
 	}
 
@@ -167,7 +167,7 @@ func (e *Engine) analyzeMedia(media []models.ShrinkMedia) []models.ShrinkMedia {
 }
 
 // analyzeCategory analyzes a group of files of the same media type.
-func (e *Engine) analyzeCategory(media []models.ShrinkMedia, indices []int, globalFailedJobs *int64) map[int]struct {
+func (e *Engine) analyzeCategory(media []models.ShrinkMedia, indices []int, category string, globalFailedJobs *int64) map[int]struct {
 	media    models.ShrinkMedia
 	skip     bool
 	broken   bool
@@ -406,7 +406,7 @@ func (e *Engine) analyzeCategory(media []models.ShrinkMedia, indices []int, glob
 				failed := atomic.LoadInt64(&failedJobs)
 				workers := atomic.LoadInt32(&activeWorkers)
 				if completed > 0 || workers > 0 || failed > 0 {
-					status := fmt.Sprintf("\rAnalyzing %d/%d files", completed, len(indices))
+					status := fmt.Sprintf("\rAnalyzing %d/%d %s files", completed, len(indices), strings.ToLower(category))
 					if failed > 0 {
 						status += fmt.Sprintf(" (%d failed)", failed)
 					}
@@ -423,7 +423,7 @@ func (e *Engine) analyzeCategory(media []models.ShrinkMedia, indices []int, glob
 				completed := atomic.LoadInt64(&completedJobs)
 				failed := atomic.LoadInt64(&failedJobs)
 				workers := atomic.LoadInt32(&activeWorkers)
-				status := fmt.Sprintf("\rAnalyzed %d/%d files", completed, len(indices))
+				status := fmt.Sprintf("\rAnalyzed %d/%d %s files", completed, len(indices), strings.ToLower(category))
 				if failed > 0 {
 					status += fmt.Sprintf(" (%d failed)", failed)
 				}
@@ -971,24 +971,21 @@ func (e *Engine) getActualDuration(path string) float64 {
 }
 
 // getArchiveEstimateWithCache retrieves archive estimation with caching support.
-// It checks the database cache first, and if not found or stale, performs
-// the estimation and updates the cache.
+// It checks the database cache first, and if not found, performs the estimation
+// and updates the cache (only if analysis was successful - no timeouts).
 func (e *Engine) getArchiveEstimateWithCache(m *models.ShrinkMedia, processor models.MediaProcessor) models.ProcessableInfo {
 	// Try to get from cache (use first available DB)
 	if len(e.sqlDBs) > 0 {
 		cached, err := db.GetArchiveCache(e.sqlDBs[0], m.Path)
 		if err == nil && cached != nil {
-			// Use cache if less than 24 hours old
-			if time.Since(time.Unix(cached.AnalysisTimestamp, 0)) < 24*time.Hour {
-				slog.Debug("Using cached archive analysis", "path", m.Path)
-				return models.ProcessableInfo{
-					FutureSize:     cached.FutureSize,
-					ProcessingTime: cached.ProcessingTime,
-					IsProcessable:  cached.HasProcessable,
-					ActualSize:     cached.TotalArchiveSize,
-					IsBroken:       cached.IsBroken,
-					PartFiles:      strings.Split(cached.PartFiles, "|"),
-				}
+			slog.Debug("Using cached archive analysis", "path", m.Path)
+			return models.ProcessableInfo{
+				FutureSize:     cached.FutureSize,
+				ProcessingTime: cached.ProcessingTime,
+				IsProcessable:  cached.HasProcessable,
+				ActualSize:     cached.TotalArchiveSize,
+				IsBroken:       cached.IsBroken,
+				PartFiles:      strings.Split(cached.PartFiles, "|"),
 			}
 		}
 	}
@@ -997,7 +994,8 @@ func (e *Engine) getArchiveEstimateWithCache(m *models.ShrinkMedia, processor mo
 	info := processor.EstimateSize(m, e.cfg)
 
 	// Update cache (use first available DB)
-	if len(e.sqlDBs) > 0 {
+	// Only cache if analysis was successful (no timeouts)
+	if len(e.sqlDBs) > 0 && !info.IsTimeout {
 		// Convert part files to pipe-separated string for storage
 		partFilesStr := ""
 		if len(info.PartFiles) > 0 {
@@ -1005,14 +1003,13 @@ func (e *Engine) getArchiveEstimateWithCache(m *models.ShrinkMedia, processor mo
 		}
 
 		entry := &db.ArchiveCacheEntry{
-			Path:              m.Path,
-			TotalArchiveSize:  info.ActualSize,
-			FutureSize:        info.FutureSize,
-			ProcessingTime:    info.ProcessingTime,
-			HasProcessable:    info.IsProcessable,
-			IsBroken:          info.IsBroken,
-			PartFiles:         partFilesStr,
-			AnalysisTimestamp: time.Now().Unix(),
+			Path:             m.Path,
+			TotalArchiveSize: info.ActualSize,
+			FutureSize:       info.FutureSize,
+			ProcessingTime:   info.ProcessingTime,
+			HasProcessable:   info.IsProcessable,
+			IsBroken:         info.IsBroken,
+			PartFiles:        partFilesStr,
 		}
 
 		if err := db.SetArchiveCache(e.sqlDBs[0], entry); err != nil {

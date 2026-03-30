@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 )
 
 func TestArchiveCache(t *testing.T) {
@@ -47,14 +46,13 @@ func TestArchiveCache(t *testing.T) {
 
 	t.Run("SetAndGet", func(t *testing.T) {
 		entry := &ArchiveCacheEntry{
-			Path:              "/test/archive.zip",
-			TotalArchiveSize:  1000000,
-			FutureSize:        500000,
-			ProcessingTime:    120,
-			HasProcessable:    true,
-			IsBroken:          false,
-			PartFiles:         "[]",
-			AnalysisTimestamp: time.Now().Unix(),
+			Path:             "/test/archive.zip",
+			TotalArchiveSize: 1000000,
+			FutureSize:       500000,
+			ProcessingTime:   120,
+			HasProcessable:   true,
+			IsBroken:         false,
+			PartFiles:        "[]",
 		}
 
 		// Set cache
@@ -93,14 +91,13 @@ func TestArchiveCache(t *testing.T) {
 
 	t.Run("Update", func(t *testing.T) {
 		entry := &ArchiveCacheEntry{
-			Path:              "/test/archive2.zip",
-			TotalArchiveSize:  2000000,
-			FutureSize:        800000,
-			ProcessingTime:    200,
-			HasProcessable:    true,
-			IsBroken:          false,
-			PartFiles:         "[]",
-			AnalysisTimestamp: time.Now().Unix(),
+			Path:             "/test/archive2.zip",
+			TotalArchiveSize: 2000000,
+			FutureSize:       800000,
+			ProcessingTime:   200,
+			HasProcessable:   true,
+			IsBroken:         false,
+			PartFiles:        "[]",
 		}
 
 		// Set initial cache
@@ -130,14 +127,13 @@ func TestArchiveCache(t *testing.T) {
 
 	t.Run("Delete", func(t *testing.T) {
 		entry := &ArchiveCacheEntry{
-			Path:              "/test/archive3.zip",
-			TotalArchiveSize:  3000000,
-			FutureSize:        1000000,
-			ProcessingTime:    300,
-			HasProcessable:    true,
-			IsBroken:          false,
-			PartFiles:         "[]",
-			AnalysisTimestamp: time.Now().Unix(),
+			Path:             "/test/archive3.zip",
+			TotalArchiveSize: 3000000,
+			FutureSize:       1000000,
+			ProcessingTime:   300,
+			HasProcessable:   true,
+			IsBroken:         false,
+			PartFiles:        "[]",
 		}
 
 		// Set cache
@@ -163,24 +159,22 @@ func TestArchiveCache(t *testing.T) {
 	t.Run("BulkSet", func(t *testing.T) {
 		entries := []ArchiveCacheEntry{
 			{
-				Path:              "/test/bulk1.zip",
-				TotalArchiveSize:  1000000,
-				FutureSize:        500000,
-				ProcessingTime:    100,
-				HasProcessable:    true,
-				IsBroken:          false,
-				PartFiles:         "[]",
-				AnalysisTimestamp: time.Now().Unix(),
+				Path:             "/test/bulk1.zip",
+				TotalArchiveSize: 1000000,
+				FutureSize:       500000,
+				ProcessingTime:   100,
+				HasProcessable:   true,
+				IsBroken:         false,
+				PartFiles:        "[]",
 			},
 			{
-				Path:              "/test/bulk2.zip",
-				TotalArchiveSize:  2000000,
-				FutureSize:        800000,
-				ProcessingTime:    200,
-				HasProcessable:    false,
-				IsBroken:          true,
-				PartFiles:         "[\"/test/bulk2.z01\"]",
-				AnalysisTimestamp: time.Now().Unix(),
+				Path:             "/test/bulk2.zip",
+				TotalArchiveSize: 2000000,
+				FutureSize:       800000,
+				ProcessingTime:   200,
+				HasProcessable:   false,
+				IsBroken:         true,
+				PartFiles:        "[\"/test/bulk2.z01\"]",
 			},
 		}
 
@@ -205,68 +199,6 @@ func TestArchiveCache(t *testing.T) {
 		}
 		if retrieved2 == nil || !retrieved2.IsBroken {
 			t.Errorf("Second entry not set correctly")
-		}
-	})
-
-	t.Run("CleanupOld", func(t *testing.T) {
-		// Set an old entry
-		oldTimestamp := time.Now().Add(-24 * time.Hour).Unix()
-		entry := &ArchiveCacheEntry{
-			Path:              "/test/old.zip",
-			TotalArchiveSize:  1000000,
-			FutureSize:        500000,
-			ProcessingTime:    100,
-			HasProcessable:    true,
-			IsBroken:          false,
-			PartFiles:         "[]",
-			AnalysisTimestamp: oldTimestamp,
-		}
-
-		if err := SetArchiveCache(db, entry); err != nil {
-			t.Fatalf("Failed to set cache: %v", err)
-		}
-
-		// Cleanup entries older than 1 hour
-		if err := CleanupOldArchiveCache(db, 1*time.Hour); err != nil {
-			t.Fatalf("Failed to cleanup old cache: %v", err)
-		}
-
-		// Verify deletion
-		retrieved, err := GetArchiveCache(db, "/test/old.zip")
-		if err != nil {
-			t.Fatalf("Failed to get cache: %v", err)
-		}
-		if retrieved != nil {
-			t.Error("Old cache entry should have been cleaned up")
-		}
-	})
-
-	t.Run("GetStale", func(t *testing.T) {
-		// Set a stale entry
-		oldTimestamp := time.Now().Add(-2 * time.Hour).Unix()
-		entry := &ArchiveCacheEntry{
-			Path:              "/test/stale.zip",
-			TotalArchiveSize:  1000000,
-			FutureSize:        500000,
-			ProcessingTime:    100,
-			HasProcessable:    true,
-			IsBroken:          false,
-			PartFiles:         "[]",
-			AnalysisTimestamp: oldTimestamp,
-		}
-
-		if err := SetArchiveCache(db, entry); err != nil {
-			t.Fatalf("Failed to set cache: %v", err)
-		}
-
-		// Get stale entries (older than 1 hour)
-		stale, err := GetStaleArchiveCache(db, 1*time.Hour)
-		if err != nil {
-			t.Fatalf("Failed to get stale cache: %v", err)
-		}
-
-		if len(stale) != 1 {
-			t.Errorf("Expected 1 stale entry, got %d", len(stale))
 		}
 	})
 }

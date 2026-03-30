@@ -148,7 +148,7 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *models.Shri
 	}
 
 	// Log archive contents before extraction
-	if contents, lsarFailed := p.lsarWithStatus(m.Path); !lsarFailed {
+	if contents, lsarFailed, _ := p.lsarWithStatus(m.Path); !lsarFailed {
 		slog.Info("Lsar identified files in archive", "path", m.Path, "count", len(contents))
 		for _, c := range contents {
 			slog.Debug("Archive content", "file", c.Path, "size", c.Size)
@@ -356,6 +356,7 @@ type ArchiveEstimateResult struct {
 	HasProcessable   bool
 	TotalArchiveSize int64
 	IsBroken         bool
+	IsTimeout        bool
 }
 
 // EstimateSizeForArchive estimates size using compressed size and inspects archive contents
@@ -374,35 +375,41 @@ func (p *ArchiveProcessor) EstimateSizeForArchive(m *models.ShrinkMedia, cfg *mo
 	}
 
 	// Get archive contents and check for multi-part volumes
-	contents, lsarFailed := p.lsarWithStatus(m.Path)
-	slog.Debug("Archive contents retrieved", "path", m.Path, "count", len(contents), "lsarFailed", lsarFailed)
+	contents, lsarFailed, isTimeout := p.lsarWithStatus(m.Path)
+	slog.Debug("Archive contents retrieved", "path", m.Path, "count", len(contents), "lsarFailed", lsarFailed, "isTimeout", isTimeout)
 
 	// Check for multi-part archives and verify all parts exist
 	result.TotalArchiveSize = m.Size
-	slog.Debug("Calling getPartFiles", "path", m.Path)
-	partFiles := p.getPartFiles(m.Path)
-	slog.Debug("getPartFiles returned", "path", m.Path, "parts", len(partFiles))
+	
+	// Only call getPartFiles if lsar failed for a reason other than timeout
+	// (timeout is likely due to large archives, not missing parts)
+	var partFiles []string
+	if !isTimeout {
+		slog.Debug("Calling getPartFiles", "path", m.Path)
+		partFiles = p.getPartFiles(m.Path)
+		slog.Debug("getPartFiles returned", "path", m.Path, "parts", len(partFiles))
 
-	// Check for missing parts in sequence for known multi-part types
-	if isBrokenSequence(m.Path, partFiles) {
-		slog.Info("Broken sequence detected for archive", "path", m.Path)
-		result.IsBroken = true
-		return result
-	}
-
-	// Sum up sizes
-	if len(partFiles) > 0 {
-		result.TotalArchiveSize = 0
-		if info, err := os.Stat(m.Path); err == nil {
-			result.TotalArchiveSize += info.Size()
+		// Check for missing parts in sequence for known multi-part types
+		if isBrokenSequence(m.Path, partFiles) {
+			slog.Info("Broken sequence detected for archive", "path", m.Path)
+			result.IsBroken = true
+			return result
 		}
-		for _, partFile := range partFiles {
-			if info, err := os.Stat(partFile); err == nil {
+
+		// Sum up sizes
+		if len(partFiles) > 0 {
+			result.TotalArchiveSize = 0
+			if info, err := os.Stat(m.Path); err == nil {
 				result.TotalArchiveSize += info.Size()
-			} else {
-				// Missing part file - archive is broken
-				result.IsBroken = true
-				return result
+			}
+			for _, partFile := range partFiles {
+				if info, err := os.Stat(partFile); err == nil {
+					result.TotalArchiveSize += info.Size()
+				} else {
+					// Missing part file - archive is broken
+					result.IsBroken = true
+					return result
+				}
 			}
 		}
 	}
@@ -410,6 +417,12 @@ func (p *ArchiveProcessor) EstimateSizeForArchive(m *models.ShrinkMedia, cfg *mo
 	// If lsar failed (empty contents due to error or missing parts), archive is broken
 	if lsarFailed {
 		result.IsBroken = true
+		return result
+	}
+
+	// If lsar timed out, mark it so we don't cache this result
+	if isTimeout {
+		result.IsTimeout = true
 		return result
 	}
 
@@ -551,13 +564,14 @@ func (p *ArchiveProcessor) EstimateSize(m *models.ShrinkMedia, cfg *models.Proce
 		partFiles = p.getPartFiles(m.Path)
 	}
 
-	slog.Debug("EstimateSize complete", "path", m.Path, "processable", est.HasProcessable, "broken", est.IsBroken)
+	slog.Debug("EstimateSize complete", "path", m.Path, "processable", est.HasProcessable, "broken", est.IsBroken, "timeout", est.IsTimeout)
 	return models.ProcessableInfo{
 		FutureSize:     est.FutureSize,
 		ProcessingTime: est.ProcessingTime,
 		IsProcessable:  est.HasProcessable,
 		ActualSize:     est.TotalArchiveSize,
 		IsBroken:       est.IsBroken,
+		IsTimeout:      est.IsTimeout,
 		PartFiles:      partFiles,
 	}
 }
@@ -955,11 +969,12 @@ func (p *ArchiveProcessor) getPartFilesByGlob(partFilesMap map[string]bool, path
 }
 
 // lsarWithStatus lists archive contents and returns whether lsar encountered an error
-func (p *ArchiveProcessor) lsarWithStatus(path string) ([]models.ShrinkMedia, bool) {
+// Returns: contents, lsarFailed, isTimeout
+func (p *ArchiveProcessor) lsarWithStatus(path string) ([]models.ShrinkMedia, bool, bool) {
 	slog.Debug("lsarWithStatus starting", "path", path)
 	lsar := utils.GetCommandPath("lsar")
 	if lsar == "" {
-		return nil, true
+		return nil, true, false
 	}
 
 	// Add timeout to prevent hanging for large archives
@@ -987,9 +1002,11 @@ func (p *ArchiveProcessor) lsarWithStatus(path string) ([]models.ShrinkMedia, bo
 		output, err = lsarCmd.CombinedOutput()
 	}
 
+	isTimeout := false
 	if ctx.Err() == context.DeadlineExceeded {
 		slog.Warn("lsar command timed out", "path", path)
 		err = fmt.Errorf("lsar timeout")
+		isTimeout = true
 	}
 	slog.Debug("lsar command completed", "path", path, "output_len", len(output), "err", err)
 	lsarFailed := err != nil
@@ -1016,10 +1033,10 @@ func (p *ArchiveProcessor) lsarWithStatus(path string) ([]models.ShrinkMedia, bo
 
 	if err := json.Unmarshal(jsonBytes, &result); err != nil {
 		if lsarFailed {
-			return nil, true
+			return nil, true, isTimeout
 		}
 		slog.Error("Failed to unmarshal lsar output", "error", err, "path", path)
-		return nil, false
+		return nil, false, false
 	}
 
 	var media []models.ShrinkMedia
@@ -1033,8 +1050,8 @@ func (p *ArchiveProcessor) lsarWithStatus(path string) ([]models.ShrinkMedia, bo
 			Ext:            ext,
 		})
 	}
-	slog.Debug("lsarWithStatus complete", "path", path, "count", len(media), "failed", lsarFailed)
-	return media, lsarFailed
+	slog.Debug("lsarWithStatus complete", "path", path, "count", len(media), "failed", lsarFailed, "timeout", isTimeout)
+	return media, lsarFailed, isTimeout
 }
 
 // flattenWrapperFolders moves files from single subfolders up to the parent directory

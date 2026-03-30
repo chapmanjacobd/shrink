@@ -10,6 +10,7 @@ type ProcessableInfo struct {
 	ProcessingTime int
 	IsProcessable  bool
 	IsBroken       bool // Whether the media item is broken/unreadable
+	IsTimeout      bool // Whether the analysis timed out (don't cache this result)
 }
 
 // MediaProcessor defines the interface for processing different media types
