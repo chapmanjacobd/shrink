@@ -53,6 +53,7 @@ type EngineConfig struct {
 	AnalysisThreads int
 	Timeout         TimeoutFlags
 	Move            string
+	ActiveTime      []*utils.TimeRange
 }
 
 // Engine coordinates the media analysis and processing lifecycle.
@@ -513,6 +514,31 @@ func (e *Engine) processWorker(ctx context.Context, m models.ShrinkMedia, stopAl
 			e.metrics.RecordStopped(displayCat, path)
 		}
 	}()
+
+	// Check schedule: wait until estimated finish time falls within active period
+	if len(e.engCfg.ActiveTime) > 0 {
+		processingDuration := time.Duration(m.ProcessingTime) * time.Second
+		now := time.Now()
+		
+		// Calculate wait time to ensure we finish during active hours
+		waitDuration := utils.CalculateWaitDurationForFinish(now, processingDuration, e.engCfg.ActiveTime)
+		
+		if waitDuration > 0 {
+			slog.Info("Schedule: waiting until active period", 
+				"path", m.Path,
+				"wait", waitDuration.Round(time.Second),
+				"estimated_finish", now.Add(waitDuration).Add(processingDuration).Format("15:04"))
+			
+			// Wait with context cancellation support
+			select {
+			case <-time.After(waitDuration):
+				slog.Info("Schedule: active period started, processing", "path", m.Path)
+			case <-ctx.Done():
+				slog.Info("Schedule: waiting cancelled", "path", m.Path)
+				return
+			}
+		}
+	}
 
 	result := e.processSingle(ctx, m)
 	stopped = true

@@ -87,6 +87,18 @@ Dry run to see what would be processed:
 shrink --simulate /path/to/media
 ```
 
+Only transcode during specific hours (e.g., overnight 10pm-6am):
+
+```bash
+shrink --active-time 10pm-6am /path/to/media
+```
+
+Multiple active periods (lunch and evening):
+
+```bash
+shrink --active-time 12pm-1pm --active-time 6pm-11pm /path/to/media
+```
+
 ## CLI Reference
 
 ### Global Flags
@@ -124,6 +136,26 @@ shrink --simulate /path/to/media
 | --text-only | Only process text/ebook files |
 | -s, --include | Include paths matching pattern |
 | -E, --exclude | Exclude paths matching pattern |
+
+### Schedule Flags
+
+| Flag | Description |
+| :--- | :--- |
+| --active-time | Only transcode if estimated finish time falls within active period. Supports multiple time ranges (e.g., `--active-time 2pm-8am --active-time 10am-1pm`). Accepts 12-hour (2pm, 8:30am) and 24-hour (14:00) formats. |
+
+#### Schedule Examples
+
+Only process during evening/night hours:
+
+```bash
+shrink --active-time 6pm-8am /path/to/media
+```
+
+Process during lunch break and evening:
+
+```bash
+shrink --active-time 12pm-1pm --active-time 6pm-10pm /path/to/media
+```
 
 ## License
 

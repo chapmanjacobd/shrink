@@ -3,8 +3,10 @@ package utils
 import (
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -693,4 +695,309 @@ func PrintTableToString(headers []string, rows [][]string) string {
 	}
 
 	return sb.String()
+}
+
+// ============================================================================
+// Schedule/Active Time Utilities
+// ============================================================================
+
+// TimeRange represents a time range like "2pm-8am" or "10am-1pm"
+type TimeRange struct {
+	Start time.Time
+	End   time.Time
+}
+
+// ParseTime parses time strings like "2pm", "8am", "10:30am", "14:00"
+func ParseTime(s string) (time.Time, error) {
+	s = strings.TrimSpace(strings.ToLower(s))
+	
+	// Try 24-hour format first (HH:MM or HH)
+	if regexp.MustCompile(`^\d{1,2}(:\d{2})?$`).MatchString(s) {
+		if strings.Contains(s, ":") {
+			return time.Parse("15:04", s)
+		}
+		return time.Parse("15", s)
+	}
+	
+	// Try 12-hour format with am/pm (2pm, 8am, 2:30pm, 10:30am)
+	if regexp.MustCompile(`^\d{1,2}(:\d{2})?\s*(am|pm)$`).MatchString(s) {
+		if strings.Contains(s, ":") {
+			return time.Parse("3:04pm", s)
+		}
+		return time.Parse("3pm", s)
+	}
+	
+	return time.Time{}, fmt.Errorf("invalid time format: %s (expected formats: 2pm, 8am, 10:30am, 14:00, etc.)", s)
+}
+
+// ParseTimeRange parses time range strings like "2pm-8am" or "10am-1pm"
+func ParseTimeRange(s string) (*TimeRange, error) {
+	parts := strings.Split(s, "-")
+	if len(parts) != 2 {
+		return nil, fmt.Errorf("invalid time range format: %s (expected format: 2pm-8am)", s)
+	}
+	
+	start, err := ParseTime(strings.TrimSpace(parts[0]))
+	if err != nil {
+		return nil, err
+	}
+	
+	end, err := ParseTime(strings.TrimSpace(parts[1]))
+	if err != nil {
+		return nil, err
+	}
+	
+	return &TimeRange{Start: start, End: end}, nil
+}
+
+// ParseTimeRanges parses multiple time range strings
+func ParseTimeRanges(ranges []string) ([]*TimeRange, error) {
+	result := make([]*TimeRange, 0, len(ranges))
+	for _, r := range ranges {
+		tr, err := ParseTimeRange(r)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, tr)
+	}
+	return result, nil
+}
+
+// IsTimeInRange checks if a given time is within a time range.
+// Handles overnight ranges (e.g., 10pm-6am).
+func IsTimeInRange(t time.Time, tr *TimeRange) bool {
+	// Normalize t to just the time component
+	tTime := time.Date(0, 1, 1, t.Hour(), t.Minute(), t.Second(), 0, t.Location())
+	startTime := time.Date(0, 1, 1, tr.Start.Hour(), tr.Start.Minute(), 0, 0, t.Location())
+	endTime := time.Date(0, 1, 1, tr.End.Hour(), tr.End.Minute(), 0, 0, t.Location())
+	
+	// Handle overnight ranges (e.g., 10pm-6am)
+	if startTime.After(endTime) {
+		// Range spans midnight: active if t >= start OR t <= end
+		return !tTime.Before(startTime) || !tTime.After(endTime)
+	}
+	
+	// Normal range: active if start <= t <= end
+	return !tTime.Before(startTime) && !tTime.After(endTime)
+}
+
+// IsTimeInAnyRange checks if a given time is within any of the provided time ranges
+func IsTimeInAnyRange(t time.Time, ranges []*TimeRange) bool {
+	for _, tr := range ranges {
+		if IsTimeInRange(t, tr) {
+			return true
+		}
+	}
+	return false
+}
+
+// CalculateWaitDuration calculates how long to wait until the next active time.
+// Returns 0 if currently in an active period.
+func CalculateWaitDuration(now time.Time, ranges []*TimeRange) time.Duration {
+	if len(ranges) == 0 {
+		return 0 // No schedule configured, no wait needed
+	}
+	
+	// If currently in an active period, no wait needed
+	if IsTimeInAnyRange(now, ranges) {
+		return 0
+	}
+	
+	// Find the next active time
+	nowTime := time.Date(0, 1, 1, now.Hour(), now.Minute(), now.Second(), 0, now.Location())
+	
+	var minWait time.Duration = time.Duration(24 * time.Hour) // Max possible wait
+	
+	for _, tr := range ranges {
+		startTime := time.Date(0, 1, 1, tr.Start.Hour(), tr.Start.Minute(), 0, 0, now.Location())
+		endTime := time.Date(0, 1, 1, tr.End.Hour(), tr.End.Minute(), 0, 0, now.Location())
+		
+		var wait time.Duration
+		
+		if startTime.After(endTime) {
+			// Overnight range (e.g., 10pm-6am)
+			if nowTime.After(startTime) {
+				// Past start time, next active is tomorrow's start
+				wait = 24*time.Hour - nowTime.Sub(startTime)
+			} else if nowTime.Before(endTime) {
+				// Before end time but not in range (shouldn't happen, but handle it)
+				wait = 0
+			} else {
+				// Between end and start, wait until next start
+				wait = startTime.Sub(nowTime)
+			}
+		} else {
+			// Normal range
+			if nowTime.Before(startTime) {
+				// Before start time, wait until start
+				wait = startTime.Sub(nowTime)
+			} else if nowTime.After(endTime) {
+				// After end time, wait until tomorrow's start
+				wait = 24*time.Hour - nowTime.Sub(startTime)
+			} else {
+				// In range (shouldn't happen as we checked above)
+				wait = 0
+			}
+		}
+		
+		if wait < minWait {
+			minWait = wait
+		}
+	}
+	
+	return minWait
+}
+
+// EstimateFinishTime calculates the estimated finish time given current time and processing duration
+func EstimateFinishTime(now time.Time, processingDuration time.Duration) time.Time {
+	return now.Add(processingDuration)
+}
+
+// WillFinishInActiveTime checks if processing started now would finish during an active period
+func WillFinishInActiveTime(now time.Time, processingDuration time.Duration, ranges []*TimeRange) bool {
+	if len(ranges) == 0 {
+		return true // No schedule configured, always OK
+	}
+	
+	finishTime := EstimateFinishTime(now, processingDuration)
+	return IsTimeInAnyRange(finishTime, ranges)
+}
+
+// CalculateWaitDurationForFinish calculates how long to wait so that processing
+// will finish during an active period.
+// Returns 0 if starting now would already finish during an active period.
+func CalculateWaitDurationForFinish(now time.Time, processingDuration time.Duration, ranges []*TimeRange) time.Duration {
+	if len(ranges) == 0 {
+		return 0 // No schedule configured, no wait needed
+	}
+	
+	// Check if starting now would finish in an active period
+	finishTime := now.Add(processingDuration)
+	if IsTimeInAnyRange(finishTime, ranges) {
+		return 0
+	}
+	
+	// Need to find a start time such that start + duration falls within an active period
+	// We'll check each active period and find the minimum wait time
+	
+	nowTime := time.Date(0, 1, 1, now.Hour(), now.Minute(), now.Second(), 0, now.Location())
+	procDuration := processingDuration
+	
+	var minWait time.Duration = time.Duration(48 * time.Hour) // Max reasonable wait
+	
+	for _, tr := range ranges {
+		startTime := time.Date(0, 1, 1, tr.Start.Hour(), tr.Start.Minute(), 0, 0, now.Location())
+		endTime := time.Date(0, 1, 1, tr.End.Hour(), tr.End.Minute(), 0, 0, now.Location())
+
+		// To finish after startTime (if we want to finish during the period),
+		// we need to start at: startTime - processingDuration
+		// But we actually want to finish DURING the period, so:
+		// - Earliest finish: startTime (start at startTime - duration)
+		// - Latest finish: endTime (start at endTime - duration)
+
+		// We want to start such that we finish between startTime and endTime
+		// So we need: startTime <= now + wait + duration <= endTime
+		// Which means: startTime - duration - now <= wait <= endTime - duration - now
+
+		// For overnight ranges, we need special handling
+		if startTime.After(endTime) {
+			// Overnight range (e.g., 10pm-6am)
+			// Active period spans midnight, so we have two segments:
+			// 1. From startTime to midnight (24:00)
+			// 2. From midnight (00:00) to endTime
+			
+			// Segment 1: finish between startTime and 24:00
+			// Need to start between (startTime - duration) and (24:00 - duration)
+			midnight := time.Date(0, 1, 1, 24, 0, 0, 0, now.Location())
+			
+			// Check if we can finish in segment 1 (before midnight)
+			latestStartSeg1 := midnight.Add(-procDuration)
+			if !latestStartSeg1.Before(nowTime) {
+				// Can start now or later and finish before midnight
+				wait := latestStartSeg1.Sub(nowTime)
+				if wait >= 0 && wait < minWait {
+					minWait = wait
+				}
+			}
+			
+			// Check if we can finish in segment 2 (after midnight, before endTime)
+			// This means starting tomorrow (or later)
+			earliestFinishSeg2 := startTime
+			latestFinishSeg2 := endTime
+			
+			// To finish at earliestFinishSeg2, need to start at earliestFinishSeg2 - duration
+			targetStart := earliestFinishSeg2.Add(-procDuration)
+			if targetStart.Before(nowTime) {
+				// Need to wait until tomorrow
+				targetStart = targetStart.Add(24 * time.Hour)
+			}
+			wait := targetStart.Sub(nowTime)
+			if wait >= 0 && wait < minWait {
+				// Verify this would finish in the active period
+				testFinish := now.Add(wait).Add(procDuration)
+				if IsTimeInRange(testFinish, tr) {
+					minWait = wait
+				}
+			}
+			
+			// Also check if we can finish later in segment 2
+			targetStart2 := latestFinishSeg2.Add(-procDuration)
+			if targetStart2.Before(nowTime) {
+				targetStart2 = targetStart2.Add(24 * time.Hour)
+			}
+			wait2 := targetStart2.Sub(nowTime)
+			if wait2 >= 0 && wait2 < minWait {
+				testFinish := now.Add(wait2).Add(procDuration)
+				if IsTimeInRange(testFinish, tr) {
+					minWait = wait2
+				}
+			}
+		} else {
+			// Normal range (doesn't span midnight)
+			// Need to finish between startTime and endTime
+			// So start between (startTime - duration) and (endTime - duration)
+			
+			// Try to finish at the end of the period (latest possible start)
+			targetStart := endTime.Add(-procDuration)
+			
+			if targetStart.Before(nowTime) {
+				// Target start is in the past, need to wait until tomorrow
+				targetStart = targetStart.Add(24 * time.Hour)
+			}
+			
+			wait := targetStart.Sub(nowTime)
+			if wait >= 0 && wait < minWait {
+				// Verify this would finish in the active period
+				testFinish := now.Add(wait).Add(procDuration)
+				if IsTimeInRange(testFinish, tr) {
+					minWait = wait
+				}
+			}
+			
+			// Also try to finish at the start of the period (earliest possible start)
+			// This might give a shorter wait if duration is long
+			targetStart2 := startTime.Add(-procDuration)
+			if targetStart2.Before(nowTime) {
+				targetStart2 = targetStart2.Add(24 * time.Hour)
+			}
+			wait2 := targetStart2.Sub(nowTime)
+			if wait2 >= 0 && wait2 < minWait {
+				testFinish := now.Add(wait2).Add(procDuration)
+				if IsTimeInRange(testFinish, tr) {
+					minWait = wait2
+				}
+			}
+		}
+	}
+	
+	// If minWait is still very large, it means processing duration is longer than
+	// any active period - in this case, we can't guarantee finishing during active time
+	// Just return 0 and let it process anyway
+	if minWait >= 48*time.Hour {
+		slog.Warn("Schedule: processing duration exceeds active period length, processing anyway",
+			"duration", processingDuration)
+		return 0
+	}
+	
+	return minWait
 }

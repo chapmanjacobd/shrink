@@ -24,6 +24,7 @@ type Config struct {
 	ParallelFlags    `embed:"" group:"Parallel"`
 	MemoryFlags      `embed:"" group:"Memory"`
 	TimeoutFlags     `embed:"" group:"Timeout"`
+	ScheduleFlags    `embed:"" group:"Schedule"`
 
 	ContinueFrom string `help:"Skip media until specific file path is seen" env:"SHRINK_CONTINUE_FROM"`
 	Move         string `help:"Directory to move successful files" env:"SHRINK_MOVE"`
@@ -143,6 +144,10 @@ type TimeoutFlags struct {
 	MinSplitSegment       string  `default:"90s" help:"Minimum split segment duration" env:"SHRINK_MIN_SPLIT_SEGMENT"`
 	DeleteUnplayable      bool    `help:"Delete unplayable files" env:"SHRINK_DELETE_UNPLAYABLE"`
 	AlwaysSplit           bool    `help:"Always split audio on silence" env:"SHRINK_ALWAYS_SPLIT"`
+}
+
+type ScheduleFlags struct {
+	ActiveTime []string `name:"active-time" help:"Only transcode if estimated finish time falls within active period (e.g., 2pm-8am, 10am-1pm). Can be specified multiple times." env:"SHRINK_ACTIVE_TIME"`
 }
 
 func (c *Config) ApplyProfile() {

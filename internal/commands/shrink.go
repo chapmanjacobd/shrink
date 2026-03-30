@@ -96,6 +96,17 @@ func (c *ShrinkCmd) Run(ctx *kong.Context) error {
 		return nil
 	}
 
+	// Parse active time ranges
+	var activeTimeRanges []*utils.TimeRange
+	if len(c.ActiveTime) > 0 {
+		var err error
+		activeTimeRanges, err = utils.ParseTimeRanges(c.ActiveTime)
+		if err != nil {
+			return fmt.Errorf("invalid --active-time: %w", err)
+		}
+		slog.Info("Schedule configured", "active_periods", c.ActiveTime)
+	}
+
 	// Initialize Engine
 	engCfg := EngineConfig{
 		VideoThreads:    c.VideoThreads,
@@ -106,6 +117,7 @@ func (c *ShrinkCmd) Run(ctx *kong.Context) error {
 		AnalysisThreads: c.AnalysisThreads,
 		Timeout:         c.TimeoutFlags,
 		Move:            c.Move,
+		ActiveTime:      activeTimeRanges,
 	}
 	engine := NewEngine(c, cfg, engCfg, c.sqlDBs, registry, metrics)
 
