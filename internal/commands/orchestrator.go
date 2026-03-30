@@ -543,6 +543,9 @@ func (e *Engine) processMedia(ctx context.Context, media []models.ShrinkMedia) {
 			select {
 			case <-ticker.C:
 				e.metrics.PrintProgress()
+			case <-ctx.Done():
+				e.metrics.SetCancelled(true)
+				e.metrics.PrintProgress()
 			case <-done:
 				e.metrics.PrintProgress() // Final update
 				return

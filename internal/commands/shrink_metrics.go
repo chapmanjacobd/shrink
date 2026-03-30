@@ -108,6 +108,7 @@ type ShrinkMetrics struct {
 	lastPrintTime time.Time
 	linesPrinted  int // Track how many lines we printed for cursor repositioning
 	isTTY         bool
+	isCancelled   bool // Track if context has been cancelled
 }
 
 // NewShrinkMetrics creates a new metrics tracker
@@ -122,6 +123,13 @@ func NewShrinkMetrics() *ShrinkMetrics {
 // IsTTY returns whether the output is a TTY
 func (m *ShrinkMetrics) IsTTY() bool {
 	return m.isTTY
+}
+
+// SetCancelled sets the cancellation flag
+func (m *ShrinkMetrics) SetCancelled(cancelled bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.isCancelled = cancelled
 }
 
 // RecordStarted records that a media item is being processed
@@ -432,7 +440,11 @@ func (m *ShrinkMetrics) PrintProgress() {
 	if maxRunningLines > 2 && len(m.runningFiles) > 0 {
 		sb.WriteString(clearSeq + "\n")
 		// Current running files section
-		sb.WriteString("Currently processing:" + clearSeq + "\n")
+		if m.isCancelled {
+			sb.WriteString("Cleaning up:" + clearSeq + "\n")
+		} else {
+			sb.WriteString("Currently processing:" + clearSeq + "\n")
+		}
 
 		// Determine how many files to show
 		filesToShow := min(len(m.runningFiles),
