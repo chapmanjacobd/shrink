@@ -320,17 +320,25 @@ func (e *Engine) analyzeCategory(media []models.ShrinkMedia, indices []int, cate
 	}
 
 	// Dynamic scaling monitor
+	// Recalculates worker target only after sufficient time AND completions
+	// to avoid scaling decisions based on incomplete long-running jobs
 	monitorDone := make(chan struct{})
 	go func() {
-		ticker := time.NewTicker(4500 * time.Millisecond)
+		ticker := time.NewTicker(500 * time.Millisecond)
 		defer ticker.Stop()
 
 		var lastCompleted int64
 		var lastFailed int64
 		var lastThroughput int64
 		direction := int32(1)
+		var accumulatedCompleted int64
+		var lastRecalcTime time.Time = time.Now()
 		const failureHalfLife = 5.0 * 60.0          // 5 minutes in seconds
 		const decayFactor = 0.693 / failureHalfLife // ln(2) / halfLife for exponential decay
+
+		// Minimum thresholds before recalculating worker target
+		const minRecalcInterval = 2 * time.Second
+		const minCompletedForRecalc = 20
 
 		for {
 			select {
@@ -341,6 +349,26 @@ func (e *Engine) analyzeCategory(media []models.ShrinkMedia, indices []int, cate
 				failedCount := failed - lastFailed
 				lastCompleted = completed
 				lastFailed = failed
+
+				// Accumulate completions since last recalc
+				accumulatedCompleted += throughput
+
+				// Only recalc if both time and completion thresholds are met
+				timeSinceRecalc := time.Since(lastRecalcTime)
+				if timeSinceRecalc < minRecalcInterval || accumulatedCompleted < minCompletedForRecalc {
+					// Still waiting for enough data - decay failures but don't scale
+					oldBits := recentFailures.Load()
+					recentFailCount := math.Float64frombits(oldBits)
+					if recentFailCount > 0 {
+						decay := math.Exp(-decayFactor * 0.5) // 0.5 seconds since last tick
+						recentFailures.Store(math.Float64bits(recentFailCount * decay))
+					}
+					continue
+				}
+
+				// Reset accumulation counter and timer for next cycle
+				accumulatedCompleted = 0
+				lastRecalcTime = time.Now()
 
 				current := concurrency.Load()
 
@@ -359,7 +387,7 @@ func (e *Engine) analyzeCategory(media []models.ShrinkMedia, indices []int, cate
 				oldBits := recentFailures.Load()
 				recentFailCount := math.Float64frombits(oldBits)
 				if recentFailCount > 0 {
-					decay := math.Exp(-decayFactor * 4.5) // 4.5 seconds since last tick
+					decay := math.Exp(-decayFactor * timeSinceRecalc.Seconds())
 					recentFailures.Store(math.Float64bits(recentFailCount * decay))
 				}
 

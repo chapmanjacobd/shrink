@@ -380,7 +380,7 @@ func (p *ArchiveProcessor) EstimateSizeForArchive(m *models.ShrinkMedia, cfg *mo
 
 	// Check for multi-part archives and verify all parts exist
 	result.TotalArchiveSize = m.Size
-	
+
 	// Only call getPartFiles if lsar failed for a reason other than timeout
 	// (timeout is likely due to large archives, not missing parts)
 	var partFiles []string
