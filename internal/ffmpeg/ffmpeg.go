@@ -35,7 +35,8 @@ func (p *FFmpegProcessor) Process(ctx context.Context, m *models.ShrinkMedia, cf
 	// Probe the file
 	probe, err := ProbeMedia(m.Path)
 	if err != nil {
-		return models.ProcessResult{SourcePath: m.Path, Error: err}
+		// Wrap ffprobe errors with a marker for detection
+		return models.ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("ffprobe failed: %w", err)}
 	}
 
 	// Check for streams

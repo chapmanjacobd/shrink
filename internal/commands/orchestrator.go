@@ -663,7 +663,7 @@ func (e *Engine) processSingle(ctx context.Context, m models.ShrinkMedia) models
 
 	// Handle processing errors
 	if result.Error != nil {
-		return e.handleProcessingError(m, result, elapsedSeconds)
+		return e.handleProcessingError(processCtx, m, result, elapsedSeconds)
 	}
 
 	// Handle unsuccessful processing (e.g., invalid output)
@@ -716,7 +716,7 @@ func (e *Engine) captureTimestamps(path string) (time.Time, time.Time, error) {
 }
 
 // handleProcessingError handles errors from processing.
-func (e *Engine) handleProcessingError(m models.ShrinkMedia, result models.ProcessResult, elapsed float64) models.ProcessResult {
+func (e *Engine) handleProcessingError(ctx context.Context, m models.ShrinkMedia, result models.ProcessResult, elapsed float64) models.ProcessResult {
 	// Log the error (including timeouts and cancellations for visibility)
 	if result.Error == context.Canceled {
 		slog.Warn("Processing canceled by user", "path", m.Path)
@@ -733,21 +733,41 @@ func (e *Engine) handleProcessingError(m models.ShrinkMedia, result models.Proce
 	}
 	e.metrics.RecordFailure(m.DisplayCategory(), elapsed)
 
-	// Don't move or delete files if processing was interrupted by user or system signal
-	isInterrupted := result.Error == context.Canceled || strings.Contains(result.Error.Error(), "signal: killed")
+	// Check for user-initiated cancellation (Ctrl+C)
+	// When using systemd-run --scope, both Ctrl+C and OOM result in "signal: killed"
+	// We distinguish by checking if the parent context was canceled
+	isUserCancel := result.Error == context.Canceled ||
+		(ctx.Err() == context.Canceled && strings.Contains(result.Error.Error(), "signal: killed"))
 
-	// Check for memory limit exceeded (environment error)
-	isEnvironmentErr := result.StopAll || strings.Contains(result.Error.Error(), "exceeded memory limit")
+	// Check for environment errors (OOM kill, memory limit, hardware failure)
+	// OOM kills happen when context is NOT canceled but process receives signal
+	// These are file-specific errors, not environment-wide (don't stop all processing)
+	isOOMKill := result.StopAll ||
+		strings.Contains(result.Error.Error(), "exceeded memory limit") ||
+		(ctx.Err() == nil && strings.Contains(result.Error.Error(), "signal: killed"))
 
-	if isInterrupted || isEnvironmentErr {
-		// Don't mark file status - allow retry on next run
-		slog.Debug("Skipping database update due to interrupt/environment error", "path", m.Path)
+	if isUserCancel {
+		// User canceled - don't mark file status, allow retry on next run
+		slog.Debug("Skipping database update due to user cancellation", "path", m.Path)
+	} else if isOOMKill {
+		// OOM kill - file is likely still playable, just heavy to convert
+		// Mark as error but don't delete or mark as broken/unplayable
+		slog.Debug("Marking file as error due to OOM/environment kill", "path", m.Path)
+		if e.cfg.Common.MoveBroken != "" {
+			e.ui.MoveToBroken(m.Path, result.PartFiles)
+			db.MarkBroken(e.sqlDBs, m.Path)
+		} else {
+			// Just mark as error - don't delete (file is likely still playable)
+			db.MarkProcessingError(e.sqlDBs, m.Path)
+		}
 	} else {
 		// Mark as processing error or broken based on context
 		if e.cfg.Common.MoveBroken != "" {
 			e.ui.MoveToBroken(m.Path, result.PartFiles)
 			db.MarkBroken(e.sqlDBs, m.Path)
-		} else if e.cfg.Common.DeleteUnplayable {
+		} else if e.cfg.Common.DeleteUnplayable && isUnplayableVideoAudio(m, result.Error) {
+			// Only delete if ffprobe failed on video/audio files
+			// For other media types, ffprobe failure is too risky to delete
 			db.MarkDeleted(e.sqlDBs, m.Path)
 			db.MarkUnplayable(e.sqlDBs, m.Path)
 			os.Remove(m.Path)
@@ -767,13 +787,29 @@ func (e *Engine) handleProcessingError(m models.ShrinkMedia, result models.Proce
 		}
 	}
 	if result.SourcePath != "" && result.SourcePath != m.Path {
-		// Only remove intermediate source if we're not deleting unplayable (already handled)
-		if !e.cfg.Common.DeleteUnplayable && !isInterrupted && !isEnvironmentErr {
+		// Only remove intermediate source if we're not deleting unplayable and not user-canceled
+		if !isUnplayableVideoAudio(m, result.Error) && !isUserCancel {
 			os.Remove(result.SourcePath)
 		}
 	}
 
 	return result
+}
+
+// isUnplayableVideoAudio checks if the error indicates an unplayable video/audio file.
+// This is used to determine if --delete-unplayable should apply.
+// Only returns true for video/audio files where ffprobe or ffmpeg detected corruption.
+func isUnplayableVideoAudio(m models.ShrinkMedia, err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	// Check if error is from ffprobe or file corruption
+	if !strings.Contains(errStr, "ffprobe failed") && !strings.Contains(errStr, "file error") {
+		return false
+	}
+	// Only apply to video/audio categories
+	return m.Category == "Video" || m.Category == "Video4K" || m.Category == "Audio"
 }
 
 // handleUnsuccessfulProcessing handles processing that succeeded but produced no valid output.
@@ -785,7 +821,9 @@ func (e *Engine) handleUnsuccessfulProcessing(m models.ShrinkMedia, result model
 		// handleUnsuccessfulProcessing doesn't have PartFiles, but we can call it with nil
 		e.ui.MoveToBroken(m.Path, nil)
 		db.MarkBroken(e.sqlDBs, m.Path)
-	} else if e.cfg.Common.DeleteUnplayable {
+	} else if e.cfg.Common.DeleteUnplayable && isUnplayableVideoAudio(m, result.Error) {
+		// Only delete if ffprobe failed on video/audio files
+		// For other media types, ffprobe failure is too risky to delete
 		db.MarkDeleted(e.sqlDBs, m.Path)
 		db.MarkUnplayable(e.sqlDBs, m.Path)
 		os.Remove(m.Path)
@@ -804,7 +842,7 @@ func (e *Engine) handleUnsuccessfulProcessing(m models.ShrinkMedia, result model
 		}
 	}
 	if result.SourcePath != "" && result.SourcePath != m.Path {
-		if !e.cfg.Common.DeleteUnplayable {
+		if !isUnplayableVideoAudio(m, result.Error) {
 			os.Remove(result.SourcePath)
 		}
 	}
