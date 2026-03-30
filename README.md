@@ -37,6 +37,26 @@ go install -tags fts5 github.com/chapmanjacobd/shrink/cmd/shrink@latest
 | unar | Archive extraction (`unar` and `lsar`) |
 | ocrmypdf | (Optional) OCR for PDF files |
 
+### OS-Specific Installation Notes
+
+**Fedora/RHEL:**
+- ImageMagick requires the `ImageMagick-heic` package for HEIC/AVIF support:
+  ```bash
+  sudo dnf install ImageMagick-heic
+  ```
+
+**macOS:**
+- Calibre may require Rosetta 2 on Apple Silicon if the installed version is not yet native:
+  ```bash
+  softwareupdate --install-rosetta
+  ```
+
+**Ubuntu/Debian:**
+- FFmpeg may need the `ffmpeg-extras` package for full codec support (e.g., H.265, AV1):
+  ```bash
+  sudo apt install ffmpeg-extras
+  ```
+
 ## Quick Start
 
 ### Basic Usage
