@@ -141,7 +141,7 @@ shrink --active-time 12pm-1pm --active-time 6pm-11pm /path/to/media
 
 | Flag | Description |
 | :--- | :--- |
-| --active-time | Only transcode if estimated finish time falls within active period. Supports multiple time ranges (e.g., `--active-time 2pm-8am --active-time 10am-1pm`). Accepts 12-hour (2pm, 8:30am) and 24-hour (14:00) formats. |
+| --active-time | Only transcode if estimated finish time falls within active period. Supports multiple time ranges. Accepts 12-hour (2pm, 8:30am) and 24-hour (14:00, 23:30) formats. |
 
 #### Schedule Examples
 
@@ -155,6 +155,12 @@ Process during lunch break and evening:
 
 ```bash
 shrink --active-time 12pm-1pm --active-time 6pm-10pm /path/to/media
+```
+
+Using 24-hour format:
+
+```bash
+shrink --active-time 11:30-23:00 /path/to/media
 ```
 
 ## License

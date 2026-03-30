@@ -57,6 +57,8 @@ func TestParseTimeRange(t *testing.T) {
 		{"10am-1pm", "10am-1pm", false, 10, 13},
 		{"9am-5pm", "9am-5pm", false, 9, 17},
 		{"10pm-6am", "10pm-6am", false, 22, 6},
+		{"11:30-23:00", "11:30-23:00", false, 11, 23},
+		{"14:00-18:30", "14:00-18:30", false, 14, 18},
 		{"invalid", "invalid", true, 0, 0},
 		{"2pm", "2pm", true, 0, 0},
 	}
@@ -70,8 +72,9 @@ func TestParseTimeRange(t *testing.T) {
 			}
 			if !tt.wantErr {
 				if got.Start.Hour() != tt.wantStartHour || got.End.Hour() != tt.wantEndHour {
-					t.Errorf("ParseTimeRange(%q) = %02d:00-%02d:00, want %02d:00-%02d:00",
-						tt.input, got.Start.Hour(), got.End.Hour(), tt.wantStartHour, tt.wantEndHour)
+					t.Errorf("ParseTimeRange(%q) = %02d:%02d-%02d:%02d, want %02d:%02d-%02d:%02d",
+						tt.input, got.Start.Hour(), got.Start.Minute(), got.End.Hour(), got.End.Minute(),
+						tt.wantStartHour, 0, tt.wantEndHour, 0)
 				}
 			}
 		})
