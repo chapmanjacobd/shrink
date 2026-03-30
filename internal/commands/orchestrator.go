@@ -403,13 +403,9 @@ func (e *Engine) analyzeCategory(media []models.ShrinkMedia, indices []int, cate
 			select {
 			case <-ticker.C:
 				completed := atomic.LoadInt64(&completedJobs)
-				failed := atomic.LoadInt64(&failedJobs)
 				workers := atomic.LoadInt32(&activeWorkers)
-				if completed > 0 || workers > 0 || failed > 0 {
+				if completed > 0 || workers > 0 {
 					status := fmt.Sprintf("\rAnalyzing %d/%d %s files", completed, len(indices), strings.ToLower(category))
-					if failed > 0 {
-						status += fmt.Sprintf(" (%d failed)", failed)
-					}
 					if workers > 0 {
 						status += fmt.Sprintf(" (%d workers)", workers)
 					} else if totalWorkerSamples > 0 {
@@ -421,12 +417,8 @@ func (e *Engine) analyzeCategory(media []models.ShrinkMedia, indices []int, cate
 			case <-progressDone:
 				// Final update
 				completed := atomic.LoadInt64(&completedJobs)
-				failed := atomic.LoadInt64(&failedJobs)
 				workers := atomic.LoadInt32(&activeWorkers)
 				status := fmt.Sprintf("\rAnalyzed %d/%d %s files", completed, len(indices), strings.ToLower(category))
-				if failed > 0 {
-					status += fmt.Sprintf(" (%d failed)", failed)
-				}
 				if workers == 0 && totalWorkerSamples > 0 {
 					avgWorkers := float64(workerSum) / float64(totalWorkerSamples)
 					status += fmt.Sprintf(" (avg: %.1f workers)", avgWorkers)
