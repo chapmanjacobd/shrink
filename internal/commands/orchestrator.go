@@ -393,13 +393,13 @@ func (e *Engine) analyzeCategory(media []models.ShrinkMedia, indices []int, cate
 
 				// Clamp down max workers based on recent (decayed) failure count
 				// Use decayed count so old errors gradually lose impact
-				maxWorkers := int32(300)
+				maxWorkers := int32(160)
 				effectiveFailures := int(recentFailCount + 0.5) // Round to nearest int
 				if effectiveFailures > 0 {
 					// Aggressively reduce max workers as failures accumulate
 					// Each failure reduces max by 20, minimum 10 workers
 					// 1 failure = 280, 5 failures = 200, 10 failures = 100, 15 failures = 10
-					maxWorkers = max(10, 300-int32(effectiveFailures)*20)
+					maxWorkers = max(10, 160-int32(effectiveFailures)*20)
 				}
 
 				newTarget := min(max(current+(direction*2), 1), maxWorkers)
