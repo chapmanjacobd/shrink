@@ -110,7 +110,16 @@ func GetImageDimensions(path string) (int, int, error) {
 		return 0, 0, err
 	}
 
+	// First, try video streams (standard for most images including AVIF)
 	for _, stream := range probe.VideoStreams {
+		if stream.Width > 0 && stream.Height > 0 {
+			return stream.Width, stream.Height, nil
+		}
+	}
+
+	// Fallback: check all streams for any with valid dimensions
+	// This handles edge cases where ffprobe reports codec_type differently
+	for _, stream := range probe.Streams {
 		if stream.Width > 0 && stream.Height > 0 {
 			return stream.Width, stream.Height, nil
 		}
