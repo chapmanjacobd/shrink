@@ -24,19 +24,19 @@ type FFProbeResult struct {
 
 // FFProbeStream represents a stream in ffprobe output
 type FFProbeStream struct {
-	Tags        map[string]string `json:"tags"`
-	Disposition map[string]int    `json:"disposition"`
-	CodecType   string            `json:"codec_type"`
-	CodecName   string            `json:"codec_name"`
-	Duration    string            `json:"duration"`
-	NbFrames    string            `json:"nb_frames"`
-	RFrameRate  string            `json:"r_frame_rate"`
-	BitRate     string            `json:"bit_rate"`
-	SampleRate  string            `json:"sample_rate"`
-	Index       int               `json:"index"`
-	Width       int               `json:"width"`
-	Height      int               `json:"height"`
-	Channels    int               `json:"channels"`
+	Tags        map[string]any `json:"tags"`
+	Disposition map[string]int `json:"disposition"`
+	CodecType   string         `json:"codec_type"`
+	CodecName   string         `json:"codec_name"`
+	Duration    string         `json:"duration"`
+	NbFrames    string         `json:"nb_frames"`
+	RFrameRate  string         `json:"r_frame_rate"`
+	BitRate     string         `json:"bit_rate"`
+	SampleRate  string         `json:"sample_rate"`
+	Index       int            `json:"index"`
+	Width       int            `json:"width"`
+	Height      int            `json:"height"`
+	Channels    int            `json:"channels"`
 }
 
 // FFProbeFormat represents the format section of ffprobe output

@@ -447,12 +447,14 @@ func (p *FFmpegProcessor) detectSilence(path string) []string {
 func (p *FFmpegProcessor) detectStereoMode(stream *FFProbeStream) string {
 	tags := stream.Tags
 	if tags != nil {
-		stereoMode := strings.ToLower(tags["stereo_mode"])
-		switch stereoMode {
-		case "left_right", "side_by_side", "sbs":
-			return "sbs"
-		case "top_bottom", "over_under", "tb", "ou":
-			return "ou"
+		if v, ok := tags["stereo_mode"].(string); ok {
+			stereoMode := strings.ToLower(v)
+			switch stereoMode {
+			case "left_right", "side_by_side", "sbs":
+				return "sbs"
+			case "top_bottom", "over_under", "tb", "ou":
+				return "ou"
+			}
 		}
 	}
 

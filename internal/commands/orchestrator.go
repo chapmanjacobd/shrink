@@ -519,16 +519,16 @@ func (e *Engine) processWorker(ctx context.Context, m models.ShrinkMedia, stopAl
 	if len(e.engCfg.ActiveTime) > 0 {
 		processingDuration := time.Duration(m.ProcessingTime) * time.Second
 		now := time.Now()
-		
+
 		// Calculate wait time to ensure we finish during active hours
 		waitDuration := utils.CalculateWaitDurationForFinish(now, processingDuration, e.engCfg.ActiveTime)
-		
+
 		if waitDuration > 0 {
-			slog.Info("Schedule: waiting until active period", 
+			slog.Info("Schedule: waiting until active period",
 				"path", m.Path,
 				"wait", waitDuration.Round(time.Second),
 				"estimated_finish", now.Add(waitDuration).Add(processingDuration).Format("15:04"))
-			
+
 			// Wait with context cancellation support
 			select {
 			case <-time.After(waitDuration):

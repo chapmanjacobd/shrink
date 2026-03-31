@@ -710,7 +710,7 @@ type TimeRange struct {
 // ParseTime parses time strings like "2pm", "8am", "10:30am", "14:00"
 func ParseTime(s string) (time.Time, error) {
 	s = strings.TrimSpace(strings.ToLower(s))
-	
+
 	// Try 24-hour format first (HH:MM or HH)
 	if regexp.MustCompile(`^\d{1,2}(:\d{2})?$`).MatchString(s) {
 		if strings.Contains(s, ":") {
@@ -718,7 +718,7 @@ func ParseTime(s string) (time.Time, error) {
 		}
 		return time.Parse("15", s)
 	}
-	
+
 	// Try 12-hour format with am/pm (2pm, 8am, 2:30pm, 10:30am)
 	if regexp.MustCompile(`^\d{1,2}(:\d{2})?\s*(am|pm)$`).MatchString(s) {
 		if strings.Contains(s, ":") {
@@ -726,7 +726,7 @@ func ParseTime(s string) (time.Time, error) {
 		}
 		return time.Parse("3pm", s)
 	}
-	
+
 	return time.Time{}, fmt.Errorf("invalid time format: %s (expected formats: 2pm, 8am, 10:30am, 14:00, etc.)", s)
 }
 
@@ -736,17 +736,17 @@ func ParseTimeRange(s string) (*TimeRange, error) {
 	if len(parts) != 2 {
 		return nil, fmt.Errorf("invalid time range format: %s (expected format: 2pm-8am)", s)
 	}
-	
+
 	start, err := ParseTime(strings.TrimSpace(parts[0]))
 	if err != nil {
 		return nil, err
 	}
-	
+
 	end, err := ParseTime(strings.TrimSpace(parts[1]))
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return &TimeRange{Start: start, End: end}, nil
 }
 
@@ -770,13 +770,13 @@ func IsTimeInRange(t time.Time, tr *TimeRange) bool {
 	tTime := time.Date(0, 1, 1, t.Hour(), t.Minute(), t.Second(), 0, t.Location())
 	startTime := time.Date(0, 1, 1, tr.Start.Hour(), tr.Start.Minute(), 0, 0, t.Location())
 	endTime := time.Date(0, 1, 1, tr.End.Hour(), tr.End.Minute(), 0, 0, t.Location())
-	
+
 	// Handle overnight ranges (e.g., 10pm-6am)
 	if startTime.After(endTime) {
 		// Range spans midnight: active if t >= start OR t <= end
 		return !tTime.Before(startTime) || !tTime.After(endTime)
 	}
-	
+
 	// Normal range: active if start <= t <= end
 	return !tTime.Before(startTime) && !tTime.After(endTime)
 }
@@ -797,23 +797,23 @@ func CalculateWaitDuration(now time.Time, ranges []*TimeRange) time.Duration {
 	if len(ranges) == 0 {
 		return 0 // No schedule configured, no wait needed
 	}
-	
+
 	// If currently in an active period, no wait needed
 	if IsTimeInAnyRange(now, ranges) {
 		return 0
 	}
-	
+
 	// Find the next active time
 	nowTime := time.Date(0, 1, 1, now.Hour(), now.Minute(), now.Second(), 0, now.Location())
-	
+
 	var minWait time.Duration = time.Duration(24 * time.Hour) // Max possible wait
-	
+
 	for _, tr := range ranges {
 		startTime := time.Date(0, 1, 1, tr.Start.Hour(), tr.Start.Minute(), 0, 0, now.Location())
 		endTime := time.Date(0, 1, 1, tr.End.Hour(), tr.End.Minute(), 0, 0, now.Location())
-		
+
 		var wait time.Duration
-		
+
 		if startTime.After(endTime) {
 			// Overnight range (e.g., 10pm-6am)
 			if nowTime.After(startTime) {
@@ -839,12 +839,12 @@ func CalculateWaitDuration(now time.Time, ranges []*TimeRange) time.Duration {
 				wait = 0
 			}
 		}
-		
+
 		if wait < minWait {
 			minWait = wait
 		}
 	}
-	
+
 	return minWait
 }
 
@@ -858,7 +858,7 @@ func WillFinishInActiveTime(now time.Time, processingDuration time.Duration, ran
 	if len(ranges) == 0 {
 		return true // No schedule configured, always OK
 	}
-	
+
 	finishTime := EstimateFinishTime(now, processingDuration)
 	return IsTimeInAnyRange(finishTime, ranges)
 }
@@ -870,21 +870,21 @@ func CalculateWaitDurationForFinish(now time.Time, processingDuration time.Durat
 	if len(ranges) == 0 {
 		return 0 // No schedule configured, no wait needed
 	}
-	
+
 	// Check if starting now would finish in an active period
 	finishTime := now.Add(processingDuration)
 	if IsTimeInAnyRange(finishTime, ranges) {
 		return 0
 	}
-	
+
 	// Need to find a start time such that start + duration falls within an active period
 	// We'll check each active period and find the minimum wait time
-	
+
 	nowTime := time.Date(0, 1, 1, now.Hour(), now.Minute(), now.Second(), 0, now.Location())
 	procDuration := processingDuration
-	
+
 	var minWait time.Duration = time.Duration(48 * time.Hour) // Max reasonable wait
-	
+
 	for _, tr := range ranges {
 		startTime := time.Date(0, 1, 1, tr.Start.Hour(), tr.Start.Minute(), 0, 0, now.Location())
 		endTime := time.Date(0, 1, 1, tr.End.Hour(), tr.End.Minute(), 0, 0, now.Location())
@@ -905,11 +905,11 @@ func CalculateWaitDurationForFinish(now time.Time, processingDuration time.Durat
 			// Active period spans midnight, so we have two segments:
 			// 1. From startTime to midnight (24:00)
 			// 2. From midnight (00:00) to endTime
-			
+
 			// Segment 1: finish between startTime and 24:00
 			// Need to start between (startTime - duration) and (24:00 - duration)
 			midnight := time.Date(0, 1, 1, 24, 0, 0, 0, now.Location())
-			
+
 			// Check if we can finish in segment 1 (before midnight)
 			latestStartSeg1 := midnight.Add(-procDuration)
 			if !latestStartSeg1.Before(nowTime) {
@@ -919,12 +919,12 @@ func CalculateWaitDurationForFinish(now time.Time, processingDuration time.Durat
 					minWait = wait
 				}
 			}
-			
+
 			// Check if we can finish in segment 2 (after midnight, before endTime)
 			// This means starting tomorrow (or later)
 			earliestFinishSeg2 := startTime
 			latestFinishSeg2 := endTime
-			
+
 			// To finish at earliestFinishSeg2, need to start at earliestFinishSeg2 - duration
 			targetStart := earliestFinishSeg2.Add(-procDuration)
 			if targetStart.Before(nowTime) {
@@ -939,7 +939,7 @@ func CalculateWaitDurationForFinish(now time.Time, processingDuration time.Durat
 					minWait = wait
 				}
 			}
-			
+
 			// Also check if we can finish later in segment 2
 			targetStart2 := latestFinishSeg2.Add(-procDuration)
 			if targetStart2.Before(nowTime) {
@@ -956,15 +956,15 @@ func CalculateWaitDurationForFinish(now time.Time, processingDuration time.Durat
 			// Normal range (doesn't span midnight)
 			// Need to finish between startTime and endTime
 			// So start between (startTime - duration) and (endTime - duration)
-			
+
 			// Try to finish at the end of the period (latest possible start)
 			targetStart := endTime.Add(-procDuration)
-			
+
 			if targetStart.Before(nowTime) {
 				// Target start is in the past, need to wait until tomorrow
 				targetStart = targetStart.Add(24 * time.Hour)
 			}
-			
+
 			wait := targetStart.Sub(nowTime)
 			if wait >= 0 && wait < minWait {
 				// Verify this would finish in the active period
@@ -973,7 +973,7 @@ func CalculateWaitDurationForFinish(now time.Time, processingDuration time.Durat
 					minWait = wait
 				}
 			}
-			
+
 			// Also try to finish at the start of the period (earliest possible start)
 			// This might give a shorter wait if duration is long
 			targetStart2 := startTime.Add(-procDuration)
@@ -989,7 +989,7 @@ func CalculateWaitDurationForFinish(now time.Time, processingDuration time.Durat
 			}
 		}
 	}
-	
+
 	// If minWait is still very large, it means processing duration is longer than
 	// any active period - in this case, we can't guarantee finishing during active time
 	// Just return 0 and let it process anyway
@@ -998,6 +998,6 @@ func CalculateWaitDurationForFinish(now time.Time, processingDuration time.Durat
 			"duration", processingDuration)
 		return 0
 	}
-	
+
 	return minWait
 }

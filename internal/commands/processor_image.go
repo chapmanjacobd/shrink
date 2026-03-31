@@ -129,9 +129,12 @@ func (p *ImageProcessor) processImage(ctx context.Context, m *models.ShrinkMedia
 			os.Remove(outputPath)
 			return models.ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("AVIF file has invalid dimensions: %dx%d", width, height)}
 		}
-		if width > cfg.Image.MaxImageWidth || height > cfg.Image.MaxImageHeight {
+		// Allow buffer percentage plus 10px tolerance for non-resize conversions
+		maxWidth := float64(cfg.Image.MaxImageWidth)*(1+cfg.Common.MaxWidthBuffer) + 10
+		maxHeight := float64(cfg.Image.MaxImageHeight)*(1+cfg.Common.MaxHeightBuffer) + 10
+		if float64(width) > maxWidth || float64(height) > maxHeight {
 			os.Remove(outputPath)
-			return models.ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("AVIF file exceeds max dimensions: %dx%d > %dx%d", width, height, cfg.Image.MaxImageWidth, cfg.Image.MaxImageHeight)}
+			return models.ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("AVIF file exceeds max dimensions: %dx%d > %.0fx%.0f", width, height, maxWidth, maxHeight)}
 		}
 	}
 
