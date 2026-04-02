@@ -1013,17 +1013,8 @@ func (p *ArchiveProcessor) lsarWithStatus(path string) ([]models.ShrinkMedia, bo
 
 	jsonBytes := extractLSARJSON(output)
 
-	// Parse JSON to check for lsarError field
-	var rawJSON map[string]any
-	if jsonErr := json.Unmarshal(jsonBytes, &rawJSON); jsonErr == nil {
-		if lsarErr, ok := rawJSON["lsarError"]; ok {
-			if lsarErrNum, ok := lsarErr.(float64); ok && lsarErrNum != 0 {
-				lsarFailed = true
-			}
-		}
-	}
-
 	var result struct {
+		LsarError    float64 `json:"lsarError"`
 		LsarContents []struct {
 			Filename       string `json:"XADFileName"`
 			Size           int64  `json:"XADFileSize"`
@@ -1037,6 +1028,10 @@ func (p *ArchiveProcessor) lsarWithStatus(path string) ([]models.ShrinkMedia, bo
 		}
 		slog.Error("Failed to unmarshal lsar output", "error", err, "path", path)
 		return nil, false, false
+	}
+
+	if result.LsarError != 0 {
+		lsarFailed = true
 	}
 
 	var media []models.ShrinkMedia

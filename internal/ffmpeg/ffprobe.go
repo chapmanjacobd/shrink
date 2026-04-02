@@ -24,8 +24,8 @@ type FFProbeResult struct {
 
 // FFProbeStream represents a stream in ffprobe output
 type FFProbeStream struct {
-	Tags        map[string]any `json:"tags"`
-	Disposition map[string]int `json:"disposition"`
+	Tags        map[string]string `json:"tags"`
+	Disposition map[string]int    `json:"disposition"`
 	CodecType   string         `json:"codec_type"`
 	CodecName   string         `json:"codec_name"`
 	Duration    string         `json:"duration"`
