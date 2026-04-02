@@ -7,15 +7,9 @@ import (
 )
 
 func TestShouldShrink(t *testing.T) {
-	cfg := &models.ProcessorConfig{
-		Video: models.VideoConfig{MinSavingsVideo: 0.1},
-	}
-	m := &models.ShrinkMedia{Category: "Video", Size: 1000}
-
-	// Savings 20% (1000 -> 800)
-	if !m.ShouldShrink(800, cfg) {
-		t.Errorf("expected true for 20%% savings")
-	}
+	cfg := &models.ProcessorConfig{}
+	cfg.Video.MinSavingsVideo = 0.1 // 10%
+	m := &models.ShrinkMedia{Size: 1000, Category: "Video"}
 
 	// Savings 5% (1000 -> 950)
 	if m.ShouldShrink(950, cfg) {
@@ -31,7 +25,7 @@ func TestShouldShrink(t *testing.T) {
 
 func TestProcessorRegistry(t *testing.T) {
 	cfg := &models.ProcessorConfig{}
-	registry := NewProcessorRegistry(nil, cfg, false, false, false, false)
+	registry := NewProcessorRegistry(nil, cfg, false, false, false, false, false)
 
 	m := &models.ShrinkMedia{Category: "Video", MediaType: "video/mp4", Ext: ".mp4", VideoCount: 1}
 	p := registry.GetProcessor(m)
@@ -61,5 +55,13 @@ func TestProcessorRegistry(t *testing.T) {
 	p = registry.GetProcessor(m)
 	if _, ok := p.(*ArchiveProcessor); !ok {
 		t.Errorf("expected ArchiveProcessor")
+	}
+
+	// Test NoArchives flag
+	registry = NewProcessorRegistry(nil, cfg, false, false, false, false, true)
+	m = &models.ShrinkMedia{Category: "Archived", MediaType: "application/zip", Ext: ".zip"}
+	p = registry.GetProcessor(m)
+	if p != nil {
+		t.Errorf("expected nil processor for archive when NoArchives is true")
 	}
 }

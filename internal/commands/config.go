@@ -46,10 +46,11 @@ type PathFilterFlags struct {
 }
 
 type MediaFilterFlags struct {
-	VideoOnly bool `help:"Only video files" env:"SHRINK_VIDEO_ONLY"`
-	AudioOnly bool `help:"Only audio files" env:"SHRINK_AUDIO_ONLY"`
-	ImageOnly bool `help:"Only image files" env:"SHRINK_IMAGE_ONLY"`
-	TextOnly  bool `help:"Only text/ebook files" env:"SHRINK_TEXT_ONLY"`
+	VideoOnly  bool `help:"Only video files" env:"SHRINK_VIDEO_ONLY"`
+	AudioOnly  bool `help:"Only audio files" env:"SHRINK_AUDIO_ONLY"`
+	ImageOnly  bool `help:"Only image files" env:"SHRINK_IMAGE_ONLY"`
+	TextOnly   bool `help:"Only text/ebook files" env:"SHRINK_TEXT_ONLY"`
+	NoArchives bool `help:"Skip processing archive files" env:"SHRINK_NO_ARCHIVES"`
 }
 
 type TimeFilterFlags struct {

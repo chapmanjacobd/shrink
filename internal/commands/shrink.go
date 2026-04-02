@@ -56,7 +56,7 @@ func (c *ShrinkCmd) Run(ctx *kong.Context) error {
 
 	// Initialize components
 	ffmpegProc := ffmpeg.NewFFmpegProcessor(cfg)
-	registry := NewProcessorRegistry(ffmpegProc, cfg, c.VideoOnly, c.AudioOnly, c.ImageOnly, c.TextOnly)
+	registry := NewProcessorRegistry(ffmpegProc, cfg, c.VideoOnly, c.AudioOnly, c.ImageOnly, c.TextOnly, c.NoArchives)
 	defer registry.Cleanup()
 	metrics := NewShrinkMetrics()
 

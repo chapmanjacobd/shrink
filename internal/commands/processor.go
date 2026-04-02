@@ -35,7 +35,7 @@ type MediaRegistry struct {
 }
 
 // NewProcessorRegistry creates a new registry with available processors based on flags
-func NewProcessorRegistry(ffmpeg *ffmpeg.FFmpegProcessor, cfg *models.ProcessorConfig, videoOnly, audioOnly, imageOnly, textOnly bool) *MediaRegistry {
+func NewProcessorRegistry(ffmpeg *ffmpeg.FFmpegProcessor, cfg *models.ProcessorConfig, videoOnly, audioOnly, imageOnly, textOnly, noArchives bool) *MediaRegistry {
 	all := !videoOnly && !audioOnly && !imageOnly && !textOnly
 	var processors []models.MediaProcessor
 
@@ -52,8 +52,10 @@ func NewProcessorRegistry(ffmpeg *ffmpeg.FFmpegProcessor, cfg *models.ProcessorC
 		processors = append(processors, NewTextProcessor())
 	}
 
-	// Always add ArchiveProcessor as it might contain processable files of any requested type
-	processors = append(processors, NewArchiveProcessor(ffmpeg, cfg))
+	if !noArchives {
+		// Add ArchiveProcessor as it might contain processable files of any requested type
+		processors = append(processors, NewArchiveProcessor(ffmpeg, cfg))
+	}
 
 	return &MediaRegistry{
 		processors: processors,
