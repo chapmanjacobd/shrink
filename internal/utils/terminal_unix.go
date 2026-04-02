@@ -27,6 +27,28 @@ func GetCommandPath(name string) string {
 	return path
 }
 
+// ClearStdin flushes pending input from the terminal if it's a terminal
+func ClearStdin() {
+	fd := int(os.Stdin.Fd())
+	if !term.IsTerminal(fd) {
+		return
+	}
+
+	// Set stdin to non-blocking
+	if err := syscall.SetNonblock(fd, true); err != nil {
+		return
+	}
+	defer syscall.SetNonblock(fd, false)
+
+	buf := make([]byte, 1024)
+	for {
+		_, err := syscall.Read(fd, buf)
+		if err != nil {
+			break // EOF or would block
+		}
+	}
+}
+
 // TerminalSize tracks the current terminal dimensions
 type TerminalSize struct {
 	mu       sync.RWMutex

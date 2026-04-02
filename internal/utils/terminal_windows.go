@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sync"
 
+	"golang.org/x/sys/windows"
 	"golang.org/x/term"
 )
 
@@ -79,6 +80,16 @@ func GetCommandPath(name string) string {
 	}
 
 	return ""
+}
+
+// ClearStdin flushes pending input from the terminal if it's a terminal
+func ClearStdin() {
+	fd := int(os.Stdin.Fd())
+	if !term.IsTerminal(fd) {
+		return
+	}
+	handle := windows.Handle(fd)
+	_ = windows.FlushConsoleInputBuffer(handle)
 }
 
 // TerminalSize tracks the current terminal dimensions

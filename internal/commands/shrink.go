@@ -486,6 +486,7 @@ func (c *ShrinkCmd) PrintUnknownExtensions() {
 }
 
 func (c *ShrinkCmd) Confirm() bool {
+	utils.ClearStdin()
 	fmt.Print("\nProceed with shrinking? [y/N] ")
 	var response string
 	fmt.Scanln(&response)
