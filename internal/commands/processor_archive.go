@@ -124,8 +124,14 @@ func isMultiPartArchiveExt(ext string) bool {
 
 // ExtractAndProcess extracts archive contents and processes media recursively
 func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *models.ShrinkMedia, cfg *models.ProcessorConfig,
-	imageProc *ImageProcessor, ffmpegProc *ffmpeg.FFmpegProcessor, registry models.ProcessorRegistry,
+	imageProc *ImageProcessor, ffmpegProc *ffmpeg.FFmpegProcessor, registry models.ProcessorRegistry, depth int,
 ) models.ProcessResult {
+	// Limit recursion depth to prevent stack overflow from maliciously nested archives
+	if depth > 10 {
+		slog.Warn("Max archive recursion depth reached, skipping nested archive", "path", m.Path)
+		return models.ProcessResult{SourcePath: m.Path, Success: true}
+	}
+
 	// Skip secondary part files - only process the primary archive
 	if isSecondaryPart(m.Path) {
 		slog.Debug("Skipping secondary archive part", "path", m.Path)
@@ -302,7 +308,7 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *models.Shri
 				return nil
 			}
 			nestedMedia := &models.ShrinkMedia{Path: path, Size: info.Size(), Ext: ext, MediaType: "archive"}
-			res := p.ExtractAndProcess(ctx, nestedMedia, cfg, imageProc, ffmpegProc, registry)
+			res := p.ExtractAndProcess(ctx, nestedMedia, cfg, imageProc, ffmpegProc, registry, depth+1)
 			if res.Error != nil {
 				if res.Output != "" {
 					slog.Warn("Failed to extract nested archive", "path", path, "error", res.Error, "output", res.Output)
@@ -579,7 +585,7 @@ func (p *ArchiveProcessor) EstimateSize(m *models.ShrinkMedia, cfg *models.Proce
 func (p *ArchiveProcessor) Process(ctx context.Context, m *models.ShrinkMedia, cfg *models.ProcessorConfig, registry models.ProcessorRegistry) models.ProcessResult {
 	// Archives are handled by extracting and processing contents separately
 	imageProc := NewImageProcessor()
-	return p.ExtractAndProcess(ctx, m, cfg, imageProc, p.ffmpeg, registry)
+	return p.ExtractAndProcess(ctx, m, cfg, imageProc, p.ffmpeg, registry, 0)
 }
 
 // pathsEqual compares two paths for equality, handling Windows case-insensitivity and path styles

@@ -64,6 +64,16 @@ func NewProcessorRegistry(ffmpeg *ffmpeg.FFmpegProcessor, cfg *models.ProcessorC
 
 // GetProcessor returns the appropriate processor for a media item
 func (r *MediaRegistry) GetProcessor(m *models.ShrinkMedia) models.MediaProcessor {
+	// If category is already set, try to find a processor matching it exactly
+	if m.Category != "" {
+		for _, p := range r.processors {
+			if p.Category() == m.Category {
+				return p
+			}
+		}
+	}
+
+	// Fallback to extension-based detection
 	for _, p := range r.processors {
 		if p.CanProcess(m) {
 			return p

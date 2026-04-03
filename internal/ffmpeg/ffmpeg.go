@@ -52,10 +52,14 @@ func (p *FFmpegProcessor) Process(ctx context.Context, m *models.ShrinkMedia, cf
 			// Process as static image
 			m.Category = "Image"
 			processor := registry.GetProcessor(m)
-			if processor != nil {
+			// Ensure we don't pick ourselves (or another FFmpegProcessor-based one) again
+			// and that we actually found an Image processor
+			if processor != nil && processor.Category() == "Image" {
 				return processor.Process(ctx, m, cfg, registry)
 			}
-			return models.ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("no processor found for image")}
+			// If we can't process as image (e.g. image processing disabled), skip it
+			slog.Info("Skipping static GIF/WebP as image processing is disabled or no image processor found", "path", m.Path)
+			return models.ProcessResult{SourcePath: m.Path, Success: true}
 		}
 	}
 
