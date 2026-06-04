@@ -37,7 +37,7 @@ func TestGIFMutualRecursion(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	gifPath := filepath.Join(tmpDir, "test.gif")
-	if err := os.WriteFile(gifPath, []byte("fake gif content"), 0644); err != nil {
+	if err := os.WriteFile(gifPath, []byte("fake gif content"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 

@@ -44,6 +44,41 @@ func setupTestDB(t *testing.T) (*sql.DB, string) {
 	return db, dbPath
 }
 
+func createMediaReferenceTables(t *testing.T, db *sql.DB) {
+	t.Helper()
+
+	_, err := db.Exec(`
+		CREATE TABLE playlists (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			path TEXT UNIQUE,
+			title TEXT
+		) STRICT;
+		CREATE TABLE playlist_items (
+			playlist_id INTEGER NOT NULL,
+			media_path TEXT NOT NULL,
+			track_number INTEGER,
+			PRIMARY KEY (playlist_id, media_path),
+			FOREIGN KEY (playlist_id) REFERENCES playlists(id) ON DELETE CASCADE,
+			FOREIGN KEY (media_path) REFERENCES media(path) ON DELETE CASCADE
+		) STRICT;
+		CREATE TABLE history (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			media_path TEXT NOT NULL,
+			time_played INTEGER DEFAULT 0,
+			FOREIGN KEY (media_path) REFERENCES media(path) ON DELETE CASCADE
+		) STRICT;
+		CREATE TABLE captions (
+			media_path TEXT NOT NULL,
+			time REAL,
+			text TEXT,
+			FOREIGN KEY (media_path) REFERENCES media(path) ON DELETE CASCADE
+		) STRICT;
+	`)
+	if err != nil {
+		t.Fatalf("Failed to create media reference tables: %v", err)
+	}
+}
+
 func TestMediaLifecycle(t *testing.T) {
 	db, dbPath := setupTestDB(t)
 	defer db.Close()
@@ -229,5 +264,152 @@ func TestUpdateMediaWithForeignKeyConstraint(t *testing.T) {
 	}
 	if count != 1 {
 		t.Errorf("Expected 1 metadata record, got %d", count)
+	}
+}
+
+func TestUpdateMediaRenamesBuiltInForeignKeyReferences(t *testing.T) {
+	db, _ := setupTestDB(t)
+	defer db.Close()
+	createMediaReferenceTables(t, db)
+
+	oldPath := "original.mp4"
+	newPath := "compressed.mkv"
+
+	AddMediaEntry([]*sql.DB{db}, oldPath, 1000, 10.0, ShrinkStatusNotProcessed)
+
+	result, err := db.Exec("INSERT INTO playlists (path, title) VALUES (?, ?)", "playlist.m3u8", "Test Playlist")
+	if err != nil {
+		t.Fatalf("Failed to insert playlist: %v", err)
+	}
+	playlistID, err := result.LastInsertId()
+	if err != nil {
+		t.Fatalf("Failed to fetch playlist ID: %v", err)
+	}
+
+	if _, err := db.Exec("INSERT INTO history (media_path, time_played) VALUES (?, ?)", oldPath, 10); err != nil {
+		t.Fatalf("Failed to insert history: %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO captions (media_path, time, text) VALUES (?, ?, ?)", oldPath, 1.5, "caption"); err != nil {
+		t.Fatalf("Failed to insert captions: %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO playlist_items (playlist_id, media_path, track_number) VALUES (?, ?, ?)", playlistID, oldPath, 1); err != nil {
+		t.Fatalf("Failed to insert playlist item: %v", err)
+	}
+
+	UpdateMedia([]*sql.DB{db}, oldPath, newPath, 600, 10.0, 1920, 1080)
+
+	records, err := LoadMediaFromDB(db, true, false, false, false, false)
+	if err != nil {
+		t.Fatalf("LoadMediaFromDB failed: %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("Expected 1 record after rename, got %d", len(records))
+	}
+	if records[0].Path != newPath {
+		t.Fatalf("Expected record path %q, got %q", newPath, records[0].Path)
+	}
+
+	assertMediaReferenceCount(t, db, "history", newPath, 1)
+	assertMediaReferenceCount(t, db, "captions", newPath, 1)
+	assertMediaReferenceCount(t, db, "playlist_items", newPath, 1)
+	assertMediaReferenceCount(t, db, "history", oldPath, 0)
+	assertMediaReferenceCount(t, db, "captions", oldPath, 0)
+	assertMediaReferenceCount(t, db, "playlist_items", oldPath, 0)
+}
+
+func TestUpdateMediaMergesPlaylistConflictsBeforeRepointingReferences(t *testing.T) {
+	db, _ := setupTestDB(t)
+	defer db.Close()
+	createMediaReferenceTables(t, db)
+
+	oldPath := "original.mp4"
+	newPath := "compressed.mkv"
+
+	AddMediaEntry([]*sql.DB{db}, oldPath, 1000, 10.0, ShrinkStatusNotProcessed)
+	AddMediaEntry([]*sql.DB{db}, newPath, 500, 10.0, ShrinkStatusSuccess)
+
+	result, err := db.Exec("INSERT INTO playlists (path, title) VALUES (?, ?)", "playlist.m3u8", "Test Playlist")
+	if err != nil {
+		t.Fatalf("Failed to insert playlist: %v", err)
+	}
+	playlistID, err := result.LastInsertId()
+	if err != nil {
+		t.Fatalf("Failed to fetch playlist ID: %v", err)
+	}
+
+	if _, err := db.Exec("INSERT INTO history (media_path, time_played) VALUES (?, ?)", oldPath, 10); err != nil {
+		t.Fatalf("Failed to insert history: %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO captions (media_path, time, text) VALUES (?, ?, ?)", oldPath, 1.5, "caption"); err != nil {
+		t.Fatalf("Failed to insert captions: %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO playlist_items (playlist_id, media_path, track_number) VALUES (?, ?, ?)", playlistID, oldPath, 1); err != nil {
+		t.Fatalf("Failed to insert old playlist item: %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO playlist_items (playlist_id, media_path, track_number) VALUES (?, ?, ?)", playlistID, newPath, 2); err != nil {
+		t.Fatalf("Failed to insert new playlist item: %v", err)
+	}
+
+	UpdateMedia([]*sql.DB{db}, oldPath, newPath, 600, 10.0, 1920, 1080)
+
+	assertMediaReferenceCount(t, db, "history", newPath, 1)
+	assertMediaReferenceCount(t, db, "captions", newPath, 1)
+	assertMediaReferenceCount(t, db, "playlist_items", newPath, 1)
+
+	var trackNumber int
+	err = db.QueryRow("SELECT track_number FROM playlist_items WHERE playlist_id = ? AND media_path = ?", playlistID, newPath).Scan(&trackNumber)
+	if err != nil {
+		t.Fatalf("Failed to query merged playlist item: %v", err)
+	}
+	if trackNumber != 2 {
+		t.Fatalf("Expected existing newPath playlist item to win, got track_number=%d", trackNumber)
+	}
+}
+
+func TestAddMediaEntryWithDimensionsUpsertsWithoutDeletingChildren(t *testing.T) {
+	db, _ := setupTestDB(t)
+	defer db.Close()
+	createMediaReferenceTables(t, db)
+
+	path := "track.flac"
+	AddMediaEntry([]*sql.DB{db}, path, 1000, 10.0, ShrinkStatusNotProcessed)
+	if _, err := db.Exec("INSERT INTO history (media_path, time_played) VALUES (?, ?)", path, 10); err != nil {
+		t.Fatalf("Failed to insert history: %v", err)
+	}
+
+	AddMediaEntryWithDimensions([]*sql.DB{db}, path, 600, 0, 0, 0, ShrinkStatusSuccess)
+
+	assertMediaReferenceCount(t, db, "history", path, 1)
+
+	var (
+		size       int64
+		duration   int64
+		isShrinked int
+	)
+	err := db.QueryRow("SELECT size, duration, is_shrinked FROM media WHERE path = ?", path).Scan(&size, &duration, &isShrinked)
+	if err != nil {
+		t.Fatalf("Failed to query upserted media row: %v", err)
+	}
+	if size != 600 {
+		t.Fatalf("Expected size 600, got %d", size)
+	}
+	if duration != 0 {
+		t.Fatalf("Expected duration 0 after upsert, got %d", duration)
+	}
+	if isShrinked != ShrinkStatusSuccess {
+		t.Fatalf("Expected status %d, got %d", ShrinkStatusSuccess, isShrinked)
+	}
+}
+
+func assertMediaReferenceCount(t *testing.T, db *sql.DB, tableName, mediaPath string, want int) {
+	t.Helper()
+
+	var count int
+	query := "SELECT COUNT(*) FROM " + tableName + " WHERE media_path = ?"
+	if err := db.QueryRow(query, mediaPath).Scan(&count); err != nil {
+		t.Fatalf("Failed to query %s references for %s: %v", tableName, mediaPath, err)
+	}
+	if count != want {
+		t.Fatalf("Expected %d %s references for %s, got %d", want, tableName, mediaPath, count)
 	}
 }
