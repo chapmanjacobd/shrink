@@ -65,10 +65,51 @@ func TestCollectLSARPartFilesFallsBackToGlob(t *testing.T) {
 	if len(partFiles) != 2 {
 		t.Fatalf("expected glob fallback to recover 2 part files, got %d: %v", len(partFiles), partFiles)
 	}
-	if !partFiles[z01Path] {
+	if !partFilesContain(partFiles, z01Path) {
 		t.Fatalf("expected z01 part to be recovered by glob fallback: %s", z01Path)
 	}
-	if !partFiles[z02Path] {
+	if !partFilesContain(partFiles, z02Path) {
 		t.Fatalf("expected z02 part to be recovered by glob fallback: %s", z02Path)
 	}
+}
+
+func TestCollectLSARPartFilesFallsBackWhenLSAROnlyReportsMainArchive(t *testing.T) {
+	tempDir := t.TempDir()
+	zipPath := filepath.Join(tempDir, "test_archive_multi.zip")
+	z01Path := filepath.Join(tempDir, "test_archive_multi.z01")
+	z02Path := filepath.Join(tempDir, "test_archive_multi.z02")
+
+	for _, p := range []string{zipPath, z01Path, z02Path} {
+		if err := os.WriteFile(p, []byte("test"), 0o644); err != nil {
+			t.Fatalf("failed to create test file %s: %v", p, err)
+		}
+	}
+
+	p := &ArchiveProcessor{cfg: &models.ProcessorConfig{}}
+	partFiles := p.collectLSARPartFiles(
+		zipPath,
+		filepath.Dir(zipPath),
+		filepath.Base(zipPath),
+		map[string]bool{},
+		[]string{zipPath},
+	)
+
+	if len(partFiles) != 2 {
+		t.Fatalf("expected glob fallback to recover 2 part files when lsar only reports the main archive, got %d: %v", len(partFiles), partFiles)
+	}
+	if !partFilesContain(partFiles, z01Path) {
+		t.Fatalf("expected z01 part to be recovered when lsar only reports the main archive: %s", z01Path)
+	}
+	if !partFilesContain(partFiles, z02Path) {
+		t.Fatalf("expected z02 part to be recovered when lsar only reports the main archive: %s", z02Path)
+	}
+}
+
+func partFilesContain(partFiles map[string]bool, want string) bool {
+	for partFile := range partFiles {
+		if pathsEqual(partFile, want) {
+			return true
+		}
+	}
+	return false
 }

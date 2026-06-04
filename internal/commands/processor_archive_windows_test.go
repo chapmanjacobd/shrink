@@ -39,10 +39,10 @@ func TestCollectLSARPartFilesNormalizesMSYSPaths(t *testing.T) {
 	if len(partFiles) != 2 {
 		t.Fatalf("expected 2 part files, got %d: %v", len(partFiles), partFiles)
 	}
-	if !partFiles[z01Path] {
+	if !partFilesContain(partFiles, z01Path) {
 		t.Fatalf("expected z01 part to be detected: %s", z01Path)
 	}
-	if !partFiles[z02Path] {
+	if !partFilesContain(partFiles, z02Path) {
 		t.Fatalf("expected z02 part to be detected: %s", z02Path)
 	}
 }

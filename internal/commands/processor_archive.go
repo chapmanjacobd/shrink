@@ -896,6 +896,7 @@ func (p *ArchiveProcessor) getPartFilesImpl(path string) []string {
 func (p *ArchiveProcessor) collectLSARPartFiles(path, dir, baseName string, partFilesMap map[string]bool, volumes []string) map[string]bool {
 	needsGlobFallback := false
 	absMain, _ := filepath.Abs(path)
+	foundLSARPart := false
 
 	for _, reportedPath := range volumes {
 		partFile := normalizeLSARVolumePath(path, reportedPath)
@@ -909,6 +910,7 @@ func (p *ArchiveProcessor) collectLSARPartFiles(path, dir, baseName string, part
 			absPart, _ := filepath.Abs(partFile)
 			if !pathsEqual(absPart, absMain) {
 				partFilesMap[absPart] = true
+				foundLSARPart = true
 				slog.Debug("Found multi-part archive part (lsar)", "path", absPart)
 			}
 			continue
@@ -918,8 +920,8 @@ func (p *ArchiveProcessor) collectLSARPartFiles(path, dir, baseName string, part
 		needsGlobFallback = true
 	}
 
-	if needsGlobFallback {
-		slog.Warn("lsar volume lookup incomplete, supplementing with glob", "path", path, "reported", len(volumes))
+	if needsGlobFallback || !foundLSARPart {
+		slog.Warn("lsar volume lookup incomplete, supplementing with glob", "path", path, "reported", len(volumes), "found_parts", foundLSARPart)
 		partFilesMap = p.getPartFilesByGlob(partFilesMap, path, dir, baseName)
 	}
 
