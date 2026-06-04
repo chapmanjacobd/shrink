@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -109,6 +110,48 @@ func extractLSARJSON(output []byte) []byte {
 		return []byte(s[startIdx : endIdx+1])
 	}
 	return output
+}
+
+func normalizeLSARVolumePath(archivePath, reportedPath string) string {
+	reportedPath = strings.TrimSpace(reportedPath)
+	if reportedPath == "" {
+		return ""
+	}
+
+	if runtime.GOOS == "windows" {
+		reportedPath = strings.TrimPrefix(reportedPath, `\\?\`)
+
+		switch {
+		case len(reportedPath) >= 4 && reportedPath[0] == '/' && isASCIILetter(reportedPath[1]) && reportedPath[2] == ':' && reportedPath[3] == '/':
+			reportedPath = reportedPath[1:2] + ":" + `\` + strings.ReplaceAll(reportedPath[4:], "/", `\`)
+		case len(reportedPath) >= 3 && reportedPath[0] == '/' && isASCIILetter(reportedPath[1]) && reportedPath[2] == '/':
+			reportedPath = reportedPath[1:2] + ":" + `\` + strings.ReplaceAll(reportedPath[3:], "/", `\`)
+		case len(reportedPath) >= 12 && strings.HasPrefix(strings.ToLower(reportedPath), "/cygdrive/") && isASCIILetter(reportedPath[10]) && reportedPath[11] == '/':
+			reportedPath = reportedPath[10:11] + ":" + `\` + strings.ReplaceAll(reportedPath[12:], "/", `\`)
+		default:
+			reportedPath = strings.ReplaceAll(reportedPath, "/", `\`)
+			if strings.HasPrefix(reportedPath, `\`) && filepath.VolumeName(reportedPath) == "" {
+				if archiveVolume := filepath.VolumeName(archivePath); archiveVolume != "" {
+					reportedPath = archiveVolume + reportedPath
+				}
+			}
+		}
+	}
+
+	if !filepath.IsAbs(reportedPath) {
+		reportedPath = filepath.Join(filepath.Dir(archivePath), reportedPath)
+	}
+
+	absPath, err := filepath.Abs(reportedPath)
+	if err == nil {
+		reportedPath = absPath
+	}
+
+	return filepath.Clean(reportedPath)
+}
+
+func isASCIILetter(ch byte) bool {
+	return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z')
 }
 
 func (p *ArchiveProcessor) CanProcess(m *models.ShrinkMedia) bool {
@@ -823,23 +866,7 @@ func (p *ArchiveProcessor) getPartFilesImpl(path string) []string {
 		}
 		if json.Unmarshal(jsonBytes, &lsarJSON) == nil && len(lsarJSON.LsarProperties.XADVolumes) > 0 {
 			slog.Debug("lsar returned XADVolumes", "path", path, "count", len(lsarJSON.LsarProperties.XADVolumes))
-			for _, partFile := range lsarJSON.LsarProperties.XADVolumes {
-				if !filepath.IsAbs(partFile) {
-					partFile = filepath.Join(dir, partFile)
-				}
-				// Only include files that exist and are not the main archive
-				slog.Debug("Checking lsar part file existence", "part", partFile)
-				if info, err := os.Stat(partFile); err == nil && !info.IsDir() {
-					absPart, _ := filepath.Abs(partFile)
-					absMain, _ := filepath.Abs(path)
-					if !pathsEqual(absPart, absMain) {
-						partFilesMap[absPart] = true
-						slog.Debug("Found multi-part archive part (lsar)", "path", absPart)
-					}
-				} else {
-					slog.Debug("lsar part file not found or is directory", "part", partFile, "err", err)
-				}
-			}
+			partFilesMap = p.collectLSARPartFiles(path, dir, baseName, partFilesMap, lsarJSON.LsarProperties.XADVolumes)
 		} else {
 			slog.Debug("lsar returned no XADVolumes or parse failed", "path", path)
 			lsarFailed = true
@@ -864,6 +891,39 @@ func (p *ArchiveProcessor) getPartFilesImpl(path string) []string {
 	// Sort for consistent ordering
 	sort.Strings(partFiles)
 	return partFiles
+}
+
+func (p *ArchiveProcessor) collectLSARPartFiles(path, dir, baseName string, partFilesMap map[string]bool, volumes []string) map[string]bool {
+	needsGlobFallback := false
+	absMain, _ := filepath.Abs(path)
+
+	for _, reportedPath := range volumes {
+		partFile := normalizeLSARVolumePath(path, reportedPath)
+		if partFile == "" {
+			needsGlobFallback = true
+			continue
+		}
+
+		slog.Debug("Checking lsar part file existence", "reported", reportedPath, "normalized", partFile)
+		if info, err := os.Stat(partFile); err == nil && !info.IsDir() {
+			absPart, _ := filepath.Abs(partFile)
+			if !pathsEqual(absPart, absMain) {
+				partFilesMap[absPart] = true
+				slog.Debug("Found multi-part archive part (lsar)", "path", absPart)
+			}
+			continue
+		}
+
+		slog.Debug("lsar part file not found or is directory", "reported", reportedPath, "normalized", partFile)
+		needsGlobFallback = true
+	}
+
+	if needsGlobFallback {
+		slog.Warn("lsar volume lookup incomplete, supplementing with glob", "path", path, "reported", len(volumes))
+		partFilesMap = p.getPartFilesByGlob(partFilesMap, path, dir, baseName)
+	}
+
+	return partFilesMap
 }
 
 // getPartFilesByGlob finds archive parts using glob patterns (fallback when lsar fails)
