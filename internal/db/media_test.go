@@ -401,6 +401,49 @@ func TestAddMediaEntryWithDimensionsUpsertsWithoutDeletingChildren(t *testing.T)
 	}
 }
 
+func TestUpdateMediaDoesNotFailOnUnrelatedExistingForeignKeyViolations(t *testing.T) {
+	db, _ := setupTestDB(t)
+	defer db.Close()
+	createMediaReferenceTables(t, db)
+
+	if _, err := db.Exec("PRAGMA foreign_keys = OFF"); err != nil {
+		t.Fatalf("Failed to disable foreign keys: %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO captions (media_path, time, text) VALUES (?, ?, ?)", "missing.mp4", 1.5, "orphan"); err != nil {
+		t.Fatalf("Failed to insert orphan caption: %v", err)
+	}
+	if _, err := db.Exec("PRAGMA foreign_keys = ON"); err != nil {
+		t.Fatalf("Failed to re-enable foreign keys: %v", err)
+	}
+
+	oldPath := "original.mp4"
+	newPath := "compressed.mkv"
+	AddMediaEntry([]*sql.DB{db}, oldPath, 1000, 10.0, ShrinkStatusNotProcessed)
+	if _, err := db.Exec("INSERT INTO captions (media_path, time, text) VALUES (?, ?, ?)", oldPath, 2.5, "valid"); err != nil {
+		t.Fatalf("Failed to insert valid caption: %v", err)
+	}
+
+	UpdateMedia([]*sql.DB{db}, oldPath, newPath, 600, 10.0, 1920, 1080)
+
+	assertMediaReferenceCount(t, db, "captions", newPath, 1)
+
+	var mediaCount int
+	if err := db.QueryRow("SELECT COUNT(*) FROM media WHERE path = ?", newPath).Scan(&mediaCount); err != nil {
+		t.Fatalf("Failed to query renamed media row: %v", err)
+	}
+	if mediaCount != 1 {
+		t.Fatalf("Expected renamed media row at %s, got %d", newPath, mediaCount)
+	}
+
+	var orphanCount int
+	if err := db.QueryRow("SELECT COUNT(*) FROM captions WHERE media_path = ?", "missing.mp4").Scan(&orphanCount); err != nil {
+		t.Fatalf("Failed to query orphan caption: %v", err)
+	}
+	if orphanCount != 1 {
+		t.Fatalf("Expected unrelated orphan caption to remain, got %d", orphanCount)
+	}
+}
+
 func assertMediaReferenceCount(t *testing.T, db *sql.DB, tableName, mediaPath string, want int) {
 	t.Helper()
 

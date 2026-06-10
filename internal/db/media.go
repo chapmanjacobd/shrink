@@ -185,10 +185,6 @@ func updateMediaRecord(sqlDB *sql.DB, oldPath, newPath string, newSize int64, du
 		}
 	}
 
-	if err := verifyForeignKeys(tx); err != nil {
-		return err
-	}
-
 	return tx.Commit()
 }
 
@@ -591,29 +587,6 @@ func containsColumn(columns []string, target string) bool {
 
 func quoteIdentifier(identifier string) string {
 	return `"` + strings.ReplaceAll(identifier, `"`, `""`) + `"`
-}
-
-func verifyForeignKeys(tx *sql.Tx) error {
-	rows, err := tx.Query("PRAGMA foreign_key_check")
-	if err != nil {
-		return fmt.Errorf("run foreign_key_check: %w", err)
-	}
-	defer rows.Close()
-
-	if rows.Next() {
-		var (
-			tableName  string
-			rowID      sql.NullInt64
-			parentName string
-			fkID       int
-		)
-		if err := rows.Scan(&tableName, &rowID, &parentName, &fkID); err != nil {
-			return err
-		}
-		return fmt.Errorf("foreign key violation in %s referencing %s (fk=%d)", tableName, parentName, fkID)
-	}
-
-	return rows.Err()
 }
 
 // MarkShrinked marks a file as shrinked in the database with the given status code
