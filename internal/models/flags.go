@@ -25,10 +25,10 @@ func (h *PlainHandler) Handle(ctx context.Context, record slog.Record) error {
 	msg.WriteString(" ")
 	msg.WriteString(record.Message)
 	for _, a := range h.Attrs {
-		msg.WriteString(fmt.Sprintf("\n    %s=%v", a.Key, a.Value.Any()))
+		fmt.Fprintf(&msg, "\n    %s=%v", a.Key, a.Value.Any())
 	}
 	record.Attrs(func(a slog.Attr) bool {
-		msg.WriteString(fmt.Sprintf("\n    %s=%v", a.Key, a.Value.Any()))
+		fmt.Fprintf(&msg, "\n    %s=%v", a.Key, a.Value.Any())
 		return true
 	})
 	msg.WriteString("\n")

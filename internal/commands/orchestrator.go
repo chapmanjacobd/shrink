@@ -333,7 +333,7 @@ func (e *Engine) analyzeCategory(media []models.ShrinkMedia, indices []int, cate
 		var lastThroughput int64
 		direction := int32(1)
 		var accumulatedCompleted int64
-		var lastRecalcTime time.Time = time.Now()
+		var lastRecalcTime = time.Now()
 		const failureHalfLife = 5.0 * 60.0          // 5 minutes in seconds
 		const decayFactor = 0.693 / failureHalfLife // ln(2) / halfLife for exponential decay
 
@@ -706,10 +706,7 @@ func (e *Engine) processSingle(ctx context.Context, m models.ShrinkMedia) models
 		totalNewSize += out.Size
 	}
 
-	keepNewFiles := true
-	if e.cfg.Common.DeleteLarger && !e.cfg.Common.ForceShrink && totalNewSize > m.Size {
-		keepNewFiles = false
-	}
+	keepNewFiles := !(e.cfg.Common.DeleteLarger && !e.cfg.Common.ForceShrink && totalNewSize > m.Size)
 
 	e.finalizeFileSwap(m, result, keepNewFiles)
 
@@ -747,13 +744,14 @@ func (e *Engine) captureTimestamps(path string) (time.Time, time.Time, error) {
 // handleProcessingError handles errors from processing.
 func (e *Engine) handleProcessingError(ctx context.Context, m models.ShrinkMedia, result models.ProcessResult, elapsed float64) models.ProcessResult {
 	// Log the error (including timeouts and cancellations for visibility)
-	if result.Error == context.Canceled {
+	switch result.Error {
+	case context.Canceled:
 		slog.Warn("Processing canceled by user", "path", m.Path)
 		// Don't mark as shrinked - allow retry on next run
-	} else if result.Error == context.DeadlineExceeded {
+	case context.DeadlineExceeded:
 		slog.Error("Processing timed out", "path", m.Path)
 		// Don't mark as shrinked - allow retry on next run
-	} else {
+	default:
 		if result.Output != "" {
 			slog.Error("Processing failed", "path", m.Path, "error", result.Error, "output", result.Output)
 		} else {

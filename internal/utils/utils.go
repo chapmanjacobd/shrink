@@ -679,7 +679,7 @@ func PrintTableToString(headers []string, rows [][]string) string {
 	for i, h := range headers {
 		headerArgs[i] = h
 	}
-	sb.WriteString(fmt.Sprintf(headerFormat, headerArgs...))
+	fmt.Fprintf(&sb, headerFormat, headerArgs)
 
 	// Print rows
 	for _, row := range rows {
@@ -691,7 +691,7 @@ func PrintTableToString(headers []string, rows [][]string) string {
 				rowArgs[i] = ""
 			}
 		}
-		sb.WriteString(fmt.Sprintf(rowFormat, rowArgs...))
+		fmt.Fprintf(&sb, rowFormat, rowArgs)
 	}
 
 	return sb.String()
@@ -806,7 +806,7 @@ func CalculateWaitDuration(now time.Time, ranges []*TimeRange) time.Duration {
 	// Find the next active time
 	nowTime := time.Date(0, 1, 1, now.Hour(), now.Minute(), now.Second(), 0, now.Location())
 
-	var minWait time.Duration = time.Duration(24 * time.Hour) // Max possible wait
+	var minWait = time.Duration(24 * time.Hour) // Max possible wait
 
 	for _, tr := range ranges {
 		startTime := time.Date(0, 1, 1, tr.Start.Hour(), tr.Start.Minute(), 0, 0, now.Location())
@@ -883,7 +883,7 @@ func CalculateWaitDurationForFinish(now time.Time, processingDuration time.Durat
 	nowTime := time.Date(0, 1, 1, now.Hour(), now.Minute(), now.Second(), 0, now.Location())
 	procDuration := processingDuration
 
-	var minWait time.Duration = time.Duration(48 * time.Hour) // Max reasonable wait
+	var minWait = time.Duration(48 * time.Hour) // Max reasonable wait
 
 	for _, tr := range ranges {
 		startTime := time.Date(0, 1, 1, tr.Start.Hour(), tr.Start.Minute(), 0, 0, now.Location())

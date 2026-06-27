@@ -658,7 +658,8 @@ func pathsEqual(p1, p2 string) bool {
 // isBrokenSequence checks if a multi-part archive has gaps in its part sequence
 func isBrokenSequence(mainPath string, partFiles []string) bool {
 	ext := strings.ToLower(filepath.Ext(mainPath))
-	if ext == ".zip" {
+	switch ext {
+	case ".zip":
 		// Look for .z01, .z02...
 		maxN := 0
 		found := make(map[int]bool)
@@ -681,7 +682,7 @@ func isBrokenSequence(mainPath string, partFiles []string) bool {
 				}
 			}
 		}
-	} else if ext == ".rar" || ext == "" { // "" for parts without extension if identified as rar
+	case ".rar", "": // "" for parts without extension if identified as rar
 		// Look for .part1.rar, .part2.rar... or .r00, .r01...
 		maxPart := 0
 		foundPart := make(map[int]bool)
