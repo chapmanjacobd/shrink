@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/chapmanjacobd/shrink/internal/ffmpeg"
@@ -53,7 +54,7 @@ func getArchiveGlobTimeout(cfg *models.CommonConfig, filePath string) time.Durat
 	return baseTimeout
 }
 
-var splitArchiveRegex = regexp.MustCompile(`^\.(z|r|c|part)?\d{1,4}$`)
+var splitArchiveRegex = regexp.MustCompile(`^\.([a-z]|part)?\d{1,4}$`)
 
 // globWithTimeout performs a filepath.Glob with a timeout to prevent hanging.
 // Note: If filepath.Glob hangs indefinitely (e.g., on a hung network mount),
@@ -748,15 +749,15 @@ func isSecondaryPart(path string) bool {
 				}
 			}
 		}
-	} else if strings.HasPrefix(ext, ".r") {
+	} else if len(ext) >= 3 && isASCIILetter(ext[1]) {
 		if n, err := strconv.Atoi(ext[2:]); err == nil {
-			// .r00, .r01...
 			// Check if .rar exists
 			if _, err := os.Stat(filepath.Join(dir, nameWithoutExt+".rar")); err == nil {
 				return true
 			}
-			if n > 0 {
-				return true // .r01+ are secondary if .rar doesn't exist but .r00 does
+			// S, T, U, V etc are always secondary, as well as .r01+
+			if ext[1] != 'r' || n > 0 {
+				return true
 			}
 		}
 	}
@@ -977,61 +978,74 @@ func (p *ArchiveProcessor) getPartFilesByGlob(partFilesMap map[string]bool, path
 
 	globTimeout := getArchiveGlobTimeout(&p.cfg.Common, path)
 
-	// Pattern 1: .zNN parts (Zip split files)
-	pattern1 := filepath.Join(dir, baseWithoutExt+".z*")
-	if pattern, err := globWithTimeout(pattern1, globTimeout); err == nil {
-		for _, p := range pattern {
-			if info, err := os.Stat(p); err == nil && !info.IsDir() {
+	// Collect candidates from a general glob
+	pattern := filepath.Join(dir, baseWithoutExt+".*")
+	candidates, err := globWithTimeout(pattern, globTimeout)
+	if err != nil {
+		return partFilesMap
+	}
+
+	var validCandidates []string
+	for _, p := range candidates {
+		if info, err := os.Stat(p); err == nil && !info.IsDir() {
+			pExt := strings.ToLower(filepath.Ext(p))
+			if isMultiPartArchiveExt(pExt) || strings.HasSuffix(pExt, ".rar") || strings.HasSuffix(pExt, ".zip") || strings.HasSuffix(pExt, ".7z") {
 				absP, _ := filepath.Abs(p)
 				absPath, _ := filepath.Abs(path)
 				if !pathsEqual(absP, absPath) {
-					partFilesMap[absP] = true
+					validCandidates = append(validCandidates, absP)
 				}
 			}
 		}
 	}
 
-	// Pattern 2: .NNN parts (generic split files)
-	pattern2 := filepath.Join(dir, baseWithoutExt+".???")
-	if pattern, err := globWithTimeout(pattern2, globTimeout); err == nil {
-		for _, p := range pattern {
-			if info, err := os.Stat(p); err == nil && !info.IsDir() {
-				absP, _ := filepath.Abs(p)
-				absPath, _ := filepath.Abs(path)
-				if !pathsEqual(absP, absPath) {
-					partFilesMap[absP] = true
-				}
-			}
-		}
+	if len(validCandidates) == 0 {
+		return partFilesMap
 	}
 
-	// Pattern 3: .partNN.rar or .rNN.rar (RAR split files)
-	if strings.HasSuffix(ext, ".rar") {
-		pattern3 := filepath.Join(dir, baseWithoutExt+".part*.rar")
-		if pattern, err := globWithTimeout(pattern3, globTimeout); err == nil {
-			for _, p := range pattern {
-				if _, err := os.Stat(p); err == nil {
-					absP, _ := filepath.Abs(p)
-					absPath, _ := filepath.Abs(path)
-					if !pathsEqual(absP, absPath) {
-						partFilesMap[absP] = true
-					}
-				}
-			}
-		}
-		pattern4 := filepath.Join(dir, baseWithoutExt+".r??")
-		if pattern, err := globWithTimeout(pattern4, globTimeout); err == nil {
-			for _, p := range pattern {
-				if _, err := os.Stat(p); err == nil {
-					absP, _ := filepath.Abs(p)
-					absPath, _ := filepath.Abs(path)
-					if !pathsEqual(absP, absPath) {
-						partFilesMap[absP] = true
-					}
-				}
-			}
-		}
+	// Get main archive contents for verification
+	mainContents, _, _ := p.lsarWithStatus(path)
+	var mainFileNames []string
+	for _, c := range mainContents {
+		mainFileNames = append(mainFileNames, c.Path)
 	}
+	sort.Strings(mainFileNames)
+	mainFilesList := strings.Join(mainFileNames, "|")
+
+	// Verify candidates concurrently
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	sem := make(chan struct{}, 10) // Max 10 concurrent lsar calls
+
+	for _, candidate := range validCandidates {
+		wg.Add(1)
+		go func(candidatePath string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			partContents, failed, _ := p.lsarWithStatus(candidatePath)
+			if !failed && len(partContents) > 0 {
+				var partFileNames []string
+				for _, c := range partContents {
+					partFileNames = append(partFileNames, c.Path)
+				}
+				sort.Strings(partFileNames)
+				partFilesList := strings.Join(partFileNames, "|")
+
+				if partFilesList != mainFilesList {
+					slog.Warn("Glob found part with different contents, skipping", "path", candidatePath, "mainPath", path)
+					return
+				}
+			}
+
+			mu.Lock()
+			partFilesMap[candidatePath] = true
+			mu.Unlock()
+		}(candidate)
+	}
+
+	wg.Wait()
 
 	return partFilesMap
 }
