@@ -15,8 +15,8 @@ func TestConfirm(t *testing.T) {
 	defer func() { os.Stdin = oldStdin }()
 
 	go func() {
-		w.Write([]byte("y\n"))
-		w.Close()
+		_, _ = w.Write([]byte("y\n"))
+		_ = w.Close()
 	}()
 
 	if !cmd.Confirm() {

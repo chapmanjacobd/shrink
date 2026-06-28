@@ -28,7 +28,7 @@ var expectedColumns = []string{
 // Connect connects to a SQLite database
 func Connect(dbPath string) (*sql.DB, error) {
 	// Add busy timeout to connection string to handle concurrent writes
-	dsn := dbPath
+	var dsn string
 	if dbPath != ":memory:" {
 		// Use URI format if not already or append if it has query parameters
 		if !strings.Contains(dbPath, "?") {
@@ -64,14 +64,14 @@ func Connect(dbPath string) (*sql.DB, error) {
 
 	for _, pragma := range tuning {
 		if _, err := db.Exec(pragma); err != nil {
-			db.Close()
+			_ = db.Close()
 			return nil, fmt.Errorf("failed to apply %s: %w", pragma, err)
 		}
 	}
 
 	// Test connection
 	if err := db.Ping(); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, err
 	}
 
@@ -87,7 +87,7 @@ func ConnectWithInit(dbPath string) (*sql.DB, string, error) {
 
 	// Validate database schema
 	if err := ensureSchema(db); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, "", fmt.Errorf("database schema validation failed: %w", err)
 	}
 
@@ -155,7 +155,7 @@ func getTableColumns(db *sql.DB, tableName string) (map[string]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	columns := make(map[string]string)
 	for rows.Next() {
@@ -181,7 +181,7 @@ func DatabaseExists(path string) bool {
 	if err != nil {
 		return false
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	return true
 }
 

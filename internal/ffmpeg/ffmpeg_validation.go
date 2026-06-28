@@ -64,7 +64,7 @@ func (p *FFmpegProcessor) validateTranscode(m models.ShrinkMedia, outputPath str
 		}
 
 		if deleteTranscode {
-			os.Remove(outputPath)
+			_ = os.Remove(outputPath)
 			return models.ProcessResult{SourcePath: m.Path, Success: false}
 		}
 
@@ -120,7 +120,7 @@ func (p *FFmpegProcessor) validateTranscode(m models.ShrinkMedia, outputPath str
 	if hasInvalidFile {
 		// Clean up all split files
 		for _, match := range matches {
-			os.Remove(match)
+			_ = os.Remove(match)
 		}
 		return models.ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("invalid split file")}
 	}

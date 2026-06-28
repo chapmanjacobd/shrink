@@ -121,7 +121,7 @@ func GetMountPoint(path string) (string, error) {
 // FolderSize calculates the total size of a folder
 func FolderSize(path string) int64 {
 	var size int64
-	filepath.Walk(path, func(p string, info os.FileInfo, err error) error {
+	_ = filepath.Walk(path, func(p string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() {
 			return nil
 		}
@@ -161,13 +161,13 @@ func MoveFile(src, dst string) error {
 	if err != nil {
 		return err
 	}
-	defer in.Close()
+	defer func() { _ = in.Close() }()
 
 	out, err := os.Create(dst)
 	if err != nil {
 		return err
 	}
-	defer out.Close()
+	defer func() { _ = out.Close() }()
 
 	if _, err = io.Copy(out, in); err != nil {
 		return err
@@ -179,11 +179,11 @@ func MoveFile(src, dst string) error {
 	}
 
 	// Close files before deleting source
-	in.Close()
-	out.Close()
+	_ = in.Close()
+	_ = out.Close()
 
 	// Restore timestamps on destination
-	os.Chtimes(dst, atime, mtime)
+	_ = os.Chtimes(dst, atime, mtime)
 
 	return os.Remove(src)
 }

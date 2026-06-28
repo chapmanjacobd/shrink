@@ -80,7 +80,7 @@ func runShrinkCmdDir(dirPath, tempDir string, args []string) error {
 func TestMoveToBrokenMountPoint(t *testing.T) {
 	tempDir := t.TempDir()
 	sourceFile := filepath.Join(tempDir, "broken.avi")
-	os.WriteFile(sourceFile, []byte("broken"), 0o644)
+	_ = os.WriteFile(sourceFile, []byte("broken"), 0o644)
 
 	absPath, _ := filepath.Abs(sourceFile)
 	mountPoint, _ := utils.GetMountPoint(absPath)
@@ -354,7 +354,7 @@ func TestShrinkMultiPartArchive(t *testing.T) {
 	// Create database
 	dbPath := filepath.Join(tempDir, "test.db")
 	db, _ := db.Connect(dbPath)
-	db.Exec(`CREATE TABLE media (
+	_, _ = db.Exec(`CREATE TABLE media (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		path TEXT UNIQUE NOT NULL,
 		size INTEGER,
@@ -375,13 +375,13 @@ func TestShrinkMultiPartArchive(t *testing.T) {
 	zipPath := filepath.Join(tempDir, "test_archive_multi.zip")
 	copyFile(t, "../testutils/testdata/test_archive_multi.zip", zipPath)
 	info, _ := os.Stat(zipPath)
-	db.Exec(`INSERT INTO media (path, size, media_type) VALUES (?, ?, ?)`,
+	_, _ = db.Exec(`INSERT INTO media (path, size, media_type) VALUES (?, ?, ?)`,
 		zipPath, info.Size(), "archive")
 
 	// Copy parts (side-files, not in DB)
 	copyFile(t, "../testutils/testdata/test_archive_multi.z01", filepath.Join(tempDir, "test_archive_multi.z01"))
 	copyFile(t, "../testutils/testdata/test_archive_multi.z02", filepath.Join(tempDir, "test_archive_multi.z02"))
-	db.Close()
+	_ = db.Close()
 
 	args := []string{"--no-confirm"}
 	err := runShrinkCmd(dbPath, tempDir, args)
@@ -463,7 +463,7 @@ func TestShrinkBrokenArchive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to insert media: %v", err)
 	}
-	db.Close()
+	_ = db.Close()
 
 	// Run shrink - extraction should fail due to missing part
 	args := []string{"--no-confirm", "--move-broken", moveBrokenDir}
@@ -532,7 +532,7 @@ func TestShrinkArchiveKeep(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to insert media: %v", err)
 	}
-	db.Close()
+	_ = db.Close()
 
 	// Run shrink with --move-broken - archive should NOT be moved because it has content (just not processable)
 	args := []string{"--no-confirm", "--move-broken", moveBrokenDir}
@@ -621,12 +621,12 @@ func copyFile(t *testing.T, src, dst string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer in.Close()
+	defer func() { _ = in.Close() }()
 	out, err := os.Create(dst)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer out.Close()
+	defer func() { _ = out.Close() }()
 	_, err = io.Copy(out, in)
 	if err != nil {
 		t.Fatal(err)
@@ -694,7 +694,7 @@ func TestShrinkSkipWithMove(t *testing.T) {
 			if err != nil {
 				t.Fatalf("failed to insert media: %v", err)
 			}
-			db.Close()
+			_ = db.Close()
 
 			// Run shrink with --move
 			args := []string{"--no-confirm", "--move", moveDir}

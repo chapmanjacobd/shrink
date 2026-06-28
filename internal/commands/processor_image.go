@@ -89,7 +89,7 @@ func (p *ImageProcessor) processImage(ctx context.Context, m *models.ShrinkMedia
 	output, err := utils.RunCommandWithSystemd(ctx, imCmd, args, systemdCfg)
 	if err != nil {
 		// Clean up on failure
-		os.Remove(outputPath)
+		_ = os.Remove(outputPath)
 
 		// Categorize ImageMagick errors
 		errorLog := strings.Split(string(output), "\n")
@@ -111,7 +111,7 @@ func (p *ImageProcessor) processImage(ctx context.Context, m *models.ShrinkMedia
 
 	outputStats, err := os.Stat(outputPath)
 	if err != nil || outputStats.Size() == 0 {
-		os.Remove(outputPath)
+		_ = os.Remove(outputPath)
 		return models.ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("output file empty or missing")}
 	}
 
@@ -122,18 +122,18 @@ func (p *ImageProcessor) processImage(ctx context.Context, m *models.ShrinkMedia
 	if strings.HasSuffix(outputPath, ".avif") {
 		width, height, err := ffmpeg.GetImageDimensions(outputPath)
 		if err != nil {
-			os.Remove(outputPath)
+			_ = os.Remove(outputPath)
 			return models.ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("AVIF validation failed: %w", err)}
 		}
 		if width <= 1 || height <= 1 {
-			os.Remove(outputPath)
+			_ = os.Remove(outputPath)
 			return models.ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("AVIF file has invalid dimensions: %dx%d", width, height)}
 		}
 		// Allow buffer percentage plus 10px tolerance for non-resize conversions
 		maxWidth := float64(cfg.Image.MaxImageWidth)*(1+cfg.Common.MaxWidthBuffer) + 10
 		maxHeight := float64(cfg.Image.MaxImageHeight)*(1+cfg.Common.MaxHeightBuffer) + 10
 		if float64(width) > maxWidth || float64(height) > maxHeight {
-			os.Remove(outputPath)
+			_ = os.Remove(outputPath)
 			return models.ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("AVIF file exceeds max dimensions: %dx%d > %.0fx%.0f", width, height, maxWidth, maxHeight)}
 		}
 	}

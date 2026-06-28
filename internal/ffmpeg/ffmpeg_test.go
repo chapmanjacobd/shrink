@@ -72,7 +72,7 @@ func contains(slice []string, val string) bool {
 }
 `
 	sourceFile := filepath.Join(tempDir, "mock.go")
-	os.WriteFile(sourceFile, []byte(mockSource), 0o644)
+	_ = os.WriteFile(sourceFile, []byte(mockSource), 0o644)
 
 	ffprobeExe := filepath.Join(tempDir, "ffprobe")
 	ffmpegExe := filepath.Join(tempDir, "ffmpeg")
@@ -96,16 +96,16 @@ func contains(slice []string, val string) bool {
 	}
 
 	oldPath := os.Getenv("PATH")
-	os.Setenv("PATH", tempDir+string(os.PathListSeparator)+oldPath)
-	os.Setenv("MOCK_FFPROBE_OUTPUT", ffprobeOutput)
-	os.Setenv("MOCK_FFMPEG_BEHAVIOR", ffmpegBehavior)
-	os.Setenv("MOCK_SILENCE_OUTPUT", silenceOutput)
+	_ = os.Setenv("PATH", tempDir+string(os.PathListSeparator)+oldPath)
+	_ = os.Setenv("MOCK_FFPROBE_OUTPUT", ffprobeOutput)
+	_ = os.Setenv("MOCK_FFMPEG_BEHAVIOR", ffmpegBehavior)
+	_ = os.Setenv("MOCK_SILENCE_OUTPUT", silenceOutput)
 
 	return tempDir, func() {
-		os.Setenv("PATH", oldPath)
-		os.Unsetenv("MOCK_FFPROBE_OUTPUT")
-		os.Unsetenv("MOCK_FFMPEG_BEHAVIOR")
-		os.Unsetenv("MOCK_SILENCE_OUTPUT")
+		_ = os.Setenv("PATH", oldPath)
+		_ = os.Unsetenv("MOCK_FFPROBE_OUTPUT")
+		_ = os.Unsetenv("MOCK_FFMPEG_BEHAVIOR")
+		_ = os.Unsetenv("MOCK_SILENCE_OUTPUT")
 	}
 }
 
@@ -129,8 +129,8 @@ func TestProcess_Video(t *testing.T) {
 		Size:     1000000,
 		Duration: 10.0,
 	}
-	os.WriteFile("test.mp4", []byte("dummy"), 0o644)
-	defer os.Remove("test.mp4")
+	_ = os.WriteFile("test.mp4", []byte("dummy"), 0o644)
+	defer func() { _ = os.Remove("test.mp4") }()
 
 	ctx := context.Background()
 	result := processor.Process(ctx, m, cfg, nil)
@@ -160,8 +160,8 @@ func TestProcess_AudioSilence(t *testing.T) {
 		Size:     1000000,
 		Duration: 100.0,
 	}
-	os.WriteFile("test.mp3", []byte("dummy"), 0o644)
-	defer os.Remove("test.mp3")
+	_ = os.WriteFile("test.mp3", []byte("dummy"), 0o644)
+	defer func() { _ = os.Remove("test.mp3") }()
 
 	ctx := context.Background()
 	result := processor.Process(ctx, m, cfg, nil)
@@ -183,8 +183,8 @@ func TestProcess_Stereo360(t *testing.T) {
 		Size:     1000000,
 		Duration: 10.0,
 	}
-	os.WriteFile("test_360.mp4", []byte("dummy"), 0o644)
-	defer os.Remove("test_360.mp4")
+	_ = os.WriteFile("test_360.mp4", []byte("dummy"), 0o644)
+	defer func() { _ = os.Remove("test_360.mp4") }()
 
 	ctx := context.Background()
 	result := processor.Process(ctx, m, cfg, nil)
@@ -209,8 +209,8 @@ func TestProcess_AlbumArt(t *testing.T) {
 		Size:     1000000,
 		Duration: 10.0,
 	}
-	os.WriteFile("test.mp3", []byte("dummy"), 0o644)
-	defer os.Remove("test.mp3")
+	_ = os.WriteFile("test.mp3", []byte("dummy"), 0o644)
+	defer func() { _ = os.Remove("test.mp3") }()
 
 	ctx := context.Background()
 	result := processor.Process(ctx, m, cfg, nil)
@@ -236,8 +236,8 @@ func TestProcess_Subtitles(t *testing.T) {
 		Size:     1000000,
 		Duration: 10.0,
 	}
-	os.WriteFile("test_subs.mkv", []byte("dummy"), 0o644)
-	defer os.Remove("test_subs.mkv")
+	_ = os.WriteFile("test_subs.mkv", []byte("dummy"), 0o644)
+	defer func() { _ = os.Remove("test_subs.mkv") }()
 
 	ctx := context.Background()
 	result := processor.Process(ctx, m, cfg, nil)
@@ -259,8 +259,8 @@ func TestProcess_Timeout(t *testing.T) {
 		Size:     1000000,
 		Duration: 10.0,
 	}
-	os.WriteFile("test.mp4", []byte("dummy"), 0o644)
-	defer os.Remove("test.mp4")
+	_ = os.WriteFile("test.mp4", []byte("dummy"), 0o644)
+	defer func() { _ = os.Remove("test.mp4") }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	defer cancel()

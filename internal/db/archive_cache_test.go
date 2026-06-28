@@ -14,7 +14,7 @@ func TestArchiveCache(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to connect to database: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	// Create media table (required by ConnectWithInit, but we'll create it manually for testing)
 	createMediaSQL := `
@@ -210,7 +210,7 @@ func TestArchiveCacheNoCacheEntry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to connect to database: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	// Create media table
 	createMediaSQL := `

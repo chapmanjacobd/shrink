@@ -16,21 +16,21 @@ func TestInterruptionPreservesOriginal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Case 1: TextProcessor with OCR failure
 	t.Run("TextProcessor_OCR_Failure", func(t *testing.T) {
 		pdfPath := filepath.Join(tmpDir, "test.pdf")
-		os.WriteFile(pdfPath, []byte("original pdf content"), 0o644)
+		_ = os.WriteFile(pdfPath, []byte("original pdf content"), 0o644)
 
 		// Mock ocrmypdf to fail
 		binDir := filepath.Join(tmpDir, "bin")
-		os.MkdirAll(binDir, 0o755)
-		os.WriteFile(filepath.Join(binDir, "ocrmypdf"), []byte("#!/bin/sh\nexit 1"), 0o755)
+		_ = os.MkdirAll(binDir, 0o755)
+		_ = os.WriteFile(filepath.Join(binDir, "ocrmypdf"), []byte("#!/bin/sh\nexit 1"), 0o755)
 
 		oldPath := os.Getenv("PATH")
-		os.Setenv("PATH", binDir+":"+oldPath)
-		defer os.Setenv("PATH", oldPath)
+		_ = os.Setenv("PATH", binDir+":"+oldPath)
+		defer func() { _ = os.Setenv("PATH", oldPath) }()
 
 		p := NewTextProcessor()
 		cfg := &models.ProcessorConfig{
@@ -53,16 +53,16 @@ func TestInterruptionPreservesOriginal(t *testing.T) {
 	// Case 2: TextProcessor interrupted during ebook-convert
 	t.Run("TextProcessor_Convert_Interrupted", func(t *testing.T) {
 		epubPath := filepath.Join(tmpDir, "test.epub")
-		os.WriteFile(epubPath, []byte("original epub content"), 0o644)
+		_ = os.WriteFile(epubPath, []byte("original epub content"), 0o644)
 
 		// Mock ebook-convert to sleep then we cancel
 		binDir := filepath.Join(tmpDir, "bin-convert")
-		os.MkdirAll(binDir, 0o755)
-		os.WriteFile(filepath.Join(binDir, "ebook-convert"), []byte("#!/bin/sh\nsleep 10"), 0o755)
+		_ = os.MkdirAll(binDir, 0o755)
+		_ = os.WriteFile(filepath.Join(binDir, "ebook-convert"), []byte("#!/bin/sh\nsleep 10"), 0o755)
 
 		oldPath := os.Getenv("PATH")
-		os.Setenv("PATH", binDir+":"+oldPath)
-		defer os.Setenv("PATH", oldPath)
+		_ = os.Setenv("PATH", binDir+":"+oldPath)
+		defer func() { _ = os.Setenv("PATH", oldPath) }()
 
 		p := NewTextProcessor()
 		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
@@ -87,19 +87,19 @@ func TestInterruptionPreservesOriginal(t *testing.T) {
 	// Case 3: ArchiveProcessor interrupted
 	t.Run("ArchiveProcessor_Interrupted", func(t *testing.T) {
 		zipPath := filepath.Join(tmpDir, "test.zip")
-		os.WriteFile(zipPath, []byte("original zip content"), 0o644)
+		_ = os.WriteFile(zipPath, []byte("original zip content"), 0o644)
 		z01Path := filepath.Join(tmpDir, "test.z01")
-		os.WriteFile(z01Path, []byte("zip part content"), 0o644)
+		_ = os.WriteFile(z01Path, []byte("zip part content"), 0o644)
 
 		// Mock unar/lsar
 		binDir := filepath.Join(tmpDir, "bin-archive")
-		os.MkdirAll(binDir, 0o755)
-		os.WriteFile(filepath.Join(binDir, "lsar"), []byte("#!/bin/sh\necho '{\"lsarContents\":[]}'"), 0o755)
-		os.WriteFile(filepath.Join(binDir, "unar"), []byte("#!/bin/sh\nsleep 10"), 0o755)
+		_ = os.MkdirAll(binDir, 0o755)
+		_ = os.WriteFile(filepath.Join(binDir, "lsar"), []byte("#!/bin/sh\necho '{\"lsarContents\":[]}'"), 0o755)
+		_ = os.WriteFile(filepath.Join(binDir, "unar"), []byte("#!/bin/sh\nsleep 10"), 0o755)
 
 		oldPath := os.Getenv("PATH")
-		os.Setenv("PATH", binDir+":"+oldPath)
-		defer os.Setenv("PATH", oldPath)
+		_ = os.Setenv("PATH", binDir+":"+oldPath)
+		defer func() { _ = os.Setenv("PATH", oldPath) }()
 
 		cfg := &models.ProcessorConfig{}
 		p := NewArchiveProcessor(nil, cfg)

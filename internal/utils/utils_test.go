@@ -211,7 +211,7 @@ func splitLines(s string) []string {
 func TestFileExists(t *testing.T) {
 	tempDir := t.TempDir()
 	file := filepath.Join(tempDir, "test.txt")
-	os.WriteFile(file, []byte("test"), 0o644)
+	_ = os.WriteFile(file, []byte("test"), 0o644)
 
 	if !FileExists(file) {
 		t.Errorf("expected file to exist")
@@ -253,8 +253,8 @@ func TestGetMountPoint(t *testing.T) {
 
 func TestFolderSize(t *testing.T) {
 	tempDir := t.TempDir()
-	os.WriteFile(filepath.Join(tempDir, "f1.txt"), make([]byte, 1000), 0o644)
-	os.WriteFile(filepath.Join(tempDir, "f2.txt"), make([]byte, 2000), 0o644)
+	_ = os.WriteFile(filepath.Join(tempDir, "f1.txt"), make([]byte, 1000), 0o644)
+	_ = os.WriteFile(filepath.Join(tempDir, "f2.txt"), make([]byte, 2000), 0o644)
 
 	size := FolderSize(tempDir)
 	if size < 3000 {

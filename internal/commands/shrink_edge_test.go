@@ -16,14 +16,14 @@ func TestEdgeCases(t *testing.T) {
 
 	// Create test files
 	corruptVid := filepath.Join(tempDir, "corrupt.avi")
-	os.WriteFile(corruptVid, []byte("not a video"), 0o644)
+	_ = os.WriteFile(corruptVid, []byte("not a video"), 0o644)
 
 	validVid := filepath.Join(tempDir, "valid.avi")
 	copyFile(t, "../testutils/testdata/tiny.avi", validVid)
 
 	// Set timestamps to test preservation
 	modTime := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
-	os.Chtimes(validVid, modTime, modTime)
+	_ = os.Chtimes(validVid, modTime, modTime)
 
 	moveDir := filepath.Join(tempDir, "moved")
 	moveBrokenDir := filepath.Join(tempDir, "broken")
@@ -84,9 +84,9 @@ func TestContinueFrom(t *testing.T) {
 	file2 := filepath.Join(tempDir, "b.avi")
 	file3 := filepath.Join(tempDir, "c.avi")
 
-	os.WriteFile(file1, []byte("dummy1"), 0o644)
-	os.WriteFile(file2, []byte("dummy2"), 0o644)
-	os.WriteFile(file3, []byte("dummy3"), 0o644)
+	_ = os.WriteFile(file1, []byte("dummy1"), 0o644)
+	_ = os.WriteFile(file2, []byte("dummy2"), 0o644)
+	_ = os.WriteFile(file3, []byte("dummy3"), 0o644)
 
 	args := []string{
 		"--no-confirm",
@@ -120,12 +120,12 @@ func TestShrinkImage(t *testing.T) {
 func TestMissingTools(t *testing.T) {
 	// Set PATH to empty to simulate missing tools
 	oldPath := os.Getenv("PATH")
-	os.Setenv("PATH", "")
-	defer os.Setenv("PATH", oldPath)
+	_ = os.Setenv("PATH", "")
+	defer func() { _ = os.Setenv("PATH", oldPath) }()
 
 	tempDir := t.TempDir()
 	img := filepath.Join(tempDir, "test.bmp")
-	os.WriteFile(img, []byte("dummy"), 0o644)
+	_ = os.WriteFile(img, []byte("dummy"), 0o644)
 
 	args := []string{"--no-confirm"}
 	err := runShrinkCmdDir(tempDir, tempDir, args)
@@ -136,20 +136,20 @@ func TestMissingTools(t *testing.T) {
 
 func TestFilterScenarios(t *testing.T) {
 	tempDir := t.TempDir()
-	os.WriteFile(filepath.Join(tempDir, "vid.mp4"), []byte("dummy"), 0o644)
-	os.WriteFile(filepath.Join(tempDir, "aud.mp3"), []byte("dummy"), 0o644)
+	_ = os.WriteFile(filepath.Join(tempDir, "vid.mp4"), []byte("dummy"), 0o644)
+	_ = os.WriteFile(filepath.Join(tempDir, "aud.mp3"), []byte("dummy"), 0o644)
 
 	// Test --video-only
 	args := []string{"--no-confirm", "--video-only", "--simulate"}
-	runShrinkCmdDir(tempDir, tempDir, args)
+	_ = runShrinkCmdDir(tempDir, tempDir, args)
 
 	// Test --audio-only
 	args = []string{"--no-confirm", "--audio-only", "--simulate"}
-	runShrinkCmdDir(tempDir, tempDir, args)
+	_ = runShrinkCmdDir(tempDir, tempDir, args)
 
 	// Test --search
 	args = []string{"--no-confirm", "--search", "vid", "--simulate"}
-	runShrinkCmdDir(tempDir, tempDir, args)
+	_ = runShrinkCmdDir(tempDir, tempDir, args)
 }
 
 func TestConfigProfiles(t *testing.T) {
@@ -177,9 +177,9 @@ func TestConfigProfiles(t *testing.T) {
 
 func TestScanDirectory(t *testing.T) {
 	tempDir := t.TempDir()
-	os.Mkdir(filepath.Join(tempDir, ".git"), 0o755)
-	os.WriteFile(filepath.Join(tempDir, ".git", "config"), []byte("data"), 0o644)
-	os.WriteFile(filepath.Join(tempDir, "vid.mp4"), []byte("data"), 0o644)
+	_ = os.Mkdir(filepath.Join(tempDir, ".git"), 0o755)
+	_ = os.WriteFile(filepath.Join(tempDir, ".git", "config"), []byte("data"), 0o644)
+	_ = os.WriteFile(filepath.Join(tempDir, "vid.mp4"), []byte("data"), 0o644)
 
 	// Should skip .git
 	cmd := &ShrinkCmd{
@@ -200,7 +200,7 @@ func TestFileDisappears(t *testing.T) {
 	// No, just provide a non-existent file in the DB.
 	dbPath := filepath.Join(tempDir, "test.db")
 	db, _ := db.Connect(dbPath)
-	db.Exec(`CREATE TABLE media (
+	_, _ = db.Exec(`CREATE TABLE media (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		path TEXT UNIQUE NOT NULL,
 		size INTEGER,
@@ -210,10 +210,10 @@ func TestFileDisappears(t *testing.T) {
 		width INTEGER DEFAULT 0,
 		height INTEGER DEFAULT 0
 	)`)
-	db.Exec(`INSERT INTO media (path, size, media_type) VALUES (?, ?, ?)`,
+	_, _ = db.Exec(`INSERT INTO media (path, size, media_type) VALUES (?, ?, ?)`,
 		filepath.Join(tempDir, "ghost.avi"), 1000, "video")
-	db.Close()
+	_ = db.Close()
 
 	args := []string{"--no-confirm"}
-	runShrinkCmd(dbPath, tempDir, args)
+	_ = runShrinkCmd(dbPath, tempDir, args)
 }

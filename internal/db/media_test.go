@@ -81,7 +81,7 @@ func createMediaReferenceTables(t *testing.T, db *sql.DB) {
 
 func TestMediaLifecycle(t *testing.T) {
 	db, dbPath := setupTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	_ = dbPath
 
 	// 1. AddMediaEntry
@@ -141,7 +141,7 @@ func TestIsDatabaseDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create file: %v", err)
 	}
-	f.Close()
+	_ = f.Close()
 	if IsDatabaseDirectory(tempFile) {
 		t.Errorf("Expected false for file")
 	}
@@ -154,7 +154,7 @@ func TestIsDatabaseDirectory(t *testing.T) {
 // The expected behavior is to update the existing newPath row and delete oldPath
 func TestUpdateMediaWhenNewPathExists(t *testing.T) {
 	db, dbPath := setupTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	_ = dbPath
 
 	oldPath := "original.mp4"
@@ -200,7 +200,7 @@ func TestUpdateMediaWhenNewPathExists(t *testing.T) {
 // where FTS5 triggers or other FK relationships exist.
 func TestUpdateMediaWithForeignKeyConstraint(t *testing.T) {
 	db, dbPath := setupTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	_ = dbPath
 
 	// Enable foreign keys
@@ -269,7 +269,7 @@ func TestUpdateMediaWithForeignKeyConstraint(t *testing.T) {
 
 func TestUpdateMediaRenamesBuiltInForeignKeyReferences(t *testing.T) {
 	db, _ := setupTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	createMediaReferenceTables(t, db)
 
 	oldPath := "original.mp4"
@@ -319,7 +319,7 @@ func TestUpdateMediaRenamesBuiltInForeignKeyReferences(t *testing.T) {
 
 func TestUpdateMediaMergesPlaylistConflictsBeforeRepointingReferences(t *testing.T) {
 	db, _ := setupTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	createMediaReferenceTables(t, db)
 
 	oldPath := "original.mp4"
@@ -368,7 +368,7 @@ func TestUpdateMediaMergesPlaylistConflictsBeforeRepointingReferences(t *testing
 
 func TestAddMediaEntryWithDimensionsUpsertsWithoutDeletingChildren(t *testing.T) {
 	db, _ := setupTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	createMediaReferenceTables(t, db)
 
 	path := "track.flac"
@@ -403,7 +403,7 @@ func TestAddMediaEntryWithDimensionsUpsertsWithoutDeletingChildren(t *testing.T)
 
 func TestUpdateMediaDoesNotFailOnUnrelatedExistingForeignKeyViolations(t *testing.T) {
 	db, _ := setupTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	createMediaReferenceTables(t, db)
 
 	if _, err := db.Exec("PRAGMA foreign_keys = OFF"); err != nil {

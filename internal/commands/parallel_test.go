@@ -77,11 +77,11 @@ func TestParallelLimits(t *testing.T) {
 	media := []models.ShrinkMedia{}
 	for i := range 5 {
 		vPath := filepath.Join(t.TempDir(), fmt.Sprintf("v%d.mp4", i))
-		os.WriteFile(vPath, []byte("video"), 0o644)
+		_ = os.WriteFile(vPath, []byte("video"), 0o644)
 		media = append(media, models.ShrinkMedia{Path: vPath, Category: "Video"})
 
 		aPath := filepath.Join(t.TempDir(), fmt.Sprintf("a%d.mp3", i))
-		os.WriteFile(aPath, []byte("audio"), 0o644)
+		_ = os.WriteFile(aPath, []byte("audio"), 0o644)
 		media = append(media, models.ShrinkMedia{Path: aPath, Category: "Audio"})
 	}
 

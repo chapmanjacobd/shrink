@@ -21,7 +21,7 @@ func TestValidateTranscode(t *testing.T) {
 	// Case 2: Output file empty
 	tempDir := t.TempDir()
 	emptyFile := filepath.Join(tempDir, "empty.mkv")
-	os.WriteFile(emptyFile, []byte(""), 0o644)
+	_ = os.WriteFile(emptyFile, []byte(""), 0o644)
 	res = p.validateTranscode(m, emptyFile, nil)
 	if res.Success {
 		t.Errorf("expected failure for empty output")

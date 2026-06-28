@@ -76,7 +76,7 @@ func LoadMediaFromDB(db *sql.DB, forceShrink bool, videoOnly, audioOnly, imageOn
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var media []MediaRecord
 	for rows.Next() {
@@ -144,7 +144,7 @@ func updateMediaRecord(sqlDB *sql.DB, oldPath, newPath string, newSize int64, du
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	if _, err := tx.Exec("PRAGMA defer_foreign_keys = ON"); err != nil {
 		return fmt.Errorf("enable deferred foreign keys: %w", err)
@@ -322,16 +322,16 @@ func discoverMediaPathReferences(tx *sql.Tx) ([]mediaPathReference, error) {
 	for rows.Next() {
 		var tableName string
 		if err := rows.Scan(&tableName); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return nil, err
 		}
 		tableNames = append(tableNames, tableName)
 	}
 	if err := rows.Err(); err != nil {
-		rows.Close()
+		_ = rows.Close()
 		return nil, err
 	}
-	rows.Close()
+	_ = rows.Close()
 
 	var refs []mediaPathReference
 	for _, tableName := range tableNames {
@@ -350,7 +350,7 @@ func discoverTableMediaPathReferences(tx *sql.Tx, tableName string) ([]mediaPath
 	if err != nil {
 		return nil, fmt.Errorf("list foreign keys for %s: %w", tableName, err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	type fkRow struct {
 		id       int
@@ -430,7 +430,7 @@ func uniqueConstraintsIncludingColumn(tx *sql.Tx, tableName, columnName string) 
 			partial int
 		)
 		if err := rows.Scan(&seq, &name, &unique, &origin, &partial); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return nil, err
 		}
 		if unique == 0 {
@@ -439,10 +439,10 @@ func uniqueConstraintsIncludingColumn(tx *sql.Tx, tableName, columnName string) 
 		indexes = append(indexes, uniqueIndex{name: name, partial: partial == 1})
 	}
 	if err := rows.Err(); err != nil {
-		rows.Close()
+		_ = rows.Close()
 		return nil, err
 	}
-	rows.Close()
+	_ = rows.Close()
 
 	for _, index := range indexes {
 		indexColumns, hasExpression, err := uniqueIndexColumns(tx, index.name)
@@ -470,7 +470,7 @@ func primaryKeyColumns(tx *sql.Tx, tableName string) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list columns for %s: %w", tableName, err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	pkColumns := map[int]string{}
 	for rows.Next() {
@@ -515,7 +515,7 @@ func uniqueIndexColumns(tx *sql.Tx, indexName string) ([]string, bool, error) {
 	if err != nil {
 		return nil, false, fmt.Errorf("list columns for index %s: %w", indexName, err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	type indexedColumn struct {
 		seq  int
@@ -650,14 +650,14 @@ func BulkMarkOptimizedExtensions(databases []*sql.DB) {
 			)
 			if err != nil {
 				slog.Warn("Failed to bulk mark optimized extensions", "extension", ext, "error", err)
-				tx.Rollback()
+				_ = tx.Rollback()
 				goto NextDB
 			}
 		}
 
 		if err := tx.Commit(); err != nil {
 			slog.Warn("Failed to commit transaction for bulk mark", "error", err)
-			tx.Rollback()
+			_ = tx.Rollback()
 		}
 
 	NextDB:

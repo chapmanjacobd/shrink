@@ -38,7 +38,7 @@ func ClearStdin() {
 	if err := syscall.SetNonblock(fd, true); err != nil {
 		return
 	}
-	defer syscall.SetNonblock(fd, false)
+	defer func() { _ = syscall.SetNonblock(fd, false) }()
 
 	buf := make([]byte, 1024)
 	for {

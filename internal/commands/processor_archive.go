@@ -228,14 +228,14 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *models.Shri
 	output, err := utils.RunCommandWithSystemd(ctx, unar, unarArgs, systemdCfg)
 	if err != nil {
 		// Clean up on failure
-		os.RemoveAll(outputDir)
+		_ = os.RemoveAll(outputDir)
 		return models.ProcessResult{SourcePath: m.Path, PartFiles: partFiles, Error: err, Output: string(output)}
 	}
 
 	// Verify that something was actually extracted
 	entries, err := os.ReadDir(outputDir)
 	if err != nil || len(entries) == 0 {
-		os.RemoveAll(outputDir)
+		_ = os.RemoveAll(outputDir)
 		return models.ProcessResult{SourcePath: m.Path, PartFiles: partFiles, Error: fmt.Errorf("extraction produced no files"), Output: string(output)}
 	}
 
@@ -251,7 +251,7 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *models.Shri
 	var outputFiles []models.ProcessOutputFile
 	processedDirs := make(map[string]bool)
 
-	filepath.Walk(outputDir, func(path string, info os.FileInfo, err error) error {
+	_ = filepath.Walk(outputDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil
 		}
@@ -276,14 +276,14 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *models.Shri
 						totalSize += out.Size
 					}
 					if totalSize < fileSize {
-						os.Remove(path)
+						_ = os.Remove(path)
 						// Add processed outputs
 						outputFiles = append(outputFiles, res.Outputs...)
 					} else {
 						// Keep original, delete outputs
 						for _, out := range res.Outputs {
 							if !pathsEqual(out.Path, path) {
-								os.Remove(out.Path)
+								_ = os.Remove(out.Path)
 							}
 						}
 						// Add original as output
@@ -325,14 +325,14 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *models.Shri
 					}
 					// Only keep if smaller
 					if totalSize < fileSize {
-						os.Remove(path)
+						_ = os.Remove(path)
 						// Add processed outputs
 						outputFiles = append(outputFiles, res.Outputs...)
 					} else {
 						// Delete transcode and keep original
 						for _, out := range res.Outputs {
 							if !pathsEqual(out.Path, path) {
-								os.Remove(out.Path)
+								_ = os.Remove(out.Path)
 							}
 						}
 						// Add original as output
@@ -372,11 +372,11 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *models.Shri
 				// Get part files for multi-part archives BEFORE deleting the main file
 				nestedPartFiles := p.getPartFiles(path)
 				// Delete the nested archive file and all its part files after extraction
-				os.Remove(path)
+				_ = os.Remove(path)
 				// Also delete any multi-part archive parts
 				for _, partFile := range nestedPartFiles {
 					if !pathsEqual(partFile, path) {
-						os.Remove(partFile)
+						_ = os.Remove(partFile)
 					}
 				}
 				// Add nested archive outputs (extracted files from nested archive)
@@ -1211,11 +1211,11 @@ func flattenWrapperFolders(rootDir string) {
 		oldPath := filepath.Join(singlePath, conflictItem)
 		tempPath := filepath.Join(rootDir, conflictItem+".tmp")
 		finalPath := filepath.Join(rootDir, conflictItem)
-		os.Rename(oldPath, tempPath)
-		os.RemoveAll(singlePath)
-		os.Rename(tempPath, finalPath)
+		_ = os.Rename(oldPath, tempPath)
+		_ = os.RemoveAll(singlePath)
+		_ = os.Rename(tempPath, finalPath)
 	} else {
-		os.RemoveAll(singlePath)
+		_ = os.RemoveAll(singlePath)
 	}
 
 	// Recursive call to handle nested wrapper folders (e.g. wrapper/wrapper/contents)

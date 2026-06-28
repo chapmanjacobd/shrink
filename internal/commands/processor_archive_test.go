@@ -13,13 +13,13 @@ func TestFlattenWrapperFolders(t *testing.T) {
 
 	// Create nested folder
 	wrapper := filepath.Join(tempDir, "wrapper")
-	os.Mkdir(wrapper, 0o755)
+	_ = os.Mkdir(wrapper, 0o755)
 
 	inner := filepath.Join(wrapper, "inner")
-	os.Mkdir(inner, 0o755)
+	_ = os.Mkdir(inner, 0o755)
 
 	file := filepath.Join(inner, "test.txt")
-	os.WriteFile(file, []byte("test"), 0o644)
+	_ = os.WriteFile(file, []byte("test"), 0o644)
 
 	// Flatten
 	flattenWrapperFolders(tempDir)

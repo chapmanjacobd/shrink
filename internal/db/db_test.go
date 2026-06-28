@@ -43,14 +43,14 @@ func TestDatabaseLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create schema: %v", err)
 	}
-	db.Close()
+	_ = db.Close()
 
 	// 1. Connect
 	db2, err := Connect(dbPath)
 	if err != nil {
 		t.Fatalf("Connect failed: %v", err)
 	}
-	defer db2.Close()
+	defer func() { _ = db2.Close() }()
 
 	if !DatabaseExists(dbPath) {
 		t.Fatalf("DatabaseExists returned false")
@@ -61,7 +61,7 @@ func TestDatabaseLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ConnectWithInit failed: %v", err)
 	}
-	defer db3.Close()
+	defer func() { _ = db3.Close() }()
 }
 
 func TestEnsureSchemaValidation(t *testing.T) {
@@ -72,7 +72,7 @@ func TestEnsureSchemaValidation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open failed: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	// Create table with missing columns
 	_, err = db.Exec(`
@@ -114,7 +114,7 @@ func TestResolveDatabasePath(t *testing.T) {
 
 	// Create and test if it returns an absolute path if found
 	f, _ := os.Create(dbPath)
-	f.Close()
+	_ = f.Close()
 
 	res, _ = ResolveDatabasePath(dbPath)
 	if !filepath.IsAbs(res) {

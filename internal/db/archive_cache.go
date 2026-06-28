@@ -112,7 +112,7 @@ func BulkSetArchiveCache(db *sql.DB, entries []ArchiveCacheEntry) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	upsertSQL := `
 	INSERT INTO archive_cache (

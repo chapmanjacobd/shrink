@@ -110,7 +110,7 @@ func TestUpdateMetadataPreservesForeignKeyRows(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to open DB: %v", err)
 	}
-	defer sqlDB.Close()
+	defer func() { _ = sqlDB.Close() }()
 
 	_, err = sqlDB.Exec(`
 		CREATE TABLE media (

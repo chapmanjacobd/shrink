@@ -73,7 +73,7 @@ func (c *ShrinkCmd) enrichMetadata(m *models.ShrinkMedia) {
 // applyTimestamps applies timestamps to a file or folder (recursively for folders)
 func applyTimestamps(path string, atime, mtime time.Time) {
 	// Apply to the path itself
-	os.Chtimes(path, atime, mtime)
+	_ = os.Chtimes(path, atime, mtime)
 
 	// If it's a directory, walk and apply to all contents
 	info, err := os.Stat(path)
@@ -81,11 +81,11 @@ func applyTimestamps(path string, atime, mtime time.Time) {
 		return
 	}
 
-	filepath.Walk(path, func(p string, info os.FileInfo, err error) error {
+	_ = filepath.Walk(path, func(p string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil
 		}
-		os.Chtimes(p, atime, mtime)
+		_ = os.Chtimes(p, atime, mtime)
 		return nil
 	})
 }

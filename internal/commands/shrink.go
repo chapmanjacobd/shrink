@@ -81,7 +81,6 @@ func (c *ShrinkCmd) Run(ctx *kong.Context) error {
 
 	// Filter by available tools
 	filteredMedia := c.filterByTools(allMedia, registry, tools)
-	allMedia = nil // Free memory
 	slog.Info("Filtered media by tools",
 		"count", len(filteredMedia),
 		"ffmpeg", tools.FFmpeg,
@@ -124,7 +123,6 @@ func (c *ShrinkCmd) Run(ctx *kong.Context) error {
 	// Analyze and decide what to shrink
 	slog.Info("Analyzing files", "count", len(filteredMedia))
 	toShrink := engine.analyzeMedia(filteredMedia)
-	filteredMedia = nil // Free memory
 	slog.Info("Analysis complete", "selected", len(toShrink))
 
 	if len(toShrink) == 0 {
@@ -144,7 +142,6 @@ func (c *ShrinkCmd) Run(ctx *kong.Context) error {
 		}
 	}
 	toShrink = deduped
-	seenPaths = nil // Free memory
 	slog.Info("Deduplication complete", "unique_count", len(toShrink))
 
 	// Apply continue-from filter
@@ -182,7 +179,6 @@ func (c *ShrinkCmd) Run(ctx *kong.Context) error {
 
 	// Process with parallelism
 	engine.processMedia(runCtx, toShrink)
-	toShrink = nil // Free memory
 
 	// Final summary
 	metrics.LogSummary()
@@ -226,7 +222,7 @@ func (c *ShrinkCmd) initDatabases() error {
 func (c *ShrinkCmd) closeDatabases() {
 	for _, sqlDB := range c.sqlDBs {
 		if sqlDB != nil {
-			sqlDB.Close()
+			_ = sqlDB.Close()
 		}
 	}
 }
@@ -489,7 +485,7 @@ func (c *ShrinkCmd) Confirm() bool {
 	utils.ClearStdin()
 	fmt.Print("\nProceed with shrinking? [y/N] ")
 	var response string
-	fmt.Scanln(&response)
+	_, _ = fmt.Scanln(&response)
 	return strings.ToLower(response) == "y"
 }
 

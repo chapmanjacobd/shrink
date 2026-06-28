@@ -87,7 +87,7 @@ func RunScenario(t *testing.T, s Scenario, runCmd func(dbPath, tempDir string, a
 	}
 
 	// Close DB so the command under test can open it without locking issues
-	db.Close()
+	_ = db.Close()
 
 	// 4. Run the command
 	err = runCmd(dbPath, tempDir, s.CLIArgs)
@@ -100,7 +100,7 @@ func RunScenario(t *testing.T, s Scenario, runCmd func(dbPath, tempDir string, a
 	if err != nil {
 		t.Fatalf("failed to re-open db: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	// Files that MUST exist
 	for _, expectedFile := range s.ExpectFiles {
@@ -167,12 +167,12 @@ func copyFile(t *testing.T, src, dst string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer in.Close()
+	defer func() { _ = in.Close() }()
 	out, err := os.Create(dst)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer out.Close()
+	defer func() { _ = out.Close() }()
 	_, err = io.Copy(out, in)
 	if err != nil {
 		t.Fatal(err)

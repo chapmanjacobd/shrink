@@ -79,8 +79,8 @@ p > .calibre3:not(:only-of-type) {
 	cssPath := ""
 	if err == nil {
 		cssPath = tmpFile.Name()
-		tmpFile.WriteString(css)
-		tmpFile.Close()
+		_, _ = tmpFile.WriteString(css)
+		_ = tmpFile.Close()
 	}
 
 	return &TextProcessor{
@@ -96,7 +96,7 @@ func (p *TextProcessor) CanProcess(m *models.ShrinkMedia) bool {
 // Cleanup releases resources held by the TextProcessor
 func (p *TextProcessor) Cleanup() {
 	if p.cssPath != "" {
-		os.Remove(p.cssPath)
+		_ = os.Remove(p.cssPath)
 	}
 }
 
@@ -159,12 +159,12 @@ func (p *TextProcessor) processText(ctx context.Context, m *models.ShrinkMedia, 
 
 	output, err := utils.RunCommandWithSystemd(ctx, ebookConvert, args, systemdCfg)
 	if err != nil {
-		os.RemoveAll(outputDir)
+		_ = os.RemoveAll(outputDir)
 		return models.ProcessResult{SourcePath: m.Path, Error: err, Output: string(output)}
 	}
 
 	if !p.folderExists(outputDir) {
-		os.RemoveAll(outputDir)
+		_ = os.RemoveAll(outputDir)
 		return models.ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("calibre output folder missing")}
 	}
 
@@ -177,12 +177,12 @@ func (p *TextProcessor) processText(ctx context.Context, m *models.ShrinkMedia, 
 	// Step 6: Repackage to EPUB
 	epubPath := strings.TrimSuffix(m.Path, ext) + ".OEB.epub"
 	if err := p.packageToEPUB(ctx, outputDir, epubPath, cfg); err != nil {
-		os.RemoveAll(outputDir)
+		_ = os.RemoveAll(outputDir)
 		return models.ProcessResult{SourcePath: m.Path, Error: err}
 	}
 
 	// Step 7: Clean up .OEB folder
-	os.RemoveAll(outputDir)
+	_ = os.RemoveAll(outputDir)
 
 	// Step 8: Return result with EPUB path
 	var outputSize int64
@@ -267,11 +267,11 @@ func (p *TextProcessor) runOCR(ctx context.Context, path string, cfg *models.Pro
 		if strings.Contains(outputStr, "already contains text") ||
 			strings.Contains(outputStr, "skipping") {
 			slog.Info("Skipping OCR (PDF already has text)", "path", path)
-			os.Remove(outputPath)
+			_ = os.Remove(outputPath)
 			return ""
 		}
 		slog.Warn("OCR failed", "path", path, "error", err, "output", outputStr)
-		os.Remove(outputPath)
+		_ = os.Remove(outputPath)
 		return ""
 	}
 
@@ -300,7 +300,7 @@ func (p *TextProcessor) getCalibreVersion() (int, int, int) {
 		if strings.HasPrefix(part, "(") && i+2 < len(parts) {
 			version := strings.TrimSuffix(parts[i+2], ")")
 			var major, minor, patch int
-			fmt.Sscanf(version, "%d.%d.%d", &major, &minor, &patch)
+			_, _ = fmt.Sscanf(version, "%d.%d.%d", &major, &minor, &patch)
 			return major, minor, patch
 		}
 	}
@@ -353,7 +353,7 @@ func (p *TextProcessor) processEbookImagesWithManifest(ctx context.Context, outp
 			slog.Warn("Failed to convert ebook image", "path", img, "error", cmdErr)
 			// Clean up partial transcode if original still exists
 			if _, statErr := os.Stat(img); statErr == nil {
-				os.Remove(outputPath)
+				_ = os.Remove(outputPath)
 			}
 			continue
 		}
@@ -362,14 +362,14 @@ func (p *TextProcessor) processEbookImagesWithManifest(ctx context.Context, outp
 		if info, err := os.Stat(outputPath); err == nil {
 			if oldInfo, oldErr := os.Stat(img); oldErr == nil {
 				if info.Size() > 0 && info.Size() < oldInfo.Size() {
-					os.Remove(img)
+					_ = os.Remove(img)
 					converted[filepath.Base(img)] = filepath.Base(outputPath)
 				} else {
-					os.Remove(outputPath)
+					_ = os.Remove(outputPath)
 				}
 			} else {
 				// If we can't stat original, something is very wrong, cleanup new file
-				os.Remove(outputPath)
+				_ = os.Remove(outputPath)
 			}
 		}
 	}
@@ -483,7 +483,7 @@ func (p *TextProcessor) updateManifest(outputDir string, converted map[string]st
 	}
 
 	if modified {
-		os.WriteFile(manifestPath, []byte(text), 0o644)
+		_ = os.WriteFile(manifestPath, []byte(text), 0o644)
 	}
 }
 
@@ -542,7 +542,7 @@ func (p *TextProcessor) updateImageReferences(dir string, converted map[string]s
 		return
 	}
 
-	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+	if err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil
 		}
@@ -551,7 +551,9 @@ func (p *TextProcessor) updateImageReferences(dir string, converted map[string]s
 			p.updateReferencesInFile(path, converted)
 		}
 		return nil
-	})
+	}); err != nil {
+		slog.Warn("Failed to walk directory for image reference updates", "dir", dir, "error", err)
+	}
 }
 
 // updateReferencesInFile updates image references in a single HTML file
@@ -571,7 +573,7 @@ func (p *TextProcessor) updateReferencesInFile(path string, converted map[string
 	}
 
 	if modified {
-		os.WriteFile(path, []byte(text), 0o644)
+		_ = os.WriteFile(path, []byte(text), 0o644)
 	}
 }
 

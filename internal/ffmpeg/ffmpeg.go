@@ -117,7 +117,7 @@ func (p *FFmpegProcessor) Process(ctx context.Context, m *models.ShrinkMedia, cf
 	output, err := utils.RunCommandWithSystemd(ctx, ffmpeg, args, systemdCfg)
 	if err != nil {
 		// Clean up any incomplete output file
-		os.Remove(outputPath)
+		_ = os.Remove(outputPath)
 
 		// Categorize FFmpeg errors
 		errorLog := strings.Split(string(output), "\n")
@@ -130,12 +130,12 @@ func (p *FFmpegProcessor) Process(ctx context.Context, m *models.ShrinkMedia, cf
 			return models.ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("ffmpeg environment error: %w", err), Output: string(output), StopAll: true}
 		} else if isUnsupported {
 			// Unsupported codec/format - remove transcode attempt and return original
-			os.Remove(outputPath)
+			_ = os.Remove(outputPath)
 			slog.Info("Unsupported format, keeping original", "path", m.Path)
 			return models.ProcessResult{SourcePath: m.Path, Success: true, Outputs: []models.ProcessOutputFile{{Path: m.Path, Size: m.Size}}}
 		} else if isFileErr {
 			// File error (corrupt, missing, etc.) - remove transcode attempt
-			os.Remove(outputPath)
+			_ = os.Remove(outputPath)
 			return models.ProcessResult{SourcePath: m.Path, Success: false, Error: fmt.Errorf("file error: %w", err), Output: string(output)}
 		}
 
@@ -192,19 +192,16 @@ func (p *FFmpegProcessor) buildFFmpegArgs(inputPath, outputPath string, probe *F
 				args = append(args, fmt.Sprintf("-vf:v:%d", videoOutIdx), strings.Join(filters, ","))
 			}
 		}
-		videoOutIdx++
 	} else if albumArtStream != nil {
 		args = append(args,
 			"-map", fmt.Sprintf("0:%d", albumArtStream.Index),
 			fmt.Sprintf("-c:v:%d", videoOutIdx), "copy")
-		videoOutIdx++
 	}
 
 	// Audio options
 	if audioStream != nil {
 		args = append(args, "-map", fmt.Sprintf("0:%d", audioStream.Index))
 		args = append(args, p.buildAudioOptions(audioOutIdx, audioStream.Channels, audioStream.BitRate, audioStream.SampleRate)...)
-		audioOutIdx++
 
 		// Silence detection for splitting
 		isSplit := p.config.Audio.AlwaysSplit || (videoStream == nil && p.config.Audio.SplitLongerThan > 0 && probe.Duration > p.config.Audio.SplitLongerThan)

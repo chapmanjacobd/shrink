@@ -797,9 +797,9 @@ func (e *Engine) handleProcessingError(ctx context.Context, m models.ShrinkMedia
 			// For other media types, ffprobe failure is too risky to delete
 			db.MarkDeleted(e.sqlDBs, m.Path)
 			db.MarkUnplayable(e.sqlDBs, m.Path)
-			os.Remove(m.Path)
+			_ = os.Remove(m.Path)
 			if result.SourcePath != "" && result.SourcePath != m.Path {
-				os.Remove(result.SourcePath)
+				_ = os.Remove(result.SourcePath)
 			}
 		} else {
 			// Just mark as error without moving/deleting
@@ -810,13 +810,13 @@ func (e *Engine) handleProcessingError(ctx context.Context, m models.ShrinkMedia
 	// Clean up any partial outputs and intermediate source files
 	for _, out := range result.Outputs {
 		if out.Path != m.Path && out.Path != result.SourcePath {
-			os.RemoveAll(out.Path)
+			_ = os.RemoveAll(out.Path)
 		}
 	}
 	if result.SourcePath != "" && result.SourcePath != m.Path {
 		// Only remove intermediate source if we're not deleting unplayable and not user-canceled
 		if !isUnplayableVideoAudio(m, result.Error) && !isUserCancel {
-			os.Remove(result.SourcePath)
+			_ = os.Remove(result.SourcePath)
 		}
 	}
 
@@ -853,9 +853,9 @@ func (e *Engine) handleUnsuccessfulProcessing(m models.ShrinkMedia, result model
 		// For other media types, ffprobe failure is too risky to delete
 		db.MarkDeleted(e.sqlDBs, m.Path)
 		db.MarkUnplayable(e.sqlDBs, m.Path)
-		os.Remove(m.Path)
+		_ = os.Remove(m.Path)
 		if result.SourcePath != "" && result.SourcePath != m.Path {
-			os.Remove(result.SourcePath)
+			_ = os.Remove(result.SourcePath)
 		}
 	} else {
 		// Mark as error without moving/deleting
@@ -865,12 +865,12 @@ func (e *Engine) handleUnsuccessfulProcessing(m models.ShrinkMedia, result model
 	// Clean up any partial outputs and intermediate source files
 	for _, out := range result.Outputs {
 		if out.Path != m.Path && out.Path != result.SourcePath {
-			os.RemoveAll(out.Path)
+			_ = os.RemoveAll(out.Path)
 		}
 	}
 	if result.SourcePath != "" && result.SourcePath != m.Path {
 		if !isUnplayableVideoAudio(m, result.Error) {
-			os.Remove(result.SourcePath)
+			_ = os.Remove(result.SourcePath)
 		}
 	}
 
@@ -911,7 +911,7 @@ func (e *Engine) finalizeFileSwap(m models.ShrinkMedia, result models.ProcessRes
 
 			if !isOutput {
 				db.MarkDeleted(e.sqlDBs, m.Path)
-				os.Remove(m.Path)
+				_ = os.Remove(m.Path)
 			}
 		}
 
@@ -925,7 +925,7 @@ func (e *Engine) finalizeFileSwap(m models.ShrinkMedia, result models.ProcessRes
 				}
 			}
 			if !foundInOutputs {
-				os.Remove(result.SourcePath)
+				_ = os.Remove(result.SourcePath)
 			}
 		}
 
@@ -935,7 +935,7 @@ func (e *Engine) finalizeFileSwap(m models.ShrinkMedia, result models.ProcessRes
 				partFile = filepath.Join(filepath.Dir(m.Path), partFile)
 			}
 			if !pathsEqual(partFile, m.Path) && !pathsEqual(partFile, result.SourcePath) {
-				os.Remove(partFile)
+				_ = os.Remove(partFile)
 			}
 		}
 	} else {
@@ -944,12 +944,12 @@ func (e *Engine) finalizeFileSwap(m models.ShrinkMedia, result models.ProcessRes
 
 		for _, out := range result.Outputs {
 			if !pathsEqual(out.Path, m.Path) && !pathsEqual(out.Path, result.SourcePath) {
-				os.RemoveAll(out.Path)
+				_ = os.RemoveAll(out.Path)
 			}
 		}
 		// If an intermediate source was created (e.g. OCR), delete it too
 		if result.SourcePath != "" && !pathsEqual(result.SourcePath, m.Path) {
-			os.Remove(result.SourcePath)
+			_ = os.Remove(result.SourcePath)
 		}
 	}
 }
