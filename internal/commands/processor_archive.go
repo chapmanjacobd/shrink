@@ -1025,18 +1025,27 @@ func (p *ArchiveProcessor) getPartFilesByGlob(partFilesMap map[string]bool, path
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			partContents, failed, _ := p.lsarWithStatus(candidatePath)
-			if !failed && len(partContents) > 0 {
-				var partFileNames []string
-				for _, c := range partContents {
-					partFileNames = append(partFileNames, c.Path)
-				}
-				sort.Strings(partFileNames)
-				partFilesList := strings.Join(partFileNames, "|")
+			// Skip lsar verification for well-known multi-part archive extensions
+			// (.zNN, .rNN, .NNN patterns). These extensions uniquely identify
+			// archive parts and lsar may return incorrect/partial results for
+			// .zNN files on some platforms (notably Windows).
+			candidateExt := strings.ToLower(filepath.Ext(candidatePath))
+			skipVerification := isMultiPartArchiveExt(candidateExt)
 
-				if partFilesList != mainFilesList {
-					slog.Warn("Glob found part with different contents, skipping", "path", candidatePath, "mainPath", path)
-					return
+			if !skipVerification {
+				partContents, failed, _ := p.lsarWithStatus(candidatePath)
+				if !failed && len(partContents) > 0 {
+					var partFileNames []string
+					for _, c := range partContents {
+						partFileNames = append(partFileNames, c.Path)
+					}
+					sort.Strings(partFileNames)
+					partFilesList := strings.Join(partFileNames, "|")
+
+					if partFilesList != mainFilesList {
+						slog.Warn("Glob found part with different contents, skipping", "path", candidatePath, "mainPath", path)
+						return
+					}
 				}
 			}
 
