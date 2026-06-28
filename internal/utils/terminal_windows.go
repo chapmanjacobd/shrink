@@ -94,10 +94,9 @@ func ClearStdin() {
 
 // TerminalSize tracks the current terminal dimensions
 type TerminalSize struct {
-	mu       sync.RWMutex
-	width    int
-	height   int
-	initOnce sync.Once
+	mu     sync.RWMutex
+	width  int
+	height int
 }
 
 var terminalSize TerminalSize

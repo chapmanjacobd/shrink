@@ -333,7 +333,7 @@ func (e *Engine) analyzeCategory(media []models.ShrinkMedia, indices []int, cate
 		var lastThroughput int64
 		direction := int32(1)
 		var accumulatedCompleted int64
-		var lastRecalcTime = time.Now()
+		lastRecalcTime := time.Now()
 		const failureHalfLife = 5.0 * 60.0          // 5 minutes in seconds
 		const decayFactor = 0.693 / failureHalfLife // ln(2) / halfLife for exponential decay
 
@@ -706,7 +706,7 @@ func (e *Engine) processSingle(ctx context.Context, m models.ShrinkMedia) models
 		totalNewSize += out.Size
 	}
 
-	keepNewFiles := !(e.cfg.Common.DeleteLarger && !e.cfg.Common.ForceShrink && totalNewSize > m.Size)
+	keepNewFiles := !e.cfg.Common.DeleteLarger || e.cfg.Common.ForceShrink || totalNewSize <= m.Size
 
 	e.finalizeFileSwap(m, result, keepNewFiles)
 
