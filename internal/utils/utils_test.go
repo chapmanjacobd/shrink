@@ -3,6 +3,7 @@ package utils
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -124,6 +125,87 @@ func TestCommandExists(t *testing.T) {
 	if CommandExists("nonexistentcommand12345") {
 		t.Errorf("expected nonexistent command to not exist")
 	}
+}
+
+func TestPrintTableToString(t *testing.T) {
+	t.Run("empty headers", func(t *testing.T) {
+		if got := PrintTableToString(nil, nil); got != "" {
+			t.Errorf("expected empty, got %q", got)
+		}
+	})
+
+	t.Run("no MISSING in output", func(t *testing.T) {
+		headers := []string{"Media Type", "Queued", "Skip", "Fail", "OK", "Saved", "Size", "Speed", "ETA"}
+		rows := [][]string{{"video", "1", "0", "0", "5", "100 MB", "10 MB/s", "5s"}}
+		got := PrintTableToString(headers, rows)
+		if containsMissing(got) {
+			t.Errorf("output contains %%!s(MISSING):\n%s", got)
+		}
+	})
+
+	t.Run("all headers present in output", func(t *testing.T) {
+		headers := []string{"Type", "Count", "Size"}
+		rows := [][]string{{"txt", "10", "1 KB"}}
+		got := PrintTableToString(headers, rows)
+		for _, h := range headers {
+			if !strings.Contains(got, h) {
+				t.Errorf("output missing header %q:\n%s", h, got)
+			}
+		}
+	})
+
+	t.Run("all values present in output", func(t *testing.T) {
+		headers := []string{"Name", "Value"}
+		rows := [][]string{{"foo", "bar"}, {"baz", "qux"}}
+		got := PrintTableToString(headers, rows)
+		for _, cell := range []string{"foo", "bar", "baz", "qux"} {
+			if !strings.Contains(got, cell) {
+				t.Errorf("output missing value %q:\n%s", cell, got)
+			}
+		}
+	})
+
+	t.Run("right-aligned numeric columns", func(t *testing.T) {
+		headers := []string{"Name", "Count"}
+		rows := [][]string{{"a", "100"}, {"b", "5"}}
+		got := PrintTableToString(headers, rows)
+		// Count column should be right-aligned: "100" lined up, "  5" padded
+		if containsMissing(got) {
+			t.Errorf("output contains %%!s(MISSING):\n%s", got)
+		}
+		lines := splitLines(got)
+		if len(lines) != 3 {
+			t.Errorf("expected 3 lines, got %d", len(lines))
+		}
+	})
+
+	t.Run("empty rows prints header only", func(t *testing.T) {
+		got := PrintTableToString([]string{"A", "B"}, nil)
+		lines := splitLines(got)
+		if len(lines) != 1 {
+			t.Errorf("expected 1 line (header only), got %d lines:\n%s", len(lines), got)
+		}
+	})
+
+	t.Run("extra columns in row are ignored", func(t *testing.T) {
+		headers := []string{"A", "B"}
+		rows := [][]string{{"1", "2", "3"}}
+		got := PrintTableToString(headers, rows)
+		if containsMissing(got) {
+			t.Errorf("output contains %%!s(MISSING):\n%s", got)
+		}
+		if !strings.Contains(got, "1") || !strings.Contains(got, "2") {
+			t.Errorf("output missing expected values:\n%s", got)
+		}
+	})
+}
+
+func containsMissing(s string) bool {
+	return strings.Contains(s, "%!s(MISSING)")
+}
+
+func splitLines(s string) []string {
+	return strings.Split(strings.TrimSuffix(s, "\n"), "\n")
 }
 
 func TestFileExists(t *testing.T) {

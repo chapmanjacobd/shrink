@@ -679,7 +679,7 @@ func PrintTableToString(headers []string, rows [][]string) string {
 	for i, h := range headers {
 		headerArgs[i] = h
 	}
-	fmt.Fprintf(&sb, headerFormat, headerArgs)
+	fmt.Fprintf(&sb, headerFormat, headerArgs...)
 
 	// Print rows
 	for _, row := range rows {
@@ -691,7 +691,7 @@ func PrintTableToString(headers []string, rows [][]string) string {
 				rowArgs[i] = ""
 			}
 		}
-		fmt.Fprintf(&sb, rowFormat, rowArgs)
+		fmt.Fprintf(&sb, rowFormat, rowArgs...)
 	}
 
 	return sb.String()
