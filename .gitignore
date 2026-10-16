@@ -1,4 +1,4 @@
 /shrink
 /coverage.out
 /fs
-/*.db*
+*.db*
