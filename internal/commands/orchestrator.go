@@ -195,9 +195,9 @@ func (e *Engine) analyzeCategory(media []models.ShrinkMedia, indices []int, cate
 	}, min(len(indices), 1000))
 
 	var wg sync.WaitGroup
-	var completedJobs int64
-	var failedJobs int64
-	var activeWorkers int32
+	var completedJobs atomic.Int64
+	var failedJobs atomic.Int64
+	var activeWorkers atomic.Int32
 	var totalWorkerSamples int64
 	var workerSum int64
 	var concurrency atomic.Int32
@@ -210,11 +210,11 @@ func (e *Engine) analyzeCategory(media []models.ShrinkMedia, indices []int, cate
 	// Worker function
 	startWorker := func() {
 		wg.Go(func() {
-			atomic.AddInt32(&activeWorkers, 1)
-			defer atomic.AddInt32(&activeWorkers, -1)
+			activeWorkers.Add(1)
+			defer activeWorkers.Add(-1)
 
 			for {
-				if atomic.LoadInt32(&activeWorkers) > concurrency.Load() {
+				if activeWorkers.Load() > concurrency.Load() {
 					return // Scale down
 				}
 				idx, ok := <-jobs
@@ -290,7 +290,7 @@ func (e *Engine) analyzeCategory(media []models.ShrinkMedia, indices []int, cate
 				if m.Category == "Archived" && m.FutureSize == 0 && m.Size > 0 && !broken && !skip {
 					// Archive analysis failed (likely timeout) - skip but don't count as completed
 					failed = true
-					atomic.AddInt64(&failedJobs, 1)
+					failedJobs.Add(1)
 					atomic.AddInt64(globalFailedJobs, 1)
 					// Increment recentFailures (stored as float64 bits)
 					oldBits := recentFailures.Load()
@@ -309,7 +309,7 @@ func (e *Engine) analyzeCategory(media []models.ShrinkMedia, indices []int, cate
 				}{idx, *m, skip, broken, failed, skipMove}
 
 				if !failed {
-					atomic.AddInt64(&completedJobs, 1)
+					completedJobs.Add(1)
 				}
 			}
 		})
@@ -344,8 +344,8 @@ func (e *Engine) analyzeCategory(media []models.ShrinkMedia, indices []int, cate
 		for {
 			select {
 			case <-ticker.C:
-				completed := atomic.LoadInt64(&completedJobs)
-				failed := atomic.LoadInt64(&failedJobs)
+				completed := completedJobs.Load()
+				failed := failedJobs.Load()
 				throughput := completed - lastCompleted
 				failedCount := failed - lastFailed
 				lastCompleted = completed
@@ -407,7 +407,7 @@ func (e *Engine) analyzeCategory(media []models.ShrinkMedia, indices []int, cate
 
 				concurrency.Store(newTarget)
 
-				active := atomic.LoadInt32(&activeWorkers)
+				active := activeWorkers.Load()
 				for active < newTarget {
 					startWorker()
 					active++
@@ -431,8 +431,8 @@ func (e *Engine) analyzeCategory(media []models.ShrinkMedia, indices []int, cate
 		for {
 			select {
 			case <-ticker.C:
-				completed := atomic.LoadInt64(&completedJobs)
-				workers := atomic.LoadInt32(&activeWorkers)
+				completed := completedJobs.Load()
+				workers := activeWorkers.Load()
 				if completed > 0 || workers > 0 {
 					status := fmt.Sprintf("\rAnalyzing %d/%d %s files", completed, len(indices), strings.ToLower(category))
 					if workers > 0 {
@@ -445,8 +445,8 @@ func (e *Engine) analyzeCategory(media []models.ShrinkMedia, indices []int, cate
 				}
 			case <-progressDone:
 				// Final update
-				completed := atomic.LoadInt64(&completedJobs)
-				workers := atomic.LoadInt32(&activeWorkers)
+				completed := completedJobs.Load()
+				workers := activeWorkers.Load()
 				status := fmt.Sprintf("\rAnalyzed %d/%d %s files", completed, len(indices), strings.ToLower(category))
 				if workers == 0 && totalWorkerSamples > 0 {
 					avgWorkers := float64(workerSum) / float64(totalWorkerSamples)

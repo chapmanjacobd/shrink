@@ -299,7 +299,7 @@ func (m *ShrinkMetrics) PrintProgress() {
 	if collapse {
 		collapsed := make(map[string]*MediaTypeStats)
 		for mt, stats := range m.types {
-			category := strings.Split(mt, ":")[0]
+			category, _, _ := strings.Cut(mt, ":")
 			cStats := collapsed[category]
 			if cStats == nil {
 				cStats = &MediaTypeStats{}

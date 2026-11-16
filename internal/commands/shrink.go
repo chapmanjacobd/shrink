@@ -250,7 +250,7 @@ func (c *ShrinkCmd) loadAllMedia() ([]models.ShrinkMedia, error) {
 				Ext:        strings.ToLower(filepath.Ext(r.Path)),
 			}
 			// Enrich metadata for video/audio files missing dimensions (backwards compatibility)
-			if (r.Width == 0 || r.Height == 0) && (utils.VideoExtensionMap[m.Ext]) {
+			if (r.Width == 0 || r.Height == 0) && utils.VideoExtensionMap[m.Ext] {
 				c.enrichMetadata(&m)
 			}
 			allMedia = append(allMedia, m)
