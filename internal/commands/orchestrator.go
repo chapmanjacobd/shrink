@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -499,10 +500,16 @@ func (e *Engine) processSingle(ctx context.Context, m models.ShrinkMedia) models
 	// Capture original timestamps before processing
 	originalAtime, originalMtime, err := e.captureTimestamps(m.Path)
 	if err != nil {
-		// File doesn't exist - mark as deleted (no status code needed)
-		slog.Info("File not found, marking as deleted", "path", m.Path)
-		e.metrics.RecordSkipped(m.DisplayCategory())
-		db.MarkDeleted(e.sqlDBs, m.Path)
+		if errors.Is(err, os.ErrNotExist) {
+			// File doesn't exist - mark as deleted (no status code needed)
+			slog.Info("File not found, marking as deleted", "path", m.Path)
+			e.metrics.RecordSkipped(m.DisplayCategory())
+			db.MarkDeleted(e.sqlDBs, m.Path)
+		} else {
+			// Permission, I/O, or mount errors must not be treated as deletions.
+			slog.Error("Failed to access file, leaving database state unchanged", "path", m.Path, "error", err)
+			e.metrics.RecordSkipped(m.DisplayCategory())
+		}
 		return models.ProcessResult{SourcePath: m.Path, Error: err}
 	}
 
@@ -545,7 +552,7 @@ func (e *Engine) processSingle(ctx context.Context, m models.ShrinkMedia) models
 	e.finalizeFileSwap(m, result, keepNewFiles)
 
 	if keepNewFiles {
-		e.finalizeSuccessfulProcessing(&m, result, originalAtime, originalMtime, elapsedSeconds)
+		e.finalizeSuccessfulProcessing(ctx, &m, result, originalAtime, originalMtime, elapsedSeconds)
 	} else {
 		// Note: If keepNewFiles is false, finalizeFileSwap already marked as TooLarge
 		e.metrics.RecordFailure(m.DisplayCategory(), elapsedSeconds)
@@ -712,10 +719,10 @@ func (e *Engine) handleUnsuccessfulProcessing(m models.ShrinkMedia, result model
 }
 
 // finalizeSuccessfulProcessing handles post-processing for successful operations.
-func (e *Engine) finalizeSuccessfulProcessing(m *models.ShrinkMedia, result models.ProcessResult,
+func (e *Engine) finalizeSuccessfulProcessing(ctx context.Context, m *models.ShrinkMedia, result models.ProcessResult,
 	originalAtime, originalMtime time.Time, elapsed float64,
 ) {
-	e.preserveTimestamps(m, result, originalAtime, originalMtime)
+	e.preserveTimestamps(ctx, m, result, originalAtime, originalMtime)
 	for _, out := range result.Outputs {
 		e.ui.MoveTo(out.Path)
 	}
@@ -807,14 +814,14 @@ func (e *Engine) updateMetadata(m models.ShrinkMedia, result models.ProcessResul
 	}
 }
 
-func (e *Engine) preserveTimestamps(m *models.ShrinkMedia, result models.ProcessResult, originalAtime, originalMtime time.Time) {
+func (e *Engine) preserveTimestamps(ctx context.Context, m *models.ShrinkMedia, result models.ProcessResult, originalAtime, originalMtime time.Time) {
 	if len(result.Outputs) > 0 && !originalAtime.IsZero() {
 		outPath := result.Outputs[0].Path
 		if outPath != "" {
 			applyTimestamps(outPath, originalAtime, originalMtime)
 			// Update duration if needed
 			if m.Category == "Audio" || m.Category == "Video" {
-				if newDuration := e.getActualDuration(outPath); newDuration > 0 {
+				if newDuration := e.getActualDuration(ctx, outPath); newDuration > 0 {
 					m.Duration = newDuration
 				}
 			}
@@ -862,8 +869,8 @@ func (e *Engine) getTimeout(m models.ShrinkMedia) time.Duration {
 }
 
 // getActualDuration probes a file and returns its actual duration.
-func (e *Engine) getActualDuration(path string) float64 {
-	cmd := exec.CommandContext(context.Background(), "ffprobe",
+func (e *Engine) getActualDuration(ctx context.Context, path string) float64 {
+	cmd := exec.CommandContext(ctx, "ffprobe",
 		"-v", "quiet",
 		"-print_format", "json",
 		"-show_format",
