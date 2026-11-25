@@ -5,8 +5,10 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"testing"
+	"time"
 
 	dbpkg "github.com/chapmanjacobd/shrink/internal/db"
 	"github.com/chapmanjacobd/shrink/internal/models"
@@ -369,6 +371,37 @@ func TestAnalyzeSkippedArchivePreservesPartFiles(t *testing.T) {
 	}
 	if len(result.media.PartFiles) != 1 || result.media.PartFiles[0] != "/tmp/archive.z01" {
 		t.Errorf("skipped archive lost its part files: %v", result.media.PartFiles)
+	}
+}
+
+func TestPreserveTimestampsProbesDurationWithFreshContext(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses a shell script for the fake ffprobe command")
+	}
+
+	tempDir := t.TempDir()
+	ffprobePath := filepath.Join(tempDir, "ffprobe")
+	script := "#!/bin/sh\nprintf '%s' '{\"format\":{\"duration\":\"42.5\"}}'\n"
+	if err := os.WriteFile(ffprobePath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", tempDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	outPath := filepath.Join(tempDir, "out.mka")
+	if err := os.WriteFile(outPath, []byte("output"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	engine := &Engine{}
+	m := &models.ShrinkMedia{Path: "source.mka", Category: "Audio", Duration: 10}
+	result := models.ProcessResult{Outputs: []models.ProcessOutputFile{{Path: outPath, Size: 6}}}
+
+	_, cancel := context.WithCancel(context.Background())
+	cancel()
+	engine.preserveTimestamps(m, result, time.Now(), time.Now())
+
+	if m.Duration != 42.5 {
+		t.Errorf("duration was not updated after processing context ended: got %v", m.Duration)
 	}
 }
 

@@ -28,6 +28,8 @@ const (
 	defaultTimeout       = 30 * time.Minute // Default timeout for unknown media types
 	minArchiveTimeoutSec = 600              // Minimum 10 minutes for archive processing
 	archiveTimeoutPerGB  = 100              // 100 seconds per GB for archive processing
+
+	postProcessingProbeTimeout = 2 * time.Minute // Duration probe after processing finishes
 )
 
 // ============================================================================
@@ -555,7 +557,7 @@ func (e *Engine) processSingle(ctx context.Context, m models.ShrinkMedia) models
 	e.finalizeFileSwap(m, result, keepNewFiles)
 
 	if keepNewFiles {
-		e.finalizeSuccessfulProcessing(ctx, &m, result, originalAtime, originalMtime, elapsedSeconds)
+		e.finalizeSuccessfulProcessing(&m, result, originalAtime, originalMtime, elapsedSeconds)
 	} else {
 		// Note: If keepNewFiles is false, finalizeFileSwap already marked as TooLarge
 		e.metrics.RecordFailure(m.DisplayCategory(), elapsedSeconds)
@@ -722,10 +724,10 @@ func (e *Engine) handleUnsuccessfulProcessing(m models.ShrinkMedia, result model
 }
 
 // finalizeSuccessfulProcessing handles post-processing for successful operations.
-func (e *Engine) finalizeSuccessfulProcessing(ctx context.Context, m *models.ShrinkMedia, result models.ProcessResult,
+func (e *Engine) finalizeSuccessfulProcessing(m *models.ShrinkMedia, result models.ProcessResult,
 	originalAtime, originalMtime time.Time, elapsed float64,
 ) {
-	e.preserveTimestamps(ctx, m, result, originalAtime, originalMtime)
+	e.preserveTimestamps(m, result, originalAtime, originalMtime)
 	for _, out := range result.Outputs {
 		e.ui.MoveTo(out.Path)
 	}
@@ -822,14 +824,19 @@ func (e *Engine) updateMetadata(m models.ShrinkMedia, result models.ProcessResul
 	}
 }
 
-func (e *Engine) preserveTimestamps(ctx context.Context, m *models.ShrinkMedia, result models.ProcessResult, originalAtime, originalMtime time.Time) {
+func (e *Engine) preserveTimestamps(m *models.ShrinkMedia, result models.ProcessResult, originalAtime, originalMtime time.Time) {
 	if len(result.Outputs) > 0 && !originalAtime.IsZero() {
 		outPath := result.Outputs[0].Path
 		if outPath != "" {
 			applyTimestamps(outPath, originalAtime, originalMtime)
-			// Update duration if needed
+			// Update duration if needed. The processing context may be at or
+			// past its deadline by now, so probe with a short independent
+			// timeout instead of losing the duration update.
 			if m.Category == "Audio" || m.Category == "Video" {
-				if newDuration := e.getActualDuration(ctx, outPath); newDuration > 0 {
+				probeCtx, cancel := context.WithTimeout(context.Background(), postProcessingProbeTimeout)
+				newDuration := e.getActualDuration(probeCtx, outPath)
+				cancel()
+				if newDuration > 0 {
 					m.Duration = newDuration
 				}
 			}
