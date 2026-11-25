@@ -223,12 +223,11 @@ func TestIntegration_VideoTranscode_WithSubtitles(t *testing.T) {
 
 	processor := NewFFmpegProcessor(cfg)
 	m := &models.ShrinkMedia{
-		Path:           inputPath,
-		Size:           getFileSize(inputPath),
-		Duration:       10.0,
-		VideoCount:     1,
-		SubtitleCodecs: "mov_text",
-		Ext:            ".mkv",
+		Path:       inputPath,
+		Size:       getFileSize(inputPath),
+		Duration:   10.0,
+		VideoCount: 1,
+		Ext:        ".mkv",
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
