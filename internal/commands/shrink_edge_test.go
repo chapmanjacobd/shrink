@@ -177,6 +177,46 @@ func TestSkippedMoveWithNoConfirmWhenNothingToShrink(t *testing.T) {
 	}
 }
 
+func TestSimulateRejectsOutdatedSchemaWithoutMigrating(t *testing.T) {
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "legacy.db")
+
+	sqlDB, err := db.Connect(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sqlDB.Exec(`CREATE TABLE media (id INTEGER PRIMARY KEY, path TEXT, size INTEGER)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := sqlDB.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	err = runShrinkCmd(dbPath, tempDir, []string{"--simulate"})
+	if err == nil {
+		t.Fatal("expected outdated schema to be rejected")
+	}
+	if !strings.Contains(err.Error(), "missing columns") {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	sqlDB, err = db.Connect(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = sqlDB.Close() }()
+
+	var migrated int
+	if err := sqlDB.QueryRow(
+		"SELECT COUNT(*) FROM pragma_table_info('media') WHERE name = 'is_shrinked'",
+	).Scan(&migrated); err != nil {
+		t.Fatal(err)
+	}
+	if migrated != 0 {
+		t.Error("simulation migrated the database schema")
+	}
+}
+
 func TestFilterByToolsDoesNotMoveFiles(t *testing.T) {
 	tempDir := t.TempDir()
 	opusPath := filepath.Join(tempDir, "already.opus")

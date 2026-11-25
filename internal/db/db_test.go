@@ -3,10 +3,99 @@ package db
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	_ "github.com/mattn/go-sqlite3"
 )
+
+func TestConnectReadOnlyDoesNotWrite(t *testing.T) {
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "readonly.db")
+
+	db, err := Connect(dbPath)
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	_, err = db.Exec(`
+		CREATE TABLE media (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			path TEXT UNIQUE NOT NULL,
+			size INTEGER NOT NULL,
+			duration REAL DEFAULT 0,
+			video_count INTEGER DEFAULT 0,
+			audio_count INTEGER DEFAULT 0,
+			video_codecs TEXT,
+			audio_codecs TEXT,
+			subtitle_codecs TEXT,
+			media_type TEXT,
+			time_deleted INTEGER DEFAULT 0,
+			is_shrinked INTEGER DEFAULT 0,
+			width INTEGER DEFAULT 0,
+			height INTEGER DEFAULT 0
+		);
+		INSERT INTO media (path, size) VALUES ('test.mp4', 100);
+	`)
+	if err != nil {
+		t.Fatalf("Failed to create schema: %v", err)
+	}
+	_ = db.Close()
+
+	readOnly, _, err := ConnectWithInitReadOnly(dbPath)
+	if err != nil {
+		t.Fatalf("ConnectWithInitReadOnly failed: %v", err)
+	}
+	defer func() { _ = readOnly.Close() }()
+
+	var count int
+	if err := readOnly.QueryRow("SELECT COUNT(*) FROM media").Scan(&count); err != nil {
+		t.Fatalf("read-only query failed: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("read-only query returned %d rows, want 1", count)
+	}
+
+	if _, err := readOnly.Exec("UPDATE media SET size = 0"); err == nil {
+		t.Error("read-only connection accepted a write")
+	}
+}
+
+func TestConnectWithInitReadOnlyDoesNotMigrate(t *testing.T) {
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "legacy.db")
+
+	db, err := Connect(dbPath)
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	_, err = db.Exec(`CREATE TABLE media (id INTEGER PRIMARY KEY, path TEXT, size INTEGER)`)
+	if err != nil {
+		t.Fatalf("Failed to create legacy schema: %v", err)
+	}
+	_ = db.Close()
+
+	_, _, err = ConnectWithInitReadOnly(dbPath)
+	if err == nil {
+		t.Fatal("expected outdated schema to be rejected")
+	}
+	if !strings.Contains(err.Error(), "missing columns") {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	readOnly, err := ConnectReadOnly(dbPath)
+	if err != nil {
+		t.Fatalf("ConnectReadOnly failed: %v", err)
+	}
+	defer func() { _ = readOnly.Close() }()
+
+	columns, err := getTableColumns(readOnly, "media")
+	if err != nil {
+		t.Fatalf("Failed to get columns: %v", err)
+	}
+	if columns["IS_SHRINKED"] != "" {
+		t.Error("read-only connection migrated the schema")
+	}
+}
 
 func TestDatabaseLifecycle(t *testing.T) {
 	tempDir := t.TempDir()

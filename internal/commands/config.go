@@ -35,7 +35,7 @@ type Config struct {
 type CoreFlags struct {
 	Profile   string `default:"balance" help:"Profile preset: quality, speed, balance (default to balance preset 7 crf 40)" enum:"quality,speed,balance" env:"SHRINK_PROFILE"`
 	Verbose   int    `short:"v" type:"counter" help:"Enable verbose logging (-v for info, -vv for debug)" env:"SHRINK_VERBOSE"`
-	Simulate  bool   `help:"Dry run; don't actually do anything" env:"SHRINK_SIMULATE"`
+	Simulate  bool   `help:"Dry run; don't modify files or databases" env:"SHRINK_SIMULATE"`
 	NoConfirm bool   `short:"y" help:"Don't ask for confirmation" env:"SHRINK_NO_CONFIRM"`
 }
 

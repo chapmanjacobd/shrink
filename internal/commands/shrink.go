@@ -211,7 +211,11 @@ func (c *ShrinkCmd) Run(ctx *kong.Context) error {
 func (c *ShrinkCmd) initDatabases() error {
 	for _, dbPath := range c.Databases {
 		if db.IsDatabaseFile(dbPath) {
-			sqlDB, _, err := db.ConnectWithInit(dbPath)
+			open := db.ConnectWithInit
+			if c.Simulate {
+				open = db.ConnectWithInitReadOnly
+			}
+			sqlDB, _, err := open(dbPath)
 			if err != nil {
 				return err
 			}

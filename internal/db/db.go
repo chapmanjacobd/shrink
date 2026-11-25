@@ -41,6 +41,41 @@ func Connect(dbPath string) (*sql.DB, error) {
 		dsn = fmt.Sprintf("file::memory:?cache=shared&_busy_timeout=%d", sqliteBusyTimeout)
 	}
 
+	return openSQLite(dsn, []string{
+		"PRAGMA journal_mode=WAL",
+		"PRAGMA synchronous=NORMAL",
+		fmt.Sprintf("PRAGMA cache_size=%d", sqliteCacheSize),
+		"PRAGMA temp_store=MEMORY",
+		"PRAGMA foreign_keys=ON",
+		fmt.Sprintf("PRAGMA mmap_size=%d", sqliteMmapSize),
+	})
+}
+
+// ConnectReadOnly opens an existing SQLite database without writing to it.
+// It is used by simulations so that merely opening the database cannot change
+// journal modes, schema, or WAL files.
+func ConnectReadOnly(dbPath string) (*sql.DB, error) {
+	if dbPath == ":memory:" {
+		return nil, fmt.Errorf("read-only connections require a file-backed database")
+	}
+
+	separator := "?"
+	if strings.Contains(dbPath, "?") {
+		separator = "&"
+	}
+	dsn := dbPath + separator + fmt.Sprintf("mode=ro&_busy_timeout=%d", sqliteBusyTimeout)
+
+	return openSQLite(dsn, []string{
+		// query_only is a second line of defense if a write is attempted.
+		"PRAGMA query_only=ON",
+		fmt.Sprintf("PRAGMA cache_size=%d", sqliteCacheSize),
+		"PRAGMA temp_store=MEMORY",
+		"PRAGMA foreign_keys=ON",
+		fmt.Sprintf("PRAGMA mmap_size=%d", sqliteMmapSize),
+	})
+}
+
+func openSQLite(dsn string, pragmas []string) (*sql.DB, error) {
 	db, err := sql.Open("sqlite3", dsn)
 	if err != nil {
 		return nil, err
@@ -52,17 +87,7 @@ func Connect(dbPath string) (*sql.DB, error) {
 	// multiple write connections.
 	db.SetMaxOpenConns(1)
 
-	// Apply tuning PRAGMAs
-	tuning := []string{
-		"PRAGMA journal_mode=WAL",
-		"PRAGMA synchronous=NORMAL",
-		fmt.Sprintf("PRAGMA cache_size=%d", sqliteCacheSize),
-		"PRAGMA temp_store=MEMORY",
-		"PRAGMA foreign_keys=ON",
-		fmt.Sprintf("PRAGMA mmap_size=%d", sqliteMmapSize),
-	}
-
-	for _, pragma := range tuning {
+	for _, pragma := range pragmas {
 		if _, err := db.Exec(pragma); err != nil {
 			_ = db.Close()
 			return nil, fmt.Errorf("failed to apply %s: %w", pragma, err)
@@ -94,19 +119,28 @@ func ConnectWithInit(dbPath string) (*sql.DB, string, error) {
 	return db, dbPath, nil
 }
 
+// ConnectWithInitReadOnly connects to an existing database without modifying
+// it and verifies that its schema is current.
+func ConnectWithInitReadOnly(dbPath string) (*sql.DB, string, error) {
+	db, err := ConnectReadOnly(dbPath)
+	if err != nil {
+		return nil, "", err
+	}
+
+	if err := validateSchema(db); err != nil {
+		_ = db.Close()
+		return nil, "", fmt.Errorf("database schema validation failed: %w", err)
+	}
+
+	return db, dbPath, nil
+}
+
 // ensureSchema validates that the database schema matches our expectations
 // and performs migrations to add missing columns
 func ensureSchema(db *sql.DB) error {
-	columns, err := getTableColumns(db, "media")
+	missingColumns, err := missingSchemaColumns(db)
 	if err != nil {
-		return fmt.Errorf("failed to get media table columns: %w", err)
-	}
-
-	var missingColumns []string
-	for _, expected := range expectedColumns {
-		if columns[strings.ToUpper(expected)] == "" {
-			missingColumns = append(missingColumns, expected)
-		}
+		return err
 	}
 
 	if len(missingColumns) > 0 {
@@ -117,6 +151,36 @@ func ensureSchema(db *sql.DB) error {
 	}
 
 	return nil
+}
+
+// validateSchema verifies the schema without migrating it.
+func validateSchema(db *sql.DB) error {
+	missingColumns, err := missingSchemaColumns(db)
+	if err != nil {
+		return err
+	}
+	if len(missingColumns) > 0 {
+		return fmt.Errorf(
+			"database schema is missing columns %s; run shrink without --simulate once to migrate it",
+			strings.Join(missingColumns, ", "),
+		)
+	}
+	return nil
+}
+
+func missingSchemaColumns(db *sql.DB) ([]string, error) {
+	columns, err := getTableColumns(db, "media")
+	if err != nil {
+		return nil, fmt.Errorf("failed to get media table columns: %w", err)
+	}
+
+	var missingColumns []string
+	for _, expected := range expectedColumns {
+		if columns[strings.ToUpper(expected)] == "" {
+			missingColumns = append(missingColumns, expected)
+		}
+	}
+	return missingColumns, nil
 }
 
 // migrateAddColumns adds missing columns to the media table

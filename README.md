@@ -106,7 +106,7 @@ shrink --active-time 12pm-1pm --active-time 6pm-11pm /path/to/media
 | Flag | Description | Default |
 | :--- | :--- | :--- |
 | -v, --verbose | Enable verbose logging | `false` |
-| --simulate | Dry run; don't actually modify files | `false` |
+| --simulate | Dry run; don't modify files or databases | `false` |
 | -y, --no-confirm | Don't ask for confirmation before starting | `false` |
 | --video-threads | Maximum concurrent video transcodes | `2` |
 | --video-4k-threads | Maximum concurrent video transcodes for 4K+ resolution videos | `1` |
