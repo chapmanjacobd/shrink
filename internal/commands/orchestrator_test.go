@@ -235,6 +235,52 @@ func TestAnalyzeTimeoutIsNotTreatedAsSkippable(t *testing.T) {
 	}
 }
 
+func TestUpdateMetadataMarksUnchangedOutputSkipped(t *testing.T) {
+	tempDir := t.TempDir()
+	sqlDB, err := dbpkg.Connect(filepath.Join(tempDir, "media.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = sqlDB.Close() }()
+	if _, err := sqlDB.Exec(`
+		CREATE TABLE media (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			path TEXT UNIQUE NOT NULL,
+			size INTEGER DEFAULT 0,
+			duration REAL DEFAULT 0,
+			video_count INTEGER DEFAULT 0,
+			audio_count INTEGER DEFAULT 0,
+			video_codecs TEXT DEFAULT '',
+			audio_codecs TEXT DEFAULT '',
+			subtitle_codecs TEXT DEFAULT '',
+			media_type TEXT DEFAULT '',
+			time_deleted INTEGER DEFAULT 0,
+			is_shrinked INTEGER DEFAULT 0,
+			width INTEGER DEFAULT 0,
+			height INTEGER DEFAULT 0
+		)`); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(tempDir, "image.avif")
+	if _, err := sqlDB.Exec("INSERT INTO media (path, size) VALUES (?, ?)", path, 100); err != nil {
+		t.Fatal(err)
+	}
+
+	engine := NewEngine(nil, &models.ProcessorConfig{}, EngineConfig{}, []*sql.DB{sqlDB}, nil, NewShrinkMetrics())
+	engine.updateMetadata(
+		models.ShrinkMedia{Path: path, Size: 100, Category: "Image"},
+		models.ProcessResult{Outputs: []models.ProcessOutputFile{{Path: path, Size: 100}}},
+	)
+
+	var status int
+	if err := sqlDB.QueryRow("SELECT is_shrinked FROM media WHERE path = ?", path).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != dbpkg.ShrinkStatusSkipped {
+		t.Errorf("status = %d, want %d (skipped)", status, dbpkg.ShrinkStatusSkipped)
+	}
+}
+
 func TestProcessSingleStatErrorDoesNotMarkDeleted(t *testing.T) {
 	tempDir := t.TempDir()
 	blocker := filepath.Join(tempDir, "blocker")

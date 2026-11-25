@@ -808,6 +808,11 @@ func (e *Engine) updateMetadata(m models.ShrinkMedia, result models.ProcessResul
 			db.UpdateMedia(e.sqlDBs, m.Path, out.Path, out.Size, m.Duration, m.Width, m.Height)
 		} else if !pathsEqual(out.Path, m.Path) {
 			db.AddMediaEntryWithDimensions(e.sqlDBs, out.Path, out.Size, m.Duration, m.Width, m.Height, db.ShrinkStatusSuccess)
+		} else if out.Size == m.Size {
+			// Processors return the original file as their output for
+			// unsupported or already-optimal inputs. That is a skip, not a
+			// successful shrink, and should not claim savings.
+			db.MarkSkipped(e.sqlDBs, out.Path)
 		} else {
 			db.MarkSuccess(e.sqlDBs, out.Path)
 		}

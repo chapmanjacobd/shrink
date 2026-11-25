@@ -82,7 +82,7 @@ type VideoFlags struct {
 	NoPreserveVideo bool   `help:"Don't preserve video when audio-only" env:"SHRINK_NO_PRESERVE_VIDEO"`
 	IncludeTimecode bool   `help:"Include timecode streams in output" env:"SHRINK_INCLUDE_TIMECODE"`
 	// DeleteLarger defaults to true: keep the smaller file (usually the transcoded output)
-	DeleteLarger bool `default:"true" help:"Delete larger of transcode or original files" env:"SHRINK_DELETE_LARGER"`
+	DeleteLarger bool `default:"true" help:"Keep the transcode only when it is smaller than the original (false: keep the transcode regardless of size)" env:"SHRINK_DELETE_LARGER"`
 }
 
 type ImageFlags struct {
