@@ -99,7 +99,7 @@ func (c *ShrinkCmd) Run(ctx *kong.Context) error {
 	c.PrintUnknownExtensions()
 
 	if len(filteredMedia) == 0 {
-		c.MoveSkippedMedia(skippedMedia)
+		c.MoveSkippedMediaWithConfirmation(skippedMedia)
 		slog.Info("No processable media found")
 		return nil
 	}
@@ -137,7 +137,7 @@ func (c *ShrinkCmd) Run(ctx *kong.Context) error {
 	slog.Info("Analysis complete", "selected", len(toShrink))
 
 	if len(toShrink) == 0 {
-		c.MoveSkippedMedia(skippedMedia)
+		c.MoveSkippedMediaWithConfirmation(skippedMedia)
 		fmt.Println("No files to shrink")
 		metrics.LogSummary()
 		return nil
@@ -368,6 +368,19 @@ func (c *ShrinkCmd) MoveSkippedMedia(skipped []models.ShrinkMedia) {
 	}
 }
 
+// MoveSkippedMediaWithConfirmation moves skipped files after asking the user.
+// Use it when the run has no processing step whose confirmation can cover the
+// moves.
+func (c *ShrinkCmd) MoveSkippedMediaWithConfirmation(skipped []models.ShrinkMedia) {
+	if c.Simulate || c.Move == "" || len(skipped) == 0 {
+		return
+	}
+	if !c.NoConfirm && !c.ConfirmSkippedMoves(len(skipped)) {
+		return
+	}
+	c.MoveSkippedMedia(skipped)
+}
+
 func (c *ShrinkCmd) SortByEfficiency(media []models.ShrinkMedia) {
 	slices.SortFunc(media, func(a, b models.ShrinkMedia) int {
 		timeA := max(a.ProcessingTime, 1)
@@ -520,6 +533,20 @@ func (c *ShrinkCmd) PrintUnknownExtensions() {
 func (c *ShrinkCmd) Confirm() bool {
 	utils.ClearStdin()
 	fmt.Print("\nProceed with shrinking? [y/N] ")
+	var response string
+	_, _ = fmt.Scanln(&response)
+	return strings.ToLower(response) == "y"
+}
+
+// ConfirmSkippedMoves asks whether skipped files should be moved. It is used
+// when there is no processing prompt to confirm them.
+func (c *ShrinkCmd) ConfirmSkippedMoves(count int) bool {
+	noun := "files"
+	if count == 1 {
+		noun = "file"
+	}
+	utils.ClearStdin()
+	fmt.Printf("\nMove %d skipped %s to %s? [y/N] ", count, noun, c.Move)
 	var response string
 	_, _ = fmt.Scanln(&response)
 	return strings.ToLower(response) == "y"

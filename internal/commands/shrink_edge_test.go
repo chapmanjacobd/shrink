@@ -106,6 +106,77 @@ func TestSimulateDoesNotMoveSkippedFiles(t *testing.T) {
 	}
 }
 
+func TestSkippedMoveRequiresConfirmationWhenNothingToShrink(t *testing.T) {
+	tempDir := t.TempDir()
+	moveDir := filepath.Join(tempDir, "moved")
+	srcDir := filepath.Join(tempDir, "src")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	original := filepath.Join(srcDir, "already.opus")
+	if err := os.WriteFile(original, []byte("already optimized"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldStdin := os.Stdin
+	os.Stdin = r
+	defer func() { os.Stdin = oldStdin }()
+	go func() {
+		_, _ = w.Write([]byte("n\n"))
+		_ = w.Close()
+	}()
+
+	if err := runShrinkCmdDir(srcDir, tempDir, []string{"--move", moveDir}); err != nil {
+		t.Fatalf("command failed: %v", err)
+	}
+
+	if _, err := os.Stat(original); os.IsNotExist(err) {
+		t.Error("skipped file was moved without confirmation")
+	}
+	if _, err := os.Stat(moveDir); err == nil {
+		entries, _ := os.ReadDir(moveDir)
+		if len(entries) > 0 {
+			t.Errorf("skipped file was moved without confirmation: %v", entries)
+		}
+	}
+}
+
+func TestSkippedMoveWithNoConfirmWhenNothingToShrink(t *testing.T) {
+	tempDir := t.TempDir()
+	moveDir := filepath.Join(tempDir, "moved")
+	srcDir := filepath.Join(tempDir, "src")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	original := filepath.Join(srcDir, "already.opus")
+	if err := os.WriteFile(original, []byte("already optimized"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := runShrinkCmdDir(srcDir, tempDir, []string{"--move", moveDir, "--no-confirm"}); err != nil {
+		t.Fatalf("command failed: %v", err)
+	}
+
+	if _, err := os.Stat(original); err == nil {
+		t.Error("skipped file was not moved with --no-confirm")
+	}
+
+	var moved bool
+	_ = filepath.Walk(moveDir, func(path string, info os.FileInfo, err error) error {
+		if err == nil && !info.IsDir() && info.Name() == "already.opus" {
+			moved = true
+		}
+		return nil
+	})
+	if !moved {
+		t.Errorf("skipped file not found under %s", moveDir)
+	}
+}
+
 func TestFilterByToolsDoesNotMoveFiles(t *testing.T) {
 	tempDir := t.TempDir()
 	opusPath := filepath.Join(tempDir, "already.opus")
