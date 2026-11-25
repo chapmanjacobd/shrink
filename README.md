@@ -134,8 +134,8 @@ shrink --active-time 12pm-1pm --active-time 6pm-11pm /path/to/media
 | --audio-only | Only process audio files |
 | --image-only | Only process image files |
 | --text-only | Only process text/ebook files |
-| -s, --include | Include paths matching pattern |
-| -E, --exclude | Exclude paths matching pattern |
+| -s, --include | Include paths matching a glob pattern (full path or file name) |
+| -E, --exclude | Exclude paths matching a glob pattern (full path or file name) |
 
 ### Schedule Flags
 
