@@ -893,19 +893,28 @@ func (e *Engine) getActualDuration(path string) float64 {
 // It checks the database cache first, and if not found, performs the estimation
 // and updates the cache (only if analysis was successful - no timeouts).
 func (e *Engine) getArchiveEstimateWithCache(m *models.ShrinkMedia, processor models.MediaProcessor) models.ProcessableInfo {
-	// Try to get from cache (use first available DB)
+	sourceSize, sourceMtime := archiveSourceMetadata(m.Path)
+
+	// Try to get from cache (use first available DB). Ignore entries that were
+	// recorded for a different version of the file.
 	if len(e.sqlDBs) > 0 {
 		cached, err := db.GetArchiveCache(e.sqlDBs[0], m.Path)
 		if err == nil && cached != nil {
-			slog.Debug("Using cached archive analysis", "path", m.Path)
-			return models.ProcessableInfo{
-				FutureSize:     cached.FutureSize,
-				ProcessingTime: cached.ProcessingTime,
-				IsProcessable:  cached.HasProcessable,
-				ActualSize:     cached.TotalArchiveSize,
-				IsBroken:       cached.IsBroken,
-				PartFiles:      strings.Split(cached.PartFiles, "|"),
+			if sourceSize > 0 && sourceMtime > 0 &&
+				cached.SourceSize == sourceSize && cached.SourceMtime == sourceMtime {
+				slog.Debug("Using cached archive analysis", "path", m.Path)
+				return models.ProcessableInfo{
+					FutureSize:     cached.FutureSize,
+					ProcessingTime: cached.ProcessingTime,
+					IsProcessable:  cached.HasProcessable,
+					ActualSize:     cached.TotalArchiveSize,
+					IsBroken:       cached.IsBroken,
+					PartFiles:      splitPartFiles(cached.PartFiles),
+				}
 			}
+			slog.Debug("Ignoring stale archive cache entry", "path", m.Path,
+				"cached_size", cached.SourceSize, "cached_mtime", cached.SourceMtime,
+				"size", sourceSize, "mtime", sourceMtime)
 		}
 	}
 
@@ -915,12 +924,6 @@ func (e *Engine) getArchiveEstimateWithCache(m *models.ShrinkMedia, processor mo
 	// Update cache (use first available DB)
 	// Only cache if analysis was successful (no timeouts)
 	if !e.engCfg.Simulate && len(e.sqlDBs) > 0 && !info.IsTimeout {
-		// Convert part files to pipe-separated string for storage
-		partFilesStr := ""
-		if len(info.PartFiles) > 0 {
-			partFilesStr = strings.Join(info.PartFiles, "|")
-		}
-
 		entry := &db.ArchiveCacheEntry{
 			Path:             m.Path,
 			TotalArchiveSize: info.ActualSize,
@@ -928,7 +931,9 @@ func (e *Engine) getArchiveEstimateWithCache(m *models.ShrinkMedia, processor mo
 			ProcessingTime:   info.ProcessingTime,
 			HasProcessable:   info.IsProcessable,
 			IsBroken:         info.IsBroken,
-			PartFiles:        partFilesStr,
+			PartFiles:        strings.Join(info.PartFiles, "|"),
+			SourceSize:       sourceSize,
+			SourceMtime:      sourceMtime,
 		}
 
 		if err := db.SetArchiveCache(e.sqlDBs[0], entry); err != nil {
@@ -937,4 +942,28 @@ func (e *Engine) getArchiveEstimateWithCache(m *models.ShrinkMedia, processor mo
 	}
 
 	return info
+}
+
+func archiveSourceMetadata(path string) (size, mtime int64) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return 0, 0
+	}
+	return info.Size(), info.ModTime().Unix()
+}
+
+// splitPartFiles decodes the pipe-separated cache representation. An empty
+// value must decode to no parts, not to a single empty path.
+func splitPartFiles(encoded string) []string {
+	if encoded == "" {
+		return nil
+	}
+	raw := strings.Split(encoded, "|")
+	parts := make([]string, 0, len(raw))
+	for _, part := range raw {
+		if part != "" {
+			parts = append(parts, part)
+		}
+	}
+	return parts
 }

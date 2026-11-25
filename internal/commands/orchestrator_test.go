@@ -105,6 +105,33 @@ func TestFinalizeFileSwapDeleteOriginal(t *testing.T) {
 	}
 }
 
+func TestSplitPartFiles(t *testing.T) {
+	tests := []struct {
+		name    string
+		encoded string
+		want    []string
+	}{
+		{name: "empty", encoded: "", want: nil},
+		{name: "single", encoded: "/a/archive.z01", want: []string{"/a/archive.z01"}},
+		{name: "multiple", encoded: "/a/archive.z01|/a/archive.z02", want: []string{"/a/archive.z01", "/a/archive.z02"}},
+		{name: "empty entries ignored", encoded: "/a/archive.z01||/a/archive.z02|", want: []string{"/a/archive.z01", "/a/archive.z02"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := splitPartFiles(tt.encoded)
+			if len(got) != len(tt.want) {
+				t.Fatalf("splitPartFiles(%q) = %v, want %v", tt.encoded, got, tt.want)
+			}
+			for i := range tt.want {
+				if got[i] != tt.want[i] {
+					t.Errorf("splitPartFiles(%q)[%d] = %q, want %q", tt.encoded, i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
 func TestAnalyzeCategoryProcessesAllJobs(t *testing.T) {
 	var running, maxSeen int32
 	var wg sync.WaitGroup

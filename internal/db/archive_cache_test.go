@@ -52,7 +52,9 @@ func TestArchiveCache(t *testing.T) {
 			ProcessingTime:   120,
 			HasProcessable:   true,
 			IsBroken:         false,
-			PartFiles:        "[]",
+			PartFiles:        "/test/archive.z01|/test/archive.z02",
+			SourceSize:       1000000,
+			SourceMtime:      1700000000,
 		}
 
 		// Set cache
@@ -86,6 +88,13 @@ func TestArchiveCache(t *testing.T) {
 		}
 		if retrieved.IsBroken != entry.IsBroken {
 			t.Errorf("IsBroken mismatch: got %v, want %v", retrieved.IsBroken, entry.IsBroken)
+		}
+		if retrieved.PartFiles != entry.PartFiles {
+			t.Errorf("PartFiles mismatch: got %q, want %q", retrieved.PartFiles, entry.PartFiles)
+		}
+		if retrieved.SourceSize != entry.SourceSize || retrieved.SourceMtime != entry.SourceMtime {
+			t.Errorf("source metadata mismatch: got %d/%d, want %d/%d",
+				retrieved.SourceSize, retrieved.SourceMtime, entry.SourceSize, entry.SourceMtime)
 		}
 	})
 
@@ -246,6 +255,49 @@ func TestArchiveCacheNoCacheEntry(t *testing.T) {
 	}
 	if entry != nil {
 		t.Error("GetArchiveCache should return nil for non-existent entry")
+	}
+}
+
+func TestInitArchiveCacheMigratesLegacyTable(t *testing.T) {
+	tmpDir := t.TempDir()
+	db, err := Connect(filepath.Join(tmpDir, "legacy.db"))
+	if err != nil {
+		t.Fatalf("Failed to connect to database: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	_, err = db.Exec(`
+		CREATE TABLE archive_cache (
+			path TEXT PRIMARY KEY,
+			total_archive_size INTEGER DEFAULT 0,
+			future_size INTEGER DEFAULT 0,
+			processing_time INTEGER DEFAULT 0,
+			has_processable INTEGER DEFAULT 0,
+			is_broken INTEGER DEFAULT 0,
+			part_files TEXT DEFAULT ''
+		)`)
+	if err != nil {
+		t.Fatalf("Failed to create legacy table: %v", err)
+	}
+
+	if err := InitArchiveCache(db); err != nil {
+		t.Fatalf("InitArchiveCache failed: %v", err)
+	}
+
+	entry := &ArchiveCacheEntry{
+		Path:        "/test/archive.zip",
+		SourceSize:  123,
+		SourceMtime: 456,
+	}
+	if err := SetArchiveCache(db, entry); err != nil {
+		t.Fatalf("SetArchiveCache failed after migration: %v", err)
+	}
+	retrieved, err := GetArchiveCache(db, entry.Path)
+	if err != nil {
+		t.Fatalf("GetArchiveCache failed after migration: %v", err)
+	}
+	if retrieved == nil || retrieved.SourceSize != 123 || retrieved.SourceMtime != 456 {
+		t.Fatalf("migrated source metadata not stored: %+v", retrieved)
 	}
 }
 
