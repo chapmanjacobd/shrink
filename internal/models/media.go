@@ -58,10 +58,7 @@ func (m *ShrinkMedia) ShouldShrink(futureSize int64, cfg *ProcessorConfig) bool 
 			// A zero threshold still requires actual savings.
 			return savings > 0
 		}
-		required := int64(math.Ceil(float64(m.Size) * minSavings))
-		if required < 1 {
-			required = 1
-		}
+		required := max(int64(math.Ceil(float64(m.Size)*minSavings)), 1)
 		return savings >= required
 	}
 	// Threshold is absolute bytes

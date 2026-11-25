@@ -282,7 +282,7 @@ func (m *ShrinkMetrics) PrintProgress() {
 	}
 
 	// Print summary table
-	headers := []string{"Media Type", "Queued", "Skip", "Fail", "OK", "Saved", "Size", "Speed", "ETA"}
+	headers := []string{"Media Type", "Queued", "Skip", "Fail", "OK", "Saved", "Ratio", "Speed", "ETA"}
 	var rows [][]string
 
 	// Sort media types by Queue (descending) for consistent ordering
@@ -544,7 +544,7 @@ func (m *ShrinkMetrics) LogSummary() {
 	fmt.Println("PROCESSING COMPLETE")
 	fmt.Println(strings.Repeat("=", 78))
 
-	headers := []string{"Media Type", "Skip", "Fail", "OK", "Saved", "Size", "Speed"}
+	headers := []string{"Media Type", "Skip", "Fail", "OK", "Saved", "Ratio", "Speed"}
 	var rows [][]string
 
 	for _, mt := range sortedTypes {

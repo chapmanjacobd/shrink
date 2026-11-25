@@ -40,8 +40,6 @@ func runShrinkCmd(dbPath, tempDir string, args []string) error {
 		return err
 	}
 
-	cmd.DeleteLarger = true
-
 	// We run it synchronously
 	return cmd.Run(ctx)
 }
@@ -70,8 +68,6 @@ func runShrinkCmdDir(dirPath, tempDir string, args []string) error {
 	if err != nil {
 		return err
 	}
-
-	cmd.DeleteLarger = true
 
 	// We run it synchronously
 	return cmd.Run(ctx)

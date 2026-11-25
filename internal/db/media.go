@@ -50,7 +50,7 @@ type mediaPathReference struct {
 }
 
 // LoadMediaFromDB loads all processable media from a database
-func LoadMediaFromDB(db *sql.DB, forceShrink bool, videoOnly, audioOnly, imageOnly, textOnly bool) ([]MediaRecord, error) {
+func LoadMediaFromDB(db *sql.DB, forceShrink bool) ([]MediaRecord, error) {
 	query := `
 		SELECT path,
             size,

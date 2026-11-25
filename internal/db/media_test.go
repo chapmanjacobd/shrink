@@ -88,7 +88,7 @@ func TestMediaLifecycle(t *testing.T) {
 	AddMediaEntry([]*sql.DB{db}, "test.mp4", 1000, 10.0, ShrinkStatusNotProcessed)
 
 	// 2. LoadMediaFromDB
-	records, err := LoadMediaFromDB(db, false, false, false, false, false)
+	records, err := LoadMediaFromDB(db, false)
 	if err != nil {
 		t.Fatalf("LoadMediaFromDB failed: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestMediaLifecycle(t *testing.T) {
 	// 5. MarkDeleted
 	MarkDeleted([]*sql.DB{db}, "test.av1.mkv")
 
-	records, err = LoadMediaFromDB(db, false, false, false, false, false)
+	records, err = LoadMediaFromDB(db, false)
 	if err != nil {
 		t.Fatalf("LoadMediaFromDB failed: %v", err)
 	}
@@ -167,7 +167,7 @@ func TestUpdateMediaWhenNewPathExists(t *testing.T) {
 	AddMediaEntry([]*sql.DB{db}, newPath, 500, 10.0, ShrinkStatusSuccess)
 
 	// Verify both entries exist
-	records, err := LoadMediaFromDB(db, true, false, false, false, false)
+	records, err := LoadMediaFromDB(db, true)
 	if err != nil {
 		t.Fatalf("LoadMediaFromDB failed: %v", err)
 	}
@@ -180,7 +180,7 @@ func TestUpdateMediaWhenNewPathExists(t *testing.T) {
 	UpdateMedia([]*sql.DB{db}, oldPath, newPath, 600, 10.0, 0, 0)
 
 	// Verify only newPath exists with updated values
-	records, err = LoadMediaFromDB(db, true, false, false, false, false)
+	records, err = LoadMediaFromDB(db, true)
 	if err != nil {
 		t.Fatalf("LoadMediaFromDB failed: %v", err)
 	}
@@ -241,7 +241,7 @@ func TestUpdateMediaWithForeignKeyConstraint(t *testing.T) {
 	UpdateMedia([]*sql.DB{db}, oldPath, newPath, 600, 10.0, 0, 0)
 
 	// Verify the update succeeded correctly
-	records, err := LoadMediaFromDB(db, true, false, false, false, false)
+	records, err := LoadMediaFromDB(db, true)
 	if err != nil {
 		t.Fatalf("LoadMediaFromDB failed: %v", err)
 	}
@@ -298,7 +298,7 @@ func TestUpdateMediaRenamesBuiltInForeignKeyReferences(t *testing.T) {
 
 	UpdateMedia([]*sql.DB{db}, oldPath, newPath, 600, 10.0, 1920, 1080)
 
-	records, err := LoadMediaFromDB(db, true, false, false, false, false)
+	records, err := LoadMediaFromDB(db, true)
 	if err != nil {
 		t.Fatalf("LoadMediaFromDB failed: %v", err)
 	}
