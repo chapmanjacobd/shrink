@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -194,9 +195,13 @@ func (it InstalledTools) IsAvailable(toolName string) bool {
 }
 
 func (c *ShrinkCmd) checkInstalledTools() InstalledTools {
+	hasImageMagick := utils.GetCommandPath("magick") != ""
+	if !hasImageMagick && runtime.GOOS != "windows" {
+		hasImageMagick = utils.GetCommandPath("convert") != ""
+	}
 	tools := InstalledTools{
 		FFmpeg:      utils.GetCommandPath("ffmpeg") != "",
-		ImageMagick: utils.GetCommandPath("magick") != "" || utils.GetCommandPath("convert") != "",
+		ImageMagick: hasImageMagick,
 		Calibre:     utils.GetCommandPath("ebook-convert") != "",
 		Unar:        utils.GetCommandPath("lsar") != "",
 	}

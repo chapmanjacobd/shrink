@@ -26,7 +26,7 @@ func CommandExists(name string) bool {
 	switch name {
 	case "ebook-convert":
 		searchPaths = append(searchPaths, filepath.Join(programFiles, "Calibre2", "ebook-convert.exe"))
-	case "magick", "convert":
+	case "magick":
 		// ImageMagick often has version in folder name, use Glob
 		if dirs, err := filepath.Glob(filepath.Join(programFiles, "ImageMagick-*")); err == nil {
 			for _, dir := range dirs {
@@ -62,7 +62,7 @@ func GetCommandPath(name string) string {
 	switch name {
 	case "ebook-convert":
 		searchPaths = append(searchPaths, filepath.Join(programFiles, "Calibre2", "ebook-convert.exe"))
-	case "magick", "convert":
+	case "magick":
 		if dirs, err := filepath.Glob(filepath.Join(programFiles, "ImageMagick-*")); err == nil {
 			for _, dir := range dirs {
 				searchPaths = append(searchPaths, filepath.Join(dir, name+".exe"))

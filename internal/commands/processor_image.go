@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -196,14 +197,19 @@ func isImageMagickEnvironmentError(errorLog []string) bool {
 	return false
 }
 
-// getImageMagickCommand returns the appropriate ImageMagick command path ("magick" or "convert")
-// Returns empty string if neither is available
+// getImageMagickCommand returns the appropriate ImageMagick command path
+// ("magick" or, on platforms where it is not ambiguous, "convert").
+// Returns empty string if neither is available.
 func getImageMagickCommand() string {
 	if path := utils.GetCommandPath("magick"); path != "" {
 		return path
 	}
-	if path := utils.GetCommandPath("convert"); path != "" {
-		return path
+	// On Windows, convert.exe is the system FAT-to-NTFS utility, not
+	// ImageMagick's legacy command name.
+	if runtime.GOOS != "windows" {
+		if path := utils.GetCommandPath("convert"); path != "" {
+			return path
+		}
 	}
 	return ""
 }
