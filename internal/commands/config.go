@@ -2,6 +2,8 @@
 package commands
 
 import (
+	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/chapmanjacobd/shrink/internal/models"
@@ -141,7 +143,7 @@ type TimeoutFlags struct {
 	ArchiveExtractTimeout string  `default:"30m" help:"Archive extraction (unar) timeout" env:"SHRINK_ARCHIVE_EXTRACT_TIMEOUT"`
 	VideoTimeoutMult      float64 `default:"3.0" help:"Video timeout multiplier (timeout = duration * multiplier)" env:"SHRINK_VIDEO_TIMEOUT_MULT"`
 	AudioTimeoutMult      float64 `default:"0.5" help:"Audio timeout multiplier (timeout = duration * multiplier)" env:"SHRINK_AUDIO_TIMEOUT_MULT"`
-	SplitLongerThan       string  `default:"37mins" help:"Split audio longer than this duration" env:"SHRINK_SPLIT_LONGER_THAN"`
+	SplitLongerThan       string  `default:"37m" help:"Split audio longer than this duration" env:"SHRINK_SPLIT_LONGER_THAN"`
 	MinSplitSegment       string  `default:"90s" help:"Minimum split segment duration" env:"SHRINK_MIN_SPLIT_SEGMENT"`
 	DeleteUnplayable      bool    `help:"Delete unplayable files" env:"SHRINK_DELETE_UNPLAYABLE"`
 	AlwaysSplit           bool    `help:"Always split audio on silence" env:"SHRINK_ALWAYS_SPLIT"`
@@ -171,6 +173,145 @@ func (c *Config) ApplyProfile() {
 	if c.CRF == "" {
 		c.CRF = crf
 	}
+}
+
+// Validate checks CLI values that are not constrained by Kong. It prevents
+// silent fallbacks to zero (for example, an unparsable memory limit disabling
+// the memory limit) and worker counts of zero, which would leave categories
+// with queued work and no workers to process it.
+func (c *Config) validateConfig() error {
+	threadFlags := []struct {
+		name  string
+		value int
+	}{
+		{"--video-threads", c.VideoThreads},
+		{"--video-4k-threads", c.Video4KThreads},
+		{"--audio-threads", c.AudioThreads},
+		{"--image-threads", c.ImageThreads},
+		{"--text-threads", c.TextThreads},
+	}
+	for _, flag := range threadFlags {
+		if flag.value < 1 {
+			return fmt.Errorf("%s must be at least 1", flag.name)
+		}
+	}
+	if c.AnalysisThreads < 0 {
+		return fmt.Errorf("--analysis-threads must be zero (auto) or greater")
+	}
+
+	if err := validateSizeFlag("--memory-limit", c.MemoryLimit, true, false); err != nil {
+		return err
+	}
+	if err := validateSizeFlag("--memory-swap-max", c.MemorySwapMax, true, false); err != nil {
+		return err
+	}
+	if err := validateSizeFlag("--target-image-size", c.TargetImageSize, false, true); err != nil {
+		return err
+	}
+
+	bitrateFlags := []struct {
+		name  string
+		value string
+	}{
+		{"--source-audio-bitrate", c.SourceAudioBitrate},
+		{"--source-video-bitrate", c.SourceVideoBitrate},
+		{"--target-audio-bitrate", c.TargetAudioBitrate},
+		{"--target-video-bitrate", c.TargetVideoBitrate},
+	}
+	for _, flag := range bitrateFlags {
+		value, err := utils.ParseBitrateStrict(flag.value)
+		if err != nil {
+			return fmt.Errorf("invalid %s: %w", flag.name, err)
+		}
+		if value <= 0 {
+			return fmt.Errorf("%s must be greater than zero", flag.name)
+		}
+	}
+
+	savingsFlags := []struct {
+		name  string
+		value string
+	}{
+		{"--min-savings-video", c.MinSavingsVideo},
+		{"--min-savings-audio", c.MinSavingsAudio},
+		{"--min-savings-image", c.MinSavingsImage},
+	}
+	for _, flag := range savingsFlags {
+		if _, err := utils.ParsePercentOrBytesStrict(flag.value); err != nil {
+			return fmt.Errorf("invalid %s: %w", flag.name, err)
+		}
+	}
+
+	durationFlags := []struct {
+		name       string
+		value      string
+		allowEmpty bool
+	}{
+		{"--video-timeout", c.VideoTimeout, false},
+		{"--audio-timeout", c.AudioTimeout, false},
+		{"--image-timeout", c.ImageTimeout, false},
+		{"--text-timeout", c.TextTimeout, false},
+		{"--archive-analyze-timeout", c.ArchiveAnalyzeTimeout, false},
+		{"--archive-glob-timeout", c.ArchiveGlobTimeout, false},
+		{"--archive-extract-timeout", c.ArchiveExtractTimeout, false},
+		{"--split-longer-than", c.SplitLongerThan, false},
+		{"--min-split-segment", c.MinSplitSegment, false},
+	}
+	for _, flag := range durationFlags {
+		if flag.value == "" && flag.allowEmpty {
+			continue
+		}
+		if _, err := utils.ParseDurationStringStrict(flag.value); err != nil {
+			return fmt.Errorf("invalid %s: %w", flag.name, err)
+		}
+	}
+
+	if c.TranscodingVideoRate <= 0 {
+		return fmt.Errorf("--transcoding-video-rate must be greater than zero")
+	}
+	if c.TranscodingAudioRate <= 0 {
+		return fmt.Errorf("--transcoding-audio-rate must be greater than zero")
+	}
+	if c.TranscodingImageTime <= 0 {
+		return fmt.Errorf("--transcoding-image-time must be greater than zero")
+	}
+	if c.MaxVideoWidth <= 0 || c.MaxVideoHeight <= 0 {
+		return fmt.Errorf("--max-video-width and --max-video-height must be greater than zero")
+	}
+	if c.MaxImageWidth <= 0 || c.MaxImageHeight <= 0 {
+		return fmt.Errorf("--max-image-width and --max-image-height must be greater than zero")
+	}
+	if c.MaxWidthBuffer < 0 || c.MaxHeightBuffer < 0 {
+		return fmt.Errorf("--max-width-buffer and --max-height-buffer cannot be negative")
+	}
+
+	preset, err := strconv.Atoi(c.Preset)
+	if err != nil || preset < 0 || preset > 13 {
+		return fmt.Errorf("--preset must be an integer between 0 and 13")
+	}
+	crf, err := strconv.Atoi(c.CRF)
+	if err != nil || crf < 0 || crf > 63 {
+		return fmt.Errorf("--crf must be an integer between 0 and 63")
+	}
+
+	return nil
+}
+
+func validateSizeFlag(name, value string, allowEmpty, requirePositive bool) error {
+	if value == "" {
+		if allowEmpty {
+			return nil
+		}
+		return fmt.Errorf("%s is required", name)
+	}
+	parsed, err := utils.ParseSizeStrict(value)
+	if err != nil {
+		return fmt.Errorf("invalid %s: %w", name, err)
+	}
+	if requirePositive && parsed <= 0 {
+		return fmt.Errorf("%s must be greater than zero", name)
+	}
+	return nil
 }
 
 func (c *Config) BuildProcessorConfig() *models.ProcessorConfig {

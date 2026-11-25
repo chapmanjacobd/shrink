@@ -132,6 +132,34 @@ func TestFilterByToolsDoesNotMoveFiles(t *testing.T) {
 	}
 }
 
+func TestInvalidConfigValuesReturnErrors(t *testing.T) {
+	tempDir := t.TempDir()
+	tests := []struct {
+		name    string
+		args    []string
+		wantErr string
+	}{
+		{name: "zero video threads", args: []string{"--video-threads=0"}, wantErr: "video-threads"},
+		{name: "zero audio threads", args: []string{"--audio-threads=0"}, wantErr: "audio-threads"},
+		{name: "invalid memory limit", args: []string{"--memory-limit=banana"}, wantErr: "memory-limit"},
+		{name: "invalid savings", args: []string{"--min-savings-video=banana"}, wantErr: "min-savings-video"},
+		{name: "invalid bitrate", args: []string{"--target-audio-bitrate=fast"}, wantErr: "target-audio-bitrate"},
+		{name: "invalid preset", args: []string{"--preset=99"}, wantErr: "preset"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := runShrinkCmdDir(tempDir, tempDir, tt.args)
+			if err == nil {
+				t.Fatalf("expected error for %v", tt.args)
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("error %q does not mention %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestContinueFrom(t *testing.T) {
 	tempDir := t.TempDir()
 

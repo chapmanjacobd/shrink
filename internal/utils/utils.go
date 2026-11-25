@@ -249,26 +249,54 @@ func FormatSize(bytes int64) string {
 
 // ParseDurationString parses duration strings like "10s", "20m", "1h"
 func ParseDurationString(s string) time.Duration {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return 0
+	d, _ := ParseDurationStringStrict(s)
+	return d
+}
+
+// ParseDurationStringStrict parses a duration and reports invalid input.
+// Plain numbers are interpreted as minutes, and "min"/"mins" suffixes are
+// accepted for compatibility with the CLI defaults.
+func ParseDurationStringStrict(s string) (time.Duration, error) {
+	raw := strings.TrimSpace(s)
+	if raw == "" {
+		return 0, fmt.Errorf("duration is empty")
 	}
-	if d, err := time.ParseDuration(s); err == nil {
-		return d
+	if d, err := time.ParseDuration(raw); err == nil {
+		if d < 0 {
+			return 0, fmt.Errorf("duration cannot be negative: %q", raw)
+		}
+		return d, nil
 	}
-	n, err := strconv.ParseFloat(s, 64)
-	if err != nil {
-		return 0
+	lower := strings.ToLower(raw)
+	for _, suffix := range []string{"mins", "min"} {
+		if before, ok := strings.CutSuffix(lower, suffix); ok {
+			minutes, err := strconv.ParseFloat(strings.TrimSpace(before), 64)
+			if err != nil || minutes < 0 {
+				return 0, fmt.Errorf("invalid duration %q", raw)
+			}
+			return time.Duration(minutes * float64(time.Minute)), nil
+		}
 	}
-	return time.Duration(n * float64(time.Minute))
+	minutes, err := strconv.ParseFloat(raw, 64)
+	if err != nil || minutes < 0 {
+		return 0, fmt.Errorf("invalid duration %q", raw)
+	}
+	return time.Duration(minutes * float64(time.Minute)), nil
 }
 
 // ParseBitrate parses bitrate strings like "128kbps", "1Mbps", "1k", "1M"
 func ParseBitrate(s string) int64 {
-	s = strings.ToLower(strings.TrimSpace(s))
-	if s == "" {
-		return 0
+	value, _ := ParseBitrateStrict(s)
+	return value
+}
+
+// ParseBitrateStrict parses a bitrate and reports invalid input.
+func ParseBitrateStrict(s string) (int64, error) {
+	raw := strings.TrimSpace(s)
+	if raw == "" {
+		return 0, fmt.Errorf("bitrate is empty")
 	}
+	s = strings.ToLower(raw)
 	multiplier := int64(1)
 	if before, ok := strings.CutSuffix(s, "kbps"); ok {
 		s = before
@@ -287,16 +315,25 @@ func ParseBitrate(s string) int64 {
 	}
 	n, err := strconv.ParseInt(s, 10, 64)
 	if err != nil {
-		return 0
+		return 0, fmt.Errorf("invalid bitrate %q", raw)
 	}
-	return n * multiplier
+	if n < 0 {
+		return 0, fmt.Errorf("bitrate cannot be negative: %q", raw)
+	}
+	return n * multiplier, nil
 }
 
 // ParseSize parses size strings like "30KiB", "1MB", "1G"
 func ParseSize(s string) int64 {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return 0
+	value, _ := ParseSizeStrict(s)
+	return value
+}
+
+// ParseSizeStrict parses a size and reports invalid input.
+func ParseSizeStrict(s string) (int64, error) {
+	raw := strings.TrimSpace(s)
+	if raw == "" {
+		return 0, fmt.Errorf("size is empty")
 	}
 	multiplier := int64(1)
 	// Check longer suffixes first to avoid partial matches
@@ -341,9 +378,12 @@ func ParseSize(s string) int64 {
 	}
 	n, err := strconv.ParseInt(s, 10, 64)
 	if err != nil {
-		return 0
+		return 0, fmt.Errorf("invalid size %q", raw)
 	}
-	return n * multiplier
+	if n < 0 {
+		return 0, fmt.Errorf("size cannot be negative: %q", raw)
+	}
+	return n * multiplier, nil
 }
 
 // ParsePercentOrBytes parses percentage or byte values.
@@ -355,21 +395,43 @@ func ParseSize(s string) int64 {
 // Note: The caller must know the expected type based on context.
 // Values < 1.0 are typically percentages, values >= 1.0 are typically bytes.
 func ParsePercentOrBytes(s string) float64 {
-	s = strings.TrimSpace(s)
-	if before, ok := strings.CutSuffix(s, "%"); ok {
+	value, _ := ParsePercentOrBytesStrict(s)
+	return value
+}
+
+// ParsePercentOrBytesStrict parses a percentage or byte value and reports
+// invalid input.
+func ParsePercentOrBytesStrict(s string) (float64, error) {
+	raw := strings.TrimSpace(s)
+	if raw == "" {
+		return 0, fmt.Errorf("savings threshold is empty")
+	}
+	if before, ok := strings.CutSuffix(raw, "%"); ok {
 		pct, err := strconv.ParseFloat(before, 64)
 		if err != nil {
-			return 0
+			return 0, fmt.Errorf("invalid percentage %q", raw)
 		}
-		return pct / 100.0
+		if pct < 0 {
+			return 0, fmt.Errorf("percentage cannot be negative: %q", raw)
+		}
+		return pct / 100.0, nil
 	}
 	// Check if it's a size string (has non-digit suffix)
-	if len(s) > 0 && (s[len(s)-1] < '0' || s[len(s)-1] > '9') {
-		return float64(ParseSize(s))
+	if len(raw) > 0 && (raw[len(raw)-1] < '0' || raw[len(raw)-1] > '9') {
+		value, err := ParseSizeStrict(raw)
+		if err != nil {
+			return 0, err
+		}
+		return float64(value), nil
 	}
-	// Plain float (could be percentage or bytes depending on value)
-	n, _ := strconv.ParseFloat(s, 64)
-	return n
+	n, err := strconv.ParseFloat(raw, 64)
+	if err != nil {
+		return 0, fmt.Errorf("invalid savings threshold %q", raw)
+	}
+	if n < 0 {
+		return 0, fmt.Errorf("savings threshold cannot be negative: %q", raw)
+	}
+	return n, nil
 }
 
 var OptimizedExtensions = []string{".av1.mkv", ".opus", ".mka", ".avif", ".oga", ".ogg", ".svg", ".svgz"}

@@ -37,6 +37,9 @@ type ShrinkCmd struct {
 
 func (c *ShrinkCmd) Run(ctx *kong.Context) error {
 	c.ApplyProfile()
+	if err := c.validateConfig(); err != nil {
+		return err
+	}
 	models.SetupLogging(c.Verbose)
 	defer c.closeDatabases()
 

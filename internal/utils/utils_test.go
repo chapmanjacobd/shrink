@@ -108,6 +108,24 @@ func TestParseDurationString(t *testing.T) {
 	if got != 90*time.Minute {
 		t.Errorf("ParseDurationString(1h30m) = %v", got)
 	}
+	if got := ParseDurationString("37mins"); got != 37*time.Minute {
+		t.Errorf("ParseDurationString(37mins) = %v", got)
+	}
+}
+
+func TestStrictParsersRejectInvalidInput(t *testing.T) {
+	if _, err := ParseSizeStrict("banana"); err == nil {
+		t.Error("ParseSizeStrict accepted invalid input")
+	}
+	if _, err := ParseBitrateStrict("fast"); err == nil {
+		t.Error("ParseBitrateStrict accepted invalid input")
+	}
+	if _, err := ParsePercentOrBytesStrict("lots"); err == nil {
+		t.Error("ParsePercentOrBytesStrict accepted invalid input")
+	}
+	if _, err := ParseDurationStringStrict("soon"); err == nil {
+		t.Error("ParseDurationStringStrict accepted invalid input")
+	}
 }
 
 func TestEstimateDurationFromSize(t *testing.T) {
