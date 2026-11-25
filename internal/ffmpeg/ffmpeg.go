@@ -104,7 +104,7 @@ func (p *FFmpegProcessor) Process(ctx context.Context, m *models.ShrinkMedia, cf
 	}
 
 	// Build and execute FFmpeg command
-	args := p.buildFFmpegArgs(m.Path, outputPath, probe, videoStream, audioStream, albumArtStream, probe.SubtitleStreams)
+	args, effectiveOutputPath := p.buildFFmpegArgs(m.Path, outputPath, probe, videoStream, audioStream, albumArtStream, probe.SubtitleStreams)
 
 	// Setup systemd-run wrapper if configured (Linux only)
 	systemdCfg := utils.SystemdRunConfig{
@@ -143,13 +143,16 @@ func (p *FFmpegProcessor) Process(ctx context.Context, m *models.ShrinkMedia, cf
 	}
 
 	// Validate transcode (may return multiple results if splitting was used)
-	return p.validateTranscode(*m, outputPath, probe)
+	return p.validateTranscode(*m, effectiveOutputPath, probe)
 }
 
-// buildFFmpegArgs constructs the FFmpeg command arguments
+// buildFFmpegArgs constructs the FFmpeg command arguments.
+// It also returns the effective output path, which contains a %03d placeholder
+// when FFmpeg is asked to split the output.
 func (p *FFmpegProcessor) buildFFmpegArgs(inputPath, outputPath string, probe *FFProbeResult,
 	videoStream, audioStream, albumArtStream *FFProbeStream, subtitleStreams []FFProbeStream,
-) []string {
+) ([]string, string) {
+	effectiveOutputPath := outputPath
 	// Build base command
 	logLevel := []string{"-hide_banner", "-loglevel", "warning"}
 	if p.config.Common.VerboseFFmpeg {
@@ -210,7 +213,7 @@ func (p *FFmpegProcessor) buildFFmpegArgs(inputPath, outputPath string, probe *F
 			if len(splits) > 0 {
 				segmentTimes := strings.Join(splits, ",")
 				args = append(args, "-f", "segment", "-segment_times", segmentTimes)
-				outputPath = strings.Replace(outputPath, filepath.Ext(outputPath), ".%03d"+filepath.Ext(outputPath), 1)
+				effectiveOutputPath = strings.Replace(outputPath, filepath.Ext(outputPath), ".%03d"+filepath.Ext(outputPath), 1)
 			}
 		}
 	}
@@ -232,8 +235,8 @@ func (p *FFmpegProcessor) buildFFmpegArgs(inputPath, outputPath string, probe *F
 		"-max_interleave_delta", "0",
 	)
 
-	args = append(args, outputPath)
-	return args
+	args = append(args, effectiveOutputPath)
+	return args, effectiveOutputPath
 }
 
 // buildVideoFilters constructs video filter chain
@@ -266,9 +269,9 @@ func (p *FFmpegProcessor) buildAudioOptions(outIdx int, channels int, bitrate st
 		channels = 2
 	}
 
-	bitrateVal := parseBitrate(bitrate)
-	if bitrateVal == 0 {
-		bitrateVal = 256000
+	sourceBitrateVal := parseBitrate(bitrate)
+	if sourceBitrateVal == 0 {
+		sourceBitrateVal = 256000
 	}
 
 	sampleRateVal := parseSampleRate(sampleRate)
@@ -283,12 +286,15 @@ func (p *FFmpegProcessor) buildAudioOptions(outIdx int, channels int, bitrate st
 		args = append(args, fmt.Sprintf("-ac:a:%d", outIdx), "2")
 	}
 
-	// Bitrate config
-	if bitrateVal >= 256000 {
-		args = append(args, fmt.Sprintf("-b:a:%d", outIdx), "128k")
-	} else {
+	// Bitrate config. The configured target controls the encoded bitrate;
+	// the source bitrate only decides whether to apply low-bitrate tuning.
+	targetBitrateVal := p.config.Audio.TargetAudioBitrate
+	if targetBitrateVal <= 0 {
+		targetBitrateVal = 128000
+	}
+	args = append(args, fmt.Sprintf("-b:a:%d", outIdx), strconv.FormatInt(targetBitrateVal, 10))
+	if sourceBitrateVal < 256000 {
 		args = append(args,
-			fmt.Sprintf("-b:a:%d", outIdx), "64k",
 			fmt.Sprintf("-frame_duration:a:%d", outIdx), "40",
 			fmt.Sprintf("-apply_phase_inv:a:%d", outIdx), "0")
 	}

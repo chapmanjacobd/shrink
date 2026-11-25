@@ -171,6 +171,48 @@ func TestProcess_AudioSilence(t *testing.T) {
 	}
 }
 
+func TestProcess_AudioSplitValidatesSegmentedOutput(t *testing.T) {
+	mockProbe := `{"streams": [{"index": 0, "codec_type": "audio", "codec_name": "aac", "channels": 2}], "format": {"duration": "100.0", "size": "1000000"}}`
+	silenceOutput := "lavfi.silence_start=10.00\nlavfi.silence_start=60.00\n"
+	_, cleanup := setupMockFFmpeg(t, mockProbe, "success", silenceOutput)
+	defer cleanup()
+
+	cfg := &models.ProcessorConfig{
+		Audio: models.AudioConfig{
+			TranscodingAudioRate: 1.0,
+			MinSavingsAudio:      0.1,
+			TargetAudioBitrate:   128000,
+			AlwaysSplit:          true,
+			MinSplitSegment:      0.5,
+		},
+	}
+	processor := NewFFmpegProcessor(cfg)
+	m := &models.ShrinkMedia{
+		Path:     "test.mp3",
+		Size:     1000000,
+		Duration: 100.0,
+	}
+	_ = os.WriteFile("test.mp3", []byte("dummy"), 0o644)
+	defer func() { _ = os.Remove("test.mp3") }()
+	defer func() {
+		matches, _ := filepath.Glob("test.*.mka")
+		for _, match := range matches {
+			_ = os.Remove(match)
+		}
+	}()
+
+	result := processor.Process(context.Background(), m, cfg, nil)
+	if result.Error != nil {
+		t.Fatalf("expected success, got error: %v", result.Error)
+	}
+	if !result.Success {
+		t.Fatal("expected split transcode to be successful")
+	}
+	if len(result.Outputs) == 0 {
+		t.Fatal("expected split outputs")
+	}
+}
+
 func TestProcess_Stereo360(t *testing.T) {
 	mockProbe := `{"streams": [{"index": 0, "codec_type": "video", "codec_name": "h264", "width": 3840, "height": 1920, "tags": {"stereo_mode": "top_bottom"}}], "format": {"duration": "10.0", "size": "1000000"}}`
 	_, cleanup := setupMockFFmpeg(t, mockProbe, "success", "")
@@ -360,7 +402,9 @@ func TestBuildVideoFilters(t *testing.T) {
 }
 
 func TestBuildAudioOptions(t *testing.T) {
-	cfg := &models.ProcessorConfig{}
+	cfg := &models.ProcessorConfig{
+		Audio: models.AudioConfig{TargetAudioBitrate: 128000},
+	}
 	p := NewFFmpegProcessor(cfg)
 
 	opts := p.buildAudioOptions(0, 2, "256000", "44100")
@@ -370,7 +414,7 @@ func TestBuildAudioOptions(t *testing.T) {
 
 	expected := []string{
 		"-ac:a:0", "2",
-		"-b:a:0", "128k",
+		"-b:a:0", "128000",
 		"-c:a:0", "libopus",
 		"-ar:a:0", "48000",
 		"-af:a:0", "loudnorm=i=-18:tp=-3:lra=17",
@@ -382,11 +426,12 @@ func TestBuildAudioOptions(t *testing.T) {
 		}
 	}
 
-	// Test mono
+	// Test mono with a lower target bitrate.
+	cfg.Audio.TargetAudioBitrate = 64000
 	opts = p.buildAudioOptions(1, 1, "64000", "22050")
 	expectedMono := []string{
 		"-ac:a:1", "1",
-		"-b:a:1", "64k",
+		"-b:a:1", "64000",
 		"-frame_duration:a:1", "40",
 		"-apply_phase_inv:a:1", "0",
 		"-c:a:1", "libopus",
@@ -398,6 +443,13 @@ func TestBuildAudioOptions(t *testing.T) {
 		if !slices.Contains(opts, exp) {
 			t.Errorf("expected %q in mono audio options, got %v", exp, opts)
 		}
+	}
+
+	// The target, not the source bitrate, controls the encoded bitrate.
+	cfg.Audio.TargetAudioBitrate = 96000
+	opts = p.buildAudioOptions(0, 2, "256000", "44100")
+	if !slices.Contains(opts, "96000") {
+		t.Errorf("expected target bitrate 96000, got %v", opts)
 	}
 }
 
