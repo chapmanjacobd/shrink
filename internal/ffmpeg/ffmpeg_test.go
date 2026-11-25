@@ -171,6 +171,25 @@ func TestProcess_AudioSilence(t *testing.T) {
 	}
 }
 
+func TestProcess_StaticGIFWithoutImageProcessorKeepsOriginal(t *testing.T) {
+	mockProbe := `{"streams": [{"index": 0, "codec_type": "video", "codec_name": "gif", "width": 10, "height": 10, "nb_frames": "1"}], "format": {"duration": "1.0"}}`
+	_, cleanup := setupMockFFmpeg(t, mockProbe, "success", "")
+	defer cleanup()
+
+	processor := NewFFmpegProcessor(&models.ProcessorConfig{})
+	m := &models.ShrinkMedia{Path: "test.gif", Size: 100, Ext: ".gif"}
+	_ = os.WriteFile("test.gif", []byte("gif"), 0o644)
+	defer func() { _ = os.Remove("test.gif") }()
+
+	result := processor.Process(context.Background(), m, &models.ProcessorConfig{}, nil)
+	if result.Error != nil {
+		t.Fatalf("expected success, got error: %v", result.Error)
+	}
+	if len(result.Outputs) != 1 || result.Outputs[0].Path != m.Path {
+		t.Fatalf("expected original file to be kept as output, got %+v", result.Outputs)
+	}
+}
+
 func TestProcess_AudioSplitValidatesSegmentedOutput(t *testing.T) {
 	mockProbe := `{"streams": [{"index": 0, "codec_type": "audio", "codec_name": "aac", "channels": 2}], "format": {"duration": "100.0", "size": "1000000"}}`
 	silenceOutput := "lavfi.silence_start=10.00\nlavfi.silence_start=60.00\n"

@@ -51,15 +51,23 @@ func (p *FFmpegProcessor) Process(ctx context.Context, m *models.ShrinkMedia, cf
 		if !isAnimation {
 			// Process as static image
 			m.Category = "Image"
-			processor := registry.GetProcessor(m)
-			// Ensure we don't pick ourselves (or another FFmpegProcessor-based one) again
-			// and that we actually found an Image processor
-			if processor != nil && processor.Category() == "Image" {
-				return processor.Process(ctx, m, cfg, registry)
+			if registry != nil {
+				processor := registry.GetProcessor(m)
+				// Ensure we don't pick ourselves (or another FFmpegProcessor-based one) again
+				// and that we actually found an Image processor
+				if processor != nil && processor.Category() == "Image" {
+					return processor.Process(ctx, m, cfg, registry)
+				}
 			}
-			// If we can't process as image (e.g. image processing disabled), skip it
+			// If we can't process as image (e.g. image processing disabled),
+			// keep the original. Returning success without outputs would make
+			// the orchestrator delete the file.
 			slog.Info("Skipping static GIF/WebP as image processing is disabled or no image processor found", "path", m.Path)
-			return models.ProcessResult{SourcePath: m.Path, Success: true}
+			return models.ProcessResult{
+				SourcePath: m.Path,
+				Success:    true,
+				Outputs:    []models.ProcessOutputFile{{Path: m.Path, Size: m.Size}},
+			}
 		}
 	}
 
@@ -68,13 +76,21 @@ func (p *FFmpegProcessor) Process(ctx context.Context, m *models.ShrinkMedia, cf
 	audioStream := getFirstStream(probe.AudioStreams)
 	albumArtStream := getFirstStream(probe.AlbumArtStreams)
 
-	// Stream validation - skip files without expected streams
+	// Stream validation - keep files without expected streams.
 	if videoStream == nil && cfg.Video.VideoOnly {
-		return models.ProcessResult{SourcePath: m.Path, Success: true}
+		return models.ProcessResult{
+			SourcePath: m.Path,
+			Success:    true,
+			Outputs:    []models.ProcessOutputFile{{Path: m.Path, Size: m.Size}},
+		}
 	}
 
 	if audioStream == nil && cfg.Audio.AudioOnly {
-		return models.ProcessResult{SourcePath: m.Path, Success: true}
+		return models.ProcessResult{
+			SourcePath: m.Path,
+			Success:    true,
+			Outputs:    []models.ProcessOutputFile{{Path: m.Path, Size: m.Size}},
+		}
 	}
 
 	// Check if already encoded optimally by codec
