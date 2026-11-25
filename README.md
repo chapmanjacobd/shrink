@@ -125,6 +125,7 @@ shrink --active-time 12pm-1pm --active-time 6pm-11pm /path/to/media
 | --crf | CRF value for SVT-AV1 (0-63, lower is higher quality) | `40` |
 | --max-video-height | Maximum video height | `960` |
 | --max-video-width | Maximum video width | `1440` |
+| --delete-larger | Keep the transcode only when it is not larger than the original; `--force-shrink` overrides | `true` |
 
 ### Filter Flags
 
@@ -136,6 +137,7 @@ shrink --active-time 12pm-1pm --active-time 6pm-11pm /path/to/media
 | --text-only | Only process text/ebook files |
 | -s, --include | Include paths matching a glob pattern (full path or file name) |
 | -E, --exclude | Exclude paths matching a glob pattern (full path or file name) |
+| --search | Only include paths containing all search terms (case-insensitive) |
 
 ### Schedule Flags
 
