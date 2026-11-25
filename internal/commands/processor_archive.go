@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -481,123 +480,98 @@ func (p *ArchiveProcessor) EstimateSizeForArchive(m *models.ShrinkMedia, cfg *mo
 		return result
 	}
 
-	for _, content := range contents {
-		ext := content.Ext
-		slog.Info("Checking archive content", "path", content.Path, "ext", ext, "type", content.MediaType)
-
-		// Determine if this file is processable
-		var futureSize int64
-		var processingTime int
-		isProcessable := false
-
-		// Nested archives - use compressed size for estimation
-		// We don't extract during estimation to avoid temp space issues
-		// The actual contents will be analyzed during extraction
-		if ext != "" && (utils.ArchiveExtensionMap[ext] || isMultiPartArchiveExt(ext)) {
-			if isSecondaryPart(content.Path) {
-				slog.Debug("Skipping nested secondary archive part during estimation", "path", content.Path)
-				continue
-			}
-			slog.Info("Found nested archive", "path", content.Path, "compressedSize", content.CompressedSize)
-			isProcessable = true
-			// Estimate based on compressed size (assume video content for simplicity)
-			duration := float64(content.CompressedSize) / float64(cfg.Common.SourceVideoBitrate) * 8
-			futureSize = int64(duration * float64(cfg.Video.TargetVideoBitrate) / 8)
-			processingTime = int(math.Ceil(duration / cfg.Video.TranscodingVideoRate))
-			slog.Info("Nested archive estimation", "path", content.Path, "futureSize", futureSize, "archiveFileSize", content.Size)
-		}
-
-		// Video files
-		if !isProcessable && ext != "" && utils.VideoExtensionMap[ext] {
-			isProcessable = true
-			duration := content.Duration
-			if duration <= 0 {
-				// Estimate from compressed size (smaller = lower quality source)
-				sourceBitrate := float64(utils.GetEstimatedBitrate(ext))
-				if sourceBitrate <= 0 {
-					sourceBitrate = float64(cfg.Common.SourceVideoBitrate)
-				}
-				duration = float64(content.CompressedSize) / sourceBitrate * 8
-			}
-
-			targetBitrate := float64(cfg.Video.TargetVideoBitrate)
-			transcodeRate := cfg.Video.TranscodingVideoRate
-			if content.Width > 0 && content.Height > 0 {
-				maxW := float64(cfg.Video.MaxVideoWidth)
-				maxH := float64(cfg.Video.MaxVideoHeight)
-				actualW := float64(content.Width)
-				actualH := float64(content.Height)
-				outW, outH := actualW, actualH
-				if outW > maxW || outH > maxH {
-					scale := math.Min(maxW/outW, maxH/outH)
-					outW *= scale
-					outH *= scale
-				}
-				baselinePixels := maxW * maxH
-				outPixels := outW * outH
-				if baselinePixels > 0 {
-					pixelRatio := outPixels / baselinePixels
-					if pixelRatio < 0.25 {
-						pixelRatio = 0.25
-					}
-					if pixelRatio > 1.0 {
-						pixelRatio = 1.0
-					}
-					targetBitrate *= pixelRatio
-
-					sourcePixels := actualW * actualH
-					if sourcePixels > outPixels && outPixels > 0 {
-						complexityRatio := outPixels / sourcePixels
-						if complexityRatio < 0.2 {
-							complexityRatio = 0.2
-						}
-						transcodeRate *= complexityRatio
-					}
-				}
-			}
-
-			futureSize = int64(duration * targetBitrate / 8)
-			processingTime = int(math.Ceil(duration / transcodeRate))
-		}
-		// Audio files
-		if !isProcessable && ext != "" && utils.AudioExtensionMap[ext] {
-			isProcessable = true
-			duration := content.Duration
-			if duration <= 0 {
-				sourceBitrate := float64(utils.GetEstimatedBitrate(ext))
-				if sourceBitrate <= 0 {
-					sourceBitrate = float64(cfg.Common.SourceAudioBitrate)
-				}
-				duration = float64(content.CompressedSize) / sourceBitrate * 8
-			}
-			futureSize = int64(duration * float64(cfg.Audio.TargetAudioBitrate) / 8)
-			processingTime = int(math.Ceil(duration / cfg.Audio.TranscodingAudioRate))
-		}
-		// Image files
-		if !isProcessable && ext != "" && utils.ImageExtensionMap[ext] {
-			if !utils.IsOptimized(ext) { // Skip existing optimized formats
-				isProcessable = true
-				futureSize = cfg.Image.TargetImageSize
-				processingTime = int(cfg.Image.TranscodingImageTime)
-			}
-		}
-		// Text/Ebook files
-		if !isProcessable && ext != "" && utils.TextExtensionMap[ext] {
-			isProcessable = true
-			// Rough estimate for ebooks (compressed text is small)
-			futureSize = cfg.Image.TargetImageSize * 50
-			processingTime = int(cfg.Image.TranscodingImageTime * 12)
-		}
-
-		if isProcessable {
-			result.HasProcessable = true
-			result.FutureSize += futureSize
-			result.ProcessingTime += processingTime
-		}
-	}
+	result.FutureSize, result.ProcessingTime, result.HasProcessable = p.estimateContents(contents, cfg)
 
 	slog.Debug("EstimateSizeForArchive complete", "path", m.Path, "futureSize", result.FutureSize, "processable", result.HasProcessable)
 	return result
+}
+
+// estimateContents estimates the total on-disk size after extracting and
+// processing an archive.
+//
+// Every extracted file contributes to the estimate, including files that will
+// be kept unchanged. If only one file inside an archive is worth processing,
+// the whole archive still has to be extracted, so the preserved files must be
+// counted against the archive's compressed size. Otherwise shrinking looks
+// profitable when unarchiving would actually duplicate the other contents.
+//
+// Nested archive contents cannot be listed without extracting them, so their
+// future size is estimated from the compressed entry size. Their preserved
+// (non-processable) contents remain unaccounted for until extraction.
+func (p *ArchiveProcessor) estimateContents(contents []models.ShrinkMedia, cfg *models.ProcessorConfig) (futureSize int64, processingTime int, hasProcessable bool) {
+	for _, content := range contents {
+		future, time, processable := p.estimateContent(content, cfg)
+		futureSize += future
+		processingTime += time
+		if processable {
+			hasProcessable = true
+		}
+	}
+	return futureSize, processingTime, hasProcessable
+}
+
+// estimateContent returns the estimated post-extraction size, processing time,
+// and whether the content can be shrunk.
+func (p *ArchiveProcessor) estimateContent(content models.ShrinkMedia, cfg *models.ProcessorConfig) (futureSize int64, processingTime int, processable bool) {
+	ext := content.Ext
+	entrySize := content.Size
+	if entrySize <= 0 {
+		entrySize = content.CompressedSize
+	}
+
+	slog.Info("Checking archive content", "path", content.Path, "ext", ext, "type", content.MediaType)
+
+	// Secondary parts of a nested multi-part archive are removed with the
+	// primary archive rather than kept after extraction.
+	if ext != "" && (utils.ArchiveExtensionMap[ext] || isMultiPartArchiveExt(ext)) {
+		if isSecondaryPart(content.Path) {
+			slog.Debug("Skipping nested secondary archive part during estimation", "path", content.Path)
+			return 0, 0, false
+		}
+		// Nested archives are extracted and their contents processed during
+		// the real run. Estimate their future size as video content; files
+		// inside the nested archive are analyzed when it is extracted.
+		media := models.ShrinkMedia{
+			Path:     content.Path,
+			Size:     entrySize,
+			Ext:      ext,
+			Duration: content.Duration,
+			Width:    content.Width,
+			Height:   content.Height,
+		}
+		info := NewVideoProcessor(nil).EstimateSize(&media, cfg)
+		return info.FutureSize, info.ProcessingTime, true
+	}
+
+	// Already-optimized media is extracted and kept as-is.
+	if ext != "" && utils.IsOptimized(ext) {
+		return entrySize, 0, false
+	}
+
+	media := models.ShrinkMedia{
+		Path:     content.Path,
+		Size:     entrySize,
+		Ext:      ext,
+		Duration: content.Duration,
+		Width:    content.Width,
+		Height:   content.Height,
+	}
+
+	switch {
+	case ext != "" && utils.VideoExtensionMap[ext]:
+		info := NewVideoProcessor(nil).EstimateSize(&media, cfg)
+		return info.FutureSize, info.ProcessingTime, true
+	case ext != "" && utils.AudioExtensionMap[ext]:
+		info := NewAudioProcessor(nil).EstimateSize(&media, cfg)
+		return info.FutureSize, info.ProcessingTime, true
+	case ext != "" && utils.ImageExtensionMap[ext]:
+		return cfg.Image.TargetImageSize, int(cfg.Image.TranscodingImageTime), true
+	case ext != "" && utils.TextExtensionMap[ext]:
+		// Rough estimate for ebooks (compressed text is small)
+		return cfg.Image.TargetImageSize * 50, int(cfg.Image.TranscodingImageTime * 12), true
+	default:
+		return entrySize, 0, false
+	}
 }
 
 func (p *ArchiveProcessor) EstimateSize(m *models.ShrinkMedia, cfg *models.ProcessorConfig) models.ProcessableInfo {

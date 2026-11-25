@@ -32,6 +32,63 @@ func TestFlattenWrapperFolders(t *testing.T) {
 	}
 }
 
+func TestEstimateContentsCountsAllExtractedFiles(t *testing.T) {
+	cfg := &models.ProcessorConfig{
+		Video: models.VideoConfig{
+			TargetVideoBitrate:   800000,
+			TranscodingVideoRate: 10,
+			MaxVideoWidth:        1440,
+			MaxVideoHeight:       960,
+		},
+		Audio: models.AudioConfig{
+			TargetAudioBitrate:   128000,
+			TranscodingAudioRate: 100,
+		},
+		Image: models.ImageConfig{
+			TargetImageSize:      30 * 1024,
+			TranscodingImageTime: 1,
+		},
+		Common: models.CommonConfig{
+			SourceVideoBitrate: 1500000,
+			SourceAudioBitrate: 256000,
+		},
+	}
+	p := &ArchiveProcessor{cfg: cfg}
+
+	t.Run("preserved files are included", func(t *testing.T) {
+		contents := []models.ShrinkMedia{
+			{Path: "video.mp4", Ext: ".mp4", Size: 10 * 1024 * 1024},
+			{Path: "notes.txt", Ext: ".txt", Size: 20 * 1024 * 1024},
+		}
+
+		future, _, processable := p.estimateContents(contents, cfg)
+		if !processable {
+			t.Fatal("expected archive to have processable content")
+		}
+		if future < 20*1024*1024 {
+			t.Errorf("future size %d does not include preserved file", future)
+		}
+		if future >= 30*1024*1024 {
+			t.Errorf("future size %d should be less than original contents", future)
+		}
+	})
+
+	t.Run("unprocessable-only archive is not processable", func(t *testing.T) {
+		contents := []models.ShrinkMedia{
+			{Path: "notes.txt", Ext: ".txt", Size: 20 * 1024 * 1024},
+			{Path: "song.opus", Ext: ".opus", Size: 5 * 1024 * 1024},
+		}
+
+		future, _, processable := p.estimateContents(contents, cfg)
+		if processable {
+			t.Fatal("expected archive without processable content to be skipped")
+		}
+		if want := int64(25 * 1024 * 1024); future != want {
+			t.Errorf("future size = %d, want %d", future, want)
+		}
+	})
+}
+
 func TestIsBrokenArchive(t *testing.T) {
 	// Mock lsar to return empty for broken archive
 	// But wait, unar/lsar are external.
