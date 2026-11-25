@@ -7,6 +7,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/chapmanjacobd/shrink/internal/models"
@@ -120,32 +122,36 @@ func (p *TextProcessor) processText(ctx context.Context, m *models.ShrinkMedia, 
 		return models.ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("calibre not installed")}
 	}
 
-	ext := strings.ToLower(filepath.Ext(m.Path))
+	sourcePath := m.Path
+	ext := strings.ToLower(filepath.Ext(sourcePath))
+	workPath := sourcePath
 
-	// Step 1: OCR for PDFs if needed
-	if ext == "pdf" && utils.CommandExists("ocrmypdf") {
-		ocrPath := p.runOCR(ctx, m.Path, cfg)
-		if ocrPath != "" && ocrPath != m.Path {
-			m.Path = ocrPath
+	// Step 1: OCR for PDFs if needed. Keep the OCR output as an intermediate
+	// file; the original path must remain the result source.
+	if ext == ".pdf" && utils.CommandExists("ocrmypdf") {
+		ocrPath := p.runOCR(ctx, sourcePath, cfg)
+		if ocrPath != "" && ocrPath != sourcePath {
+			workPath = ocrPath
+			defer func() { _ = os.Remove(ocrPath) }()
 		}
 	}
 
 	// Step 2: Convert with Calibre to folder format
-	outputDir := filepath.Join(filepath.Dir(m.Path), filepath.Base(m.Path)+".OEB")
+	outputDir := filepath.Join(filepath.Dir(sourcePath), filepath.Base(sourcePath)+".OEB")
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
-		return models.ProcessResult{SourcePath: m.Path, Error: err}
+		return models.ProcessResult{SourcePath: sourcePath, Error: err}
 	}
 
 	args := []string{
-		m.Path,
+		workPath,
 		outputDir,
 		"--minimum-line-height=105",
 		"--unsmarten-punctuation",
 	}
 
 	// Use pdftohtml engine for PDFs with Calibre >= 7.19.0
-	major, minor, _ := p.getCalibreVersion()
-	if ext == "pdf" && (major > 7 || (major == 7 && minor >= 19)) {
+	major, minor, _ := p.getCalibreVersionContext(ctx)
+	if ext == ".pdf" && (major > 7 || (major == 7 && minor >= 19)) {
 		args = append(args, "--pdf-engine", "pdftohtml")
 	}
 
@@ -160,38 +166,38 @@ func (p *TextProcessor) processText(ctx context.Context, m *models.ShrinkMedia, 
 	output, err := utils.RunCommandWithSystemd(ctx, ebookConvert, args, systemdCfg)
 	if err != nil {
 		_ = os.RemoveAll(outputDir)
-		return models.ProcessResult{SourcePath: m.Path, Error: err, Output: string(output)}
+		return models.ProcessResult{SourcePath: sourcePath, Error: err, Output: string(output)}
 	}
 
 	if !p.folderExists(outputDir) {
 		_ = os.RemoveAll(outputDir)
-		return models.ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("calibre output folder missing")}
+		return models.ProcessResult{SourcePath: sourcePath, Error: fmt.Errorf("calibre output folder missing")}
 	}
 
 	// Step 3: Process images inside ebook (convert to AVIF) and update content.opf
 	converted := p.processEbookImagesWithManifest(ctx, outputDir, cfg)
 
-	// Step 5: Update references in HTML files
+	// Step 4: Update references in HTML files
 	p.updateImageReferences(outputDir, converted)
 
-	// Step 6: Repackage to EPUB
-	epubPath := strings.TrimSuffix(m.Path, ext) + ".OEB.epub"
+	// Step 5: Repackage to EPUB
+	epubPath := strings.TrimSuffix(sourcePath, filepath.Ext(sourcePath)) + ".OEB.epub"
 	if err := p.packageToEPUB(ctx, outputDir, epubPath, cfg); err != nil {
 		_ = os.RemoveAll(outputDir)
-		return models.ProcessResult{SourcePath: m.Path, Error: err}
+		return models.ProcessResult{SourcePath: sourcePath, Error: err}
 	}
 
-	// Step 7: Clean up .OEB folder
+	// Step 6: Clean up .OEB folder
 	_ = os.RemoveAll(outputDir)
 
-	// Step 8: Return result with EPUB path
+	// Step 7: Return result with EPUB path
 	var outputSize int64
 	if info, err := os.Stat(epubPath); err == nil {
 		outputSize = info.Size()
 	}
 
 	return models.ProcessResult{
-		SourcePath: m.Path,
+		SourcePath: sourcePath,
 		Outputs:    []models.ProcessOutputFile{{Path: epubPath, Size: outputSize}},
 		Success:    true,
 	}
@@ -228,7 +234,7 @@ func (p *TextProcessor) runOCR(ctx context.Context, path string, cfg *models.Pro
 		return ""
 	}
 
-	outputPath := strings.TrimSuffix(path, ".pdf") + ".ocr.pdf"
+	outputPath := strings.TrimSuffix(path, filepath.Ext(path)) + ".ocr.pdf"
 
 	args := []string{
 		"--optimize", "0",
@@ -282,29 +288,38 @@ func (p *TextProcessor) runOCR(ctx context.Context, path string, cfg *models.Pro
 	return ""
 }
 
-// getCalibreVersion returns the Calibre version as a tuple
+var calibreVersionRegex = regexp.MustCompile(`\(calibre\s+(\d+)\.(\d+)\.(\d+)`)
+
+// parseCalibreVersion extracts the version from output like
+// "ebook-convert (calibre 7.19.0)".
+func parseCalibreVersion(output string) (int, int, int) {
+	match := calibreVersionRegex.FindStringSubmatch(output)
+	if len(match) != 4 {
+		return 0, 0, 0
+	}
+	major, _ := strconv.Atoi(match[1])
+	minor, _ := strconv.Atoi(match[2])
+	patch, _ := strconv.Atoi(match[3])
+	return major, minor, patch
+}
+
+// getCalibreVersion returns the Calibre version as a tuple.
 func (p *TextProcessor) getCalibreVersion() (int, int, int) {
+	return p.getCalibreVersionContext(context.Background())
+}
+
+// getCalibreVersionContext returns the Calibre version as a tuple.
+func (p *TextProcessor) getCalibreVersionContext(ctx context.Context) (int, int, int) {
 	ebookConvert := utils.GetCommandPath("ebook-convert")
 	if ebookConvert == "" {
 		return 0, 0, 0
 	}
-	cmd := exec.Command(ebookConvert, "--version")
+	cmd := exec.CommandContext(ctx, ebookConvert, "--version")
 	output, err := cmd.Output()
 	if err != nil {
 		return 0, 0, 0
 	}
-
-	// Parse version from output like "ebook-convert (calibre 7.19.0)"
-	parts := strings.Fields(string(output))
-	for i, part := range parts {
-		if strings.HasPrefix(part, "(") && i+2 < len(parts) {
-			version := strings.TrimSuffix(parts[i+2], ")")
-			var major, minor, patch int
-			_, _ = fmt.Sscanf(version, "%d.%d.%d", &major, &minor, &patch)
-			return major, minor, patch
-		}
-	}
-	return 0, 0, 0
+	return parseCalibreVersion(string(output))
 }
 
 // processEbookImagesWithManifest converts images to AVIF and updates content.opf manifest
@@ -414,8 +429,13 @@ func (p *TextProcessor) getImageFilesFromManifest(outputDir string) []string {
 			continue
 		}
 
-		// Convert to absolute path
+		// Convert to absolute path and ensure it stays inside the extracted
+		// book. A manifest href is untrusted input.
 		imgPath := filepath.Join(outputDir, href)
+		if !pathWithin(outputDir, imgPath) {
+			slog.Warn("Ignoring manifest image outside book directory", "href", href)
+			continue
+		}
 		images = append(images, imgPath)
 	}
 
@@ -460,31 +480,75 @@ func (p *TextProcessor) updateManifest(outputDir string, converted map[string]st
 	}
 
 	text := string(content)
+	lines := strings.Split(text, "\n")
 	modified := false
 
-	// Update manifest items (href attributes in <item> elements)
-	for oldName, newName := range converted {
-		// Replace in href attributes: href="images/old.jpg" -> href="images/old.avif"
-		if strings.Contains(text, `href="`+oldName+`"`) {
-			text = strings.ReplaceAll(text, `href="`+oldName+`"`, `href="`+newName+`"`)
-			modified = true
+	// Update manifest items (href attributes in <item> elements). Hrefs
+	// commonly include a directory (images/cover.jpg), so compare against the
+	// basename and preserve the prefix.
+	for i, line := range lines {
+		if !strings.Contains(line, "<item") {
+			continue
 		}
-		if strings.Contains(text, `href='`+oldName+`'`) {
-			text = strings.ReplaceAll(text, `href='`+oldName+`'`, `href='`+newName+`'`)
-			modified = true
+		href := p.extractAttribute(line, "href")
+		if href == "" {
+			continue
+		}
+		base := filepath.Base(href)
+		newName, ok := converted[base]
+		if !ok {
+			continue
 		}
 
-		// Update media-type attributes
-		newMediaType := p.getMediaType(".avif")
-		if newMediaType != "" {
-			// Find and update media-type for this item
-			text = p.updateMediaType(text, oldName, newMediaType)
+		newHref := strings.TrimSuffix(href, base) + newName
+		line = replaceAttribute(line, "href", href, newHref)
+
+		if mediaType := p.getMediaType(filepath.Ext(newName)); mediaType != "" {
+			if oldType := p.extractAttribute(line, "media-type"); oldType != "" {
+				line = replaceAttribute(line, "media-type", oldType, mediaType)
+			}
 		}
+
+		lines[i] = line
+		modified = true
 	}
 
 	if modified {
-		_ = os.WriteFile(manifestPath, []byte(text), 0o644)
+		_ = os.WriteFile(manifestPath, []byte(strings.Join(lines, "\n")), 0o644)
 	}
+}
+
+// replaceAttribute replaces an XML attribute value without changing the quote
+// style. Attribute matching is intentionally simple because content.opf is
+// generated by Calibre and uses plain attribute syntax.
+func replaceAttribute(tag, attrName, oldValue, newValue string) string {
+	for _, quote := range []string{`"`, `'`} {
+		old := attrName + "=" + quote + oldValue + quote
+		if strings.Contains(tag, old) {
+			replacement := attrName + "=" + quote + newValue + quote
+			return strings.Replace(tag, old, replacement, 1)
+		}
+	}
+	return tag
+}
+
+// pathWithin reports whether target resolves inside base.
+func pathWithin(base, target string) bool {
+	rel, err := filepath.Rel(base, target)
+	if err != nil {
+		return false
+	}
+	if filepath.IsAbs(rel) {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// replaceImageReference replaces a basename reference without matching it as a
+// substring of a longer filename (for example "1.jpg" inside "11.jpg").
+func replaceImageReference(text, oldName, newName string) string {
+	pattern := regexp.MustCompile(`(^|[^A-Za-z0-9_.-])` + regexp.QuoteMeta(oldName) + `([^A-Za-z0-9_.-]|$)`)
+	return pattern.ReplaceAllString(text, `${1}`+newName+`${2}`)
 }
 
 // getMediaType returns the MIME type for a file extension
@@ -507,33 +571,6 @@ func (p *TextProcessor) getMediaType(ext string) string {
 	default:
 		return ""
 	}
-}
-
-// updateMediaType updates the media-type attribute for a specific item in the manifest
-func (p *TextProcessor) updateMediaType(text, fileName, newMediaType string) string {
-	// Find the item element containing this file
-	// Look for patterns like: <item href="..." media-type="..." id="..."/>
-	lines := strings.Split(text, "\n")
-	for i, line := range lines {
-		if !strings.Contains(line, "<item") {
-			continue
-		}
-		if !strings.Contains(line, fileName) {
-			continue
-		}
-
-		// Update media-type in this line
-		if strings.Contains(line, `media-type="`) {
-			// Replace existing media-type
-			oldType := p.extractAttribute(line, "media-type")
-			if oldType != "" {
-				line = strings.Replace(line, `media-type="`+oldType+`"`, `media-type="`+newMediaType+`"`, 1)
-				lines[i] = line
-			}
-		}
-	}
-
-	return strings.Join(lines, "\n")
 }
 
 // updateImageReferences updates HTML files to reference new AVIF files
@@ -567,8 +604,11 @@ func (p *TextProcessor) updateReferencesInFile(path string, converted map[string
 	modified := false
 	for oldName, newName := range converted {
 		if strings.Contains(text, oldName) {
-			text = strings.ReplaceAll(text, oldName, newName)
-			modified = true
+			updated := replaceImageReference(text, oldName, newName)
+			if updated != text {
+				text = updated
+				modified = true
+			}
 		}
 	}
 
