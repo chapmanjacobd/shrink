@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -29,6 +30,47 @@ func TestFlattenWrapperFolders(t *testing.T) {
 	newPath := filepath.Join(tempDir, "test.txt")
 	if _, err := os.Stat(newPath); os.IsNotExist(err) {
 		t.Errorf("expected flattened file missing at %s", newPath)
+	}
+}
+
+func TestExtractAndProcessDepthLimitReportsFailure(t *testing.T) {
+	p := &ArchiveProcessor{cfg: &models.ProcessorConfig{}}
+	result := p.ExtractAndProcess(
+		context.Background(),
+		&models.ShrinkMedia{Path: "/tmp/nested.zip", Ext: ".zip"},
+		&models.ProcessorConfig{},
+		nil, nil, nil, 11,
+	)
+	if result.Error == nil {
+		t.Fatal("expected recursion depth error")
+	}
+	if result.Success {
+		t.Fatal("depth limit must not report success, otherwise the archive is deleted")
+	}
+}
+
+func TestExtractAndProcessSecondaryPartReportsFailure(t *testing.T) {
+	dir := t.TempDir()
+	zipPath := filepath.Join(dir, "archive.zip")
+	partPath := filepath.Join(dir, "archive.z01")
+	for _, path := range []string{zipPath, partPath} {
+		if err := os.WriteFile(path, []byte("data"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	p := &ArchiveProcessor{cfg: &models.ProcessorConfig{}}
+	result := p.ExtractAndProcess(
+		context.Background(),
+		&models.ShrinkMedia{Path: partPath, Ext: ".z01"},
+		&models.ProcessorConfig{},
+		nil, nil, nil, 0,
+	)
+	if result.Error == nil {
+		t.Fatal("expected secondary part error")
+	}
+	if result.Success {
+		t.Fatal("secondary part must not report success")
 	}
 }
 

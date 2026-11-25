@@ -169,16 +169,25 @@ func isMultiPartArchiveExt(ext string) bool {
 func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *models.ShrinkMedia, cfg *models.ProcessorConfig,
 	imageProc *ImageProcessor, ffmpegProc *ffmpeg.FFmpegProcessor, registry models.ProcessorRegistry, depth int,
 ) models.ProcessResult {
-	// Limit recursion depth to prevent stack overflow from maliciously nested archives
+	// Limit recursion depth to prevent stack overflow from maliciously nested
+	// archives. Report failure so the caller keeps the nested archive instead
+	// of deleting it without extracting its contents.
 	if depth > 10 {
-		slog.Warn("Max archive recursion depth reached, skipping nested archive", "path", m.Path)
-		return models.ProcessResult{SourcePath: m.Path, Success: true}
+		slog.Warn("Max archive recursion depth reached, keeping nested archive", "path", m.Path)
+		return models.ProcessResult{
+			SourcePath: m.Path,
+			Error:      fmt.Errorf("max archive recursion depth (%d) reached", depth),
+		}
 	}
 
-	// Skip secondary part files - only process the primary archive
+	// Secondary parts are handled together with their primary archive. If one
+	// is processed directly, report failure rather than deleting it.
 	if isSecondaryPart(m.Path) {
 		slog.Debug("Skipping secondary archive part", "path", m.Path)
-		return models.ProcessResult{SourcePath: m.Path, Success: true} // Treat as successfully handled (no action needed)
+		return models.ProcessResult{
+			SourcePath: m.Path,
+			Error:      fmt.Errorf("secondary part of a multi-part archive"),
+		}
 	}
 
 	lsar := utils.GetCommandPath("lsar")
