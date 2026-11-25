@@ -76,6 +76,7 @@ func TestParseSize(t *testing.T) {
 		{"1MB", 1024 * 1024},
 		{"1MiB", 1024 * 1024},
 		{"1GB", 1024 * 1024 * 1024},
+		{" 1MiB ", 1024 * 1024},
 	}
 	for _, tt := range tests {
 		got := ParseSize(tt.s)

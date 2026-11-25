@@ -342,6 +342,7 @@ func ParseSizeStrict(s string) (int64, error) {
 	if raw == "" {
 		return 0, fmt.Errorf("size is empty")
 	}
+	s = raw
 	multiplier := int64(1)
 	// Check longer suffixes first to avoid partial matches
 	if before, ok := strings.CutSuffix(s, "KiB"); ok {
