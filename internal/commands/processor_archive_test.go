@@ -106,6 +106,44 @@ func TestExtractAndProcessSecondaryPartReportsFailure(t *testing.T) {
 	}
 }
 
+func TestArchiveEstimatePreservesPartFilesWhenUnprocessable(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses a shell script for the fake lsar command")
+	}
+
+	tempDir := t.TempDir()
+	lsarPath := filepath.Join(tempDir, "lsar")
+	script := `#!/bin/sh
+printf '%s' '{"lsarContents":[{"XADFileName":"notes.txt","XADFileSize":1000,"XADCompressedSize":1000}],"lsarProperties":{"XADVolumes":["archive.z01"]}}'
+`
+	if err := os.WriteFile(lsarPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", tempDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	archivePath := filepath.Join(tempDir, "archive.zip")
+	partPath := filepath.Join(tempDir, "archive.z01")
+	for _, path := range []string{archivePath, partPath} {
+		if err := os.WriteFile(path, []byte("archive"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	cfg := &models.ProcessorConfig{}
+	cfg.Common.DisableSystemd = true
+	cfg.Common.ArchiveAnalyzeTimeoutSec = 5
+	cfg.Common.ArchiveGlobTimeoutSec = 5
+	p := &ArchiveProcessor{cfg: cfg, unarInstalled: true}
+
+	info := p.EstimateSize(&models.ShrinkMedia{Path: archivePath, Ext: ".zip", Size: 7}, cfg)
+	if info.IsProcessable {
+		t.Fatalf("expected archive to be unprocessable: %+v", info)
+	}
+	if len(info.PartFiles) != 1 || !pathsEqual(info.PartFiles[0], partPath) {
+		t.Errorf("unprocessable archive lost its part files: %v", info.PartFiles)
+	}
+}
+
 func TestEstimateContentsCountsAllExtractedFiles(t *testing.T) {
 	cfg := &models.ProcessorConfig{
 		Video: models.VideoConfig{

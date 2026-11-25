@@ -334,6 +334,44 @@ func TestProcessSingleStatErrorDoesNotMarkDeleted(t *testing.T) {
 	}
 }
 
+type skippedArchiveProcessor struct {
+	BaseProcessor
+}
+
+func (p *skippedArchiveProcessor) CanProcess(m *models.ShrinkMedia) bool { return true }
+func (p *skippedArchiveProcessor) EstimateSize(m *models.ShrinkMedia, cfg *models.ProcessorConfig) models.ProcessableInfo {
+	return models.ProcessableInfo{
+		IsProcessable: false,
+		ActualSize:    100,
+		PartFiles:     []string{"/tmp/archive.z01"},
+	}
+}
+
+func (p *skippedArchiveProcessor) Process(ctx context.Context, m *models.ShrinkMedia, cfg *models.ProcessorConfig, registry models.ProcessorRegistry) models.ProcessResult {
+	return models.ProcessResult{}
+}
+
+func TestAnalyzeSkippedArchivePreservesPartFiles(t *testing.T) {
+	processor := &skippedArchiveProcessor{BaseProcessor{category: "Archived", requiredTool: "mock"}}
+	registry := &MediaRegistry{processors: []models.MediaProcessor{processor}}
+	metrics := NewShrinkMetrics()
+	metrics.isTTY = false
+	engine := NewEngine(nil, &models.ProcessorConfig{}, EngineConfig{Move: t.TempDir()}, nil, registry, metrics)
+
+	media := []models.ShrinkMedia{{Path: "archive.zip", Ext: ".zip", Size: 100}}
+	results := engine.analyzeCategory(media, []int{0}, "Archived")
+	result, ok := results[0]
+	if !ok {
+		t.Fatal("missing analysis result")
+	}
+	if !result.skip || !result.skipMove {
+		t.Fatalf("expected archive to be skipped and movable: %+v", result)
+	}
+	if len(result.media.PartFiles) != 1 || result.media.PartFiles[0] != "/tmp/archive.z01" {
+		t.Errorf("skipped archive lost its part files: %v", result.media.PartFiles)
+	}
+}
+
 func TestUpdateMetadataPreservesForeignKeyRows(t *testing.T) {
 	tempDir := t.TempDir()
 	dbPath := filepath.Join(tempDir, "media.db")

@@ -298,9 +298,12 @@ func (e *Engine) analyzeOne(media []models.ShrinkMedia, idx int) analysisResult 
 		return result
 	}
 
+	if len(info.PartFiles) > 0 {
+		m.PartFiles = info.PartFiles
+	}
+
 	if info.IsBroken {
 		m.IsBroken = true
-		m.PartFiles = info.PartFiles
 		result.broken = true
 	} else if !info.IsProcessable {
 		// Case 1: Not processable (e.g., archive with no shrinkable content)

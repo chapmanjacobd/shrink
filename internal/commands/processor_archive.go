@@ -415,6 +415,7 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *models.Shri
 // ArchiveEstimateResult holds the result of archive size estimation
 type ArchiveEstimateResult struct {
 	FutureSize       int64
+	PartFiles        []string
 	ProcessingTime   int
 	HasProcessable   bool
 	TotalArchiveSize int64
@@ -451,6 +452,7 @@ func (p *ArchiveProcessor) EstimateSizeForArchive(m *models.ShrinkMedia, cfg *mo
 		slog.Debug("Calling getPartFiles", "path", m.Path)
 		partFiles = p.getPartFiles(m.Path)
 		slog.Debug("getPartFiles returned", "path", m.Path, "parts", len(partFiles))
+		result.PartFiles = partFiles
 
 		// Check for missing parts in sequence for known multi-part types
 		if isBrokenSequence(m.Path, partFiles) {
@@ -594,12 +596,12 @@ func (p *ArchiveProcessor) EstimateSize(m *models.ShrinkMedia, cfg *models.Proce
 	slog.Debug("EstimateSize starting", "path", m.Path)
 	est := p.EstimateSizeForArchive(m, cfg)
 
-	var partFiles []string
-	if !est.HasProcessable && est.TotalArchiveSize == 0 {
+	partFiles := est.PartFiles
+	if len(partFiles) == 0 && !est.HasProcessable && est.TotalArchiveSize == 0 {
 		slog.Debug("Archive has no processable content and size=0, checking parts", "path", m.Path)
 		partFiles = p.getPartFiles(m.Path)
 		slog.Debug("getPartFiles (broken check) returned", "path", m.Path, "parts", len(partFiles))
-	} else if est.IsBroken {
+	} else if len(partFiles) == 0 && est.IsBroken {
 		// Also get part files for broken archives
 		partFiles = p.getPartFiles(m.Path)
 	}
