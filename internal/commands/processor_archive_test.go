@@ -4,10 +4,42 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/chapmanjacobd/shrink/internal/models"
 )
+
+func TestEstimateSizeForArchiveTimeoutIsNotBroken(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses a shell script for the fake lsar command")
+	}
+
+	tempDir := t.TempDir()
+	lsarPath := filepath.Join(tempDir, "lsar")
+	if err := os.WriteFile(lsarPath, []byte("#!/bin/sh\nsleep 5\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", tempDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	archivePath := filepath.Join(tempDir, "archive.zip")
+	if err := os.WriteFile(archivePath, []byte("archive"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &models.ProcessorConfig{}
+	cfg.Common.ArchiveAnalyzeTimeoutSec = 1
+	cfg.Common.DisableSystemd = true
+	p := &ArchiveProcessor{cfg: cfg, unarInstalled: true}
+
+	result := p.EstimateSizeForArchive(&models.ShrinkMedia{Path: archivePath, Size: 7}, cfg)
+	if !result.IsTimeout {
+		t.Errorf("timed-out analysis was not marked as timeout: %+v", result)
+	}
+	if result.IsBroken {
+		t.Errorf("timed-out analysis was incorrectly marked broken: %+v", result)
+	}
+}
 
 func TestFlattenWrapperFolders(t *testing.T) {
 	tempDir := t.TempDir()

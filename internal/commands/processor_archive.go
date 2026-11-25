@@ -477,15 +477,17 @@ func (p *ArchiveProcessor) EstimateSizeForArchive(m *models.ShrinkMedia, cfg *mo
 		}
 	}
 
-	// If lsar failed (empty contents due to error or missing parts), archive is broken
-	if lsarFailed {
-		result.IsBroken = true
+	// A timeout is not evidence of a broken archive. Check it before the
+	// generic lsar failure case so a slow archive is retried instead of being
+	// cached and moved as broken.
+	if isTimeout {
+		result.IsTimeout = true
 		return result
 	}
 
-	// If lsar timed out, mark it so we don't cache this result
-	if isTimeout {
-		result.IsTimeout = true
+	// If lsar failed (empty contents due to error or missing parts), archive is broken
+	if lsarFailed {
+		result.IsBroken = true
 		return result
 	}
 
