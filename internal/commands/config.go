@@ -15,8 +15,6 @@ type Config struct {
 	CoreFlags        `embed:""`
 	PathFilterFlags  `embed:"" group:"PathFilter"`
 	MediaFilterFlags `embed:"" group:"MediaFilter"`
-	TimeFilterFlags  `embed:"" group:"Time"`
-	DeletedFlags     `embed:"" group:"Deleted"`
 	SavingsFlags     `embed:"" group:"Savings"`
 	BitrateFlags     `embed:"" group:"Bitrate"`
 	TranscodingFlags `embed:"" group:"Transcoding"`
@@ -42,9 +40,9 @@ type CoreFlags struct {
 }
 
 type PathFilterFlags struct {
-	Include []string `short:"s" help:"Include paths matching pattern" env:"SHRINK_INCLUDE"`
-	Exclude []string `short:"E" help:"Exclude paths matching pattern" env:"SHRINK_EXCLUDE"`
-	Search  []string `help:"Search terms" env:"SHRINK_SEARCH"`
+	Include []string `short:"s" help:"Include paths matching a glob pattern (matched against the full path and file name)" env:"SHRINK_INCLUDE"`
+	Exclude []string `short:"E" help:"Exclude paths matching a glob pattern (matched against the full path and file name)" env:"SHRINK_EXCLUDE"`
+	Search  []string `help:"Only include paths containing all search terms (case-insensitive)" env:"SHRINK_SEARCH"`
 }
 
 type MediaFilterFlags struct {
@@ -53,21 +51,6 @@ type MediaFilterFlags struct {
 	ImageOnly  bool `help:"Only image files" env:"SHRINK_IMAGE_ONLY"`
 	TextOnly   bool `help:"Only text/ebook files" env:"SHRINK_TEXT_ONLY"`
 	NoArchives bool `help:"Skip processing archive files" env:"SHRINK_NO_ARCHIVES"`
-}
-
-type TimeFilterFlags struct {
-	CreatedAfter   string `help:"Created after date" env:"SHRINK_CREATED_AFTER"`
-	ModifiedAfter  string `help:"Modified after date" env:"SHRINK_MODIFIED_AFTER"`
-	ModifiedBefore string `help:"Modified before date" env:"SHRINK_MODIFIED_BEFORE"`
-}
-
-type DeletedFlags struct {
-	// HideDeleted defaults to true: most users don't want to see deleted files in listings
-	HideDeleted bool `default:"true" help:"Exclude deleted files" env:"SHRINK_HIDE_DELETED"`
-	OnlyDeleted bool `help:"Include only deleted files" env:"SHRINK_ONLY_DELETED"`
-	// Valid defaults to true: prefer processing files with valid metadata
-	Valid   bool `default:"true" help:"Attempt to process files with valid metadata" env:"SHRINK_VALID"`
-	Invalid bool `help:"Attempt to process files with invalid metadata" env:"SHRINK_INVALID"`
 }
 
 type SavingsFlags struct {
@@ -367,8 +350,6 @@ func (c *Config) buildCommonConfig() models.CommonConfig {
 		DeleteUnplayable:         c.DeleteUnplayable,
 		DeleteLarger:             c.DeleteLarger,
 		MoveBroken:               c.MoveBroken,
-		Valid:                    c.Valid,
-		Invalid:                  c.Invalid,
 		ForceShrink:              c.ForceShrink,
 		VerboseFFmpeg:            c.VerboseFFmpeg,
 		IncludeTimecode:          c.IncludeTimecode,

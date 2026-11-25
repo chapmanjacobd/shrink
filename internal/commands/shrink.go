@@ -76,6 +76,11 @@ func (c *ShrinkCmd) Run(ctx *kong.Context) error {
 		return err
 	}
 
+	allMedia, err = c.filterMediaByPath(allMedia)
+	if err != nil {
+		return err
+	}
+
 	slog.Info("Loaded media", "count", len(allMedia))
 	if len(allMedia) == 0 {
 		slog.Info("No media found")

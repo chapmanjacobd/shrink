@@ -71,8 +71,6 @@ type CommonConfig struct {
 	MaxHeightBuffer    float64
 	DeleteUnplayable   bool
 	DeleteLarger       bool
-	Valid              bool
-	Invalid            bool
 	ForceShrink        bool
 	VerboseFFmpeg      bool
 	IncludeTimecode    bool

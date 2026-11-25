@@ -132,6 +132,75 @@ func TestFilterByToolsDoesNotMoveFiles(t *testing.T) {
 	}
 }
 
+func TestFilterMediaByPath(t *testing.T) {
+	media := []models.ShrinkMedia{
+		{Path: "/media/keep/video.mp4"},
+		{Path: "/media/keep/skip.mp4"},
+		{Path: "/media/other/clip.mkv"},
+		{Path: "/media/keep/notes.txt"},
+	}
+
+	tests := []struct {
+		name    string
+		include []string
+		exclude []string
+		search  []string
+		want    []string
+	}{
+		{
+			name:    "include by basename",
+			include: []string{"*.mp4"},
+			want:    []string{"/media/keep/video.mp4", "/media/keep/skip.mp4"},
+		},
+		{
+			name:    "exclude",
+			exclude: []string{"*skip*"},
+			want:    []string{"/media/keep/video.mp4", "/media/other/clip.mkv", "/media/keep/notes.txt"},
+		},
+		{
+			name:   "search all terms",
+			search: []string{"media", "keep"},
+			want:   []string{"/media/keep/video.mp4", "/media/keep/skip.mp4", "/media/keep/notes.txt"},
+		},
+		{
+			name:    "include and exclude",
+			include: []string{"*.mp4"},
+			exclude: []string{"*skip*"},
+			want:    []string{"/media/keep/video.mp4"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := &ShrinkCmd{}
+			cmd.Include = tt.include
+			cmd.Exclude = tt.exclude
+			cmd.Search = tt.search
+
+			got, err := cmd.filterMediaByPath(media)
+			if err != nil {
+				t.Fatalf("filterMediaByPath failed: %v", err)
+			}
+			if len(got) != len(tt.want) {
+				t.Fatalf("got %d results, want %d: %+v", len(got), len(tt.want), got)
+			}
+			for i := range tt.want {
+				if got[i].Path != tt.want[i] {
+					t.Errorf("result %d = %q, want %q", i, got[i].Path, tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestFilterMediaByPathRejectsInvalidPattern(t *testing.T) {
+	cmd := &ShrinkCmd{}
+	cmd.Include = []string{"["}
+	if _, err := cmd.filterMediaByPath([]models.ShrinkMedia{{Path: "video.mp4"}}); err == nil {
+		t.Fatal("expected invalid glob pattern error")
+	}
+}
+
 func TestInvalidConfigValuesReturnErrors(t *testing.T) {
 	tempDir := t.TempDir()
 	tests := []struct {

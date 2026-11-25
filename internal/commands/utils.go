@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -11,6 +12,84 @@ import (
 	"github.com/chapmanjacobd/shrink/internal/models"
 	"github.com/chapmanjacobd/shrink/internal/utils"
 )
+
+// filterMediaByPath applies --include, --exclude, and --search. Include and
+// exclude patterns are globs matched against both the full path and the file
+// name. Search terms must all appear in the path (case-insensitive).
+func (c *ShrinkCmd) filterMediaByPath(media []models.ShrinkMedia) ([]models.ShrinkMedia, error) {
+	if len(c.Include) == 0 && len(c.Exclude) == 0 && len(c.Search) == 0 {
+		return media, nil
+	}
+
+	// Validate patterns once so a bad pattern fails before processing starts.
+	if _, err := matchAnyPattern("", c.Include); err != nil {
+		return nil, err
+	}
+	if _, err := matchAnyPattern("", c.Exclude); err != nil {
+		return nil, err
+	}
+
+	var err error
+	filtered := make([]models.ShrinkMedia, 0, len(media))
+	for _, m := range media {
+		included := len(c.Include) == 0
+		if !included {
+			included, err = matchAnyPattern(m.Path, c.Include)
+			if err != nil {
+				return nil, err
+			}
+		}
+		if !included {
+			continue
+		}
+
+		excluded := false
+		if len(c.Exclude) > 0 {
+			excluded, err = matchAnyPattern(m.Path, c.Exclude)
+			if err != nil {
+				return nil, err
+			}
+		}
+		if excluded {
+			continue
+		}
+
+		if !matchesAllSearchTerms(m.Path, c.Search) {
+			continue
+		}
+		filtered = append(filtered, m)
+	}
+	return filtered, nil
+}
+
+func matchAnyPattern(path string, patterns []string) (bool, error) {
+	if len(patterns) == 0 {
+		return false, nil
+	}
+	base := filepath.Base(path)
+	for _, pattern := range patterns {
+		for _, target := range []string{path, base} {
+			matched, err := filepath.Match(pattern, target)
+			if err != nil {
+				return false, fmt.Errorf("invalid path pattern %q: %w", pattern, err)
+			}
+			if matched {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
+func matchesAllSearchTerms(path string, terms []string) bool {
+	lowerPath := strings.ToLower(path)
+	for _, term := range terms {
+		if !strings.Contains(lowerPath, strings.ToLower(term)) {
+			return false
+		}
+	}
+	return true
+}
 
 // scanDirectory scans a directory recursively for files
 func (c *ShrinkCmd) scanDirectory(dirPath string) ([]models.ShrinkMedia, error) {

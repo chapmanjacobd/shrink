@@ -158,7 +158,6 @@ func TestIntegration_VideoTranscode_H264_to_AV1(t *testing.T) {
 		},
 		Common: models.CommonConfig{
 			SourceVideoBitrate: 1500000,
-			Valid:              true,
 		},
 	}
 
@@ -219,7 +218,6 @@ func TestIntegration_VideoTranscode_WithSubtitles(t *testing.T) {
 		},
 		Common: models.CommonConfig{
 			SourceVideoBitrate: 1500000,
-			Valid:              true,
 		},
 	}
 
@@ -289,7 +287,6 @@ func TestIntegration_VideoTranscode_AlreadyAV1(t *testing.T) {
 		},
 		Common: models.CommonConfig{
 			SourceVideoBitrate: 1500000,
-			Valid:              true,
 		},
 	}
 
@@ -330,7 +327,6 @@ func TestIntegration_AudioTranscode_AAC_to_Opus(t *testing.T) {
 		},
 		Common: models.CommonConfig{
 			SourceAudioBitrate: 256000,
-			Valid:              true,
 		},
 	}
 
@@ -383,7 +379,6 @@ func TestIntegration_AudioTranscode_WithLoudnorm(t *testing.T) {
 		},
 		Common: models.CommonConfig{
 			SourceAudioBitrate: 256000,
-			Valid:              true,
 		},
 	}
 
@@ -422,7 +417,6 @@ func TestIntegration_AudioTranscode_WithSilenceSplit(t *testing.T) {
 		},
 		Common: models.CommonConfig{
 			SourceAudioBitrate: 256000,
-			Valid:              true,
 		},
 	}
 
@@ -495,7 +489,6 @@ func TestIntegration_VideoTranscode_Timeout(t *testing.T) {
 		},
 		Common: models.CommonConfig{
 			SourceVideoBitrate: 1500000,
-			Valid:              true,
 		},
 	}
 
@@ -584,7 +577,6 @@ func TestIntegration_VideoTranscode_Stereo360(t *testing.T) {
 		},
 		Common: models.CommonConfig{
 			SourceVideoBitrate: 1500000,
-			Valid:              true,
 			MaxWidthBuffer:     0.05,
 			MaxHeightBuffer:    0.05,
 		},
