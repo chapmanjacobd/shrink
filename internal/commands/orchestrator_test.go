@@ -1,9 +1,11 @@
 package commands
 
 import (
+	"context"
 	"database/sql"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	dbpkg "github.com/chapmanjacobd/shrink/internal/db"
@@ -100,6 +102,109 @@ func TestFinalizeFileSwapDeleteOriginal(t *testing.T) {
 	}
 	if _, err := os.Stat(newPath); err != nil {
 		t.Errorf("new file was deleted but it was in the outputs: %v", err)
+	}
+}
+
+func TestAnalyzeCategoryProcessesAllJobs(t *testing.T) {
+	var running, maxSeen int32
+	var wg sync.WaitGroup
+	processor := &MockProcessor{category: "Video", running: &running, maxSeen: &maxSeen, wg: &wg}
+	registry := &MediaRegistry{processors: []models.MediaProcessor{processor}}
+	metrics := NewShrinkMetrics()
+	metrics.isTTY = false
+	engine := NewEngine(nil, &models.ProcessorConfig{
+		Video: models.VideoConfig{MinSavingsVideo: 0},
+	}, EngineConfig{AnalysisThreads: 4}, nil, registry, metrics)
+
+	const n = 500
+	tempDir := t.TempDir()
+	media := make([]models.ShrinkMedia, n)
+	indices := make([]int, n)
+	for i := range media {
+		media[i] = models.ShrinkMedia{
+			Path:     filepath.Join(tempDir, "video.mp4"),
+			Category: "Video",
+			Ext:      ".mp4",
+			Size:     100,
+		}
+		indices[i] = i
+	}
+
+	results := engine.analyzeCategory(media, indices, "Video")
+	if len(results) != n {
+		t.Fatalf("analyzed %d jobs, want %d", len(results), n)
+	}
+	for i := range n {
+		if _, ok := results[i]; !ok {
+			t.Fatalf("missing result for job %d", i)
+		}
+	}
+}
+
+func TestAnalyzeSecondaryArchivePartDoesNotMove(t *testing.T) {
+	tempDir := t.TempDir()
+	zipPath := filepath.Join(tempDir, "archive.zip")
+	partPath := filepath.Join(tempDir, "archive.z01")
+	for _, path := range []string{zipPath, partPath} {
+		if err := os.WriteFile(path, []byte("data"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	processor := &MockProcessor{category: "Archived", running: new(int32), maxSeen: new(int32), wg: &sync.WaitGroup{}}
+	registry := &MediaRegistry{processors: []models.MediaProcessor{processor}}
+	metrics := NewShrinkMetrics()
+	metrics.isTTY = false
+	engine := NewEngine(nil, &models.ProcessorConfig{}, EngineConfig{Move: filepath.Join(tempDir, "moved")}, nil, registry, metrics)
+
+	media := []models.ShrinkMedia{{Path: partPath, Ext: ".z01", Category: "Archived"}}
+	results := engine.analyzeCategory(media, []int{0}, "Archived")
+	result, ok := results[0]
+	if !ok {
+		t.Fatal("missing analysis result")
+	}
+	if !result.skip {
+		t.Error("expected secondary archive part to be skipped")
+	}
+	if result.skipMove {
+		t.Error("secondary archive part must not be moved independently")
+	}
+}
+
+type timeoutProcessor struct {
+	BaseProcessor
+}
+
+func (p *timeoutProcessor) CanProcess(m *models.ShrinkMedia) bool { return true }
+func (p *timeoutProcessor) EstimateSize(m *models.ShrinkMedia, cfg *models.ProcessorConfig) models.ProcessableInfo {
+	return models.ProcessableInfo{IsTimeout: true}
+}
+
+func (p *timeoutProcessor) Process(ctx context.Context, m *models.ShrinkMedia, cfg *models.ProcessorConfig, registry models.ProcessorRegistry) models.ProcessResult {
+	return models.ProcessResult{}
+}
+
+func TestAnalyzeTimeoutIsNotTreatedAsSkippable(t *testing.T) {
+	processor := &timeoutProcessor{BaseProcessor{category: "Archived", requiredTool: "mock"}}
+	registry := &MediaRegistry{processors: []models.MediaProcessor{processor}}
+	metrics := NewShrinkMetrics()
+	metrics.isTTY = false
+	engine := NewEngine(nil, &models.ProcessorConfig{}, EngineConfig{Move: t.TempDir()}, nil, registry, metrics)
+
+	media := []models.ShrinkMedia{{Path: "archive.zip", Ext: ".zip", Size: 1000}}
+	results := engine.analyzeCategory(media, []int{0}, "Archived")
+	result, ok := results[0]
+	if !ok {
+		t.Fatal("missing analysis result")
+	}
+	if !result.failed {
+		t.Error("expected timed-out analysis to be marked failed")
+	}
+	if result.skip {
+		t.Error("timed-out analysis must not be treated as a skip")
+	}
+	if result.skipMove {
+		t.Error("timed-out analysis must not be moved")
 	}
 }
 

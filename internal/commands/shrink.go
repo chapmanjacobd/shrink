@@ -80,7 +80,7 @@ func (c *ShrinkCmd) Run(ctx *kong.Context) error {
 	}
 
 	// Filter by available tools
-	filteredMedia := c.filterByTools(allMedia, registry, tools)
+	filteredMedia, skippedMedia := c.filterByTools(allMedia, registry, tools)
 	slog.Info("Filtered media by tools",
 		"count", len(filteredMedia),
 		"ffmpeg", tools.FFmpeg,
@@ -91,6 +91,7 @@ func (c *ShrinkCmd) Run(ctx *kong.Context) error {
 	c.PrintUnknownExtensions()
 
 	if len(filteredMedia) == 0 {
+		c.MoveSkippedMedia(skippedMedia)
 		slog.Info("No processable media found")
 		return nil
 	}
@@ -117,15 +118,18 @@ func (c *ShrinkCmd) Run(ctx *kong.Context) error {
 		Timeout:         c.TimeoutFlags,
 		Move:            c.Move,
 		ActiveTime:      activeTimeRanges,
+		Simulate:        c.Simulate,
 	}
 	engine := NewEngine(c, cfg, engCfg, c.sqlDBs, registry, metrics)
 
 	// Analyze and decide what to shrink
 	slog.Info("Analyzing files", "count", len(filteredMedia))
-	toShrink := engine.analyzeMedia(filteredMedia)
+	toShrink, skippedByAnalysis := engine.analyzeMedia(filteredMedia)
+	skippedMedia = append(skippedMedia, skippedByAnalysis...)
 	slog.Info("Analysis complete", "selected", len(toShrink))
 
 	if len(toShrink) == 0 {
+		c.MoveSkippedMedia(skippedMedia)
 		fmt.Println("No files to shrink")
 		metrics.LogSummary()
 		return nil
@@ -164,7 +168,7 @@ func (c *ShrinkCmd) Run(ctx *kong.Context) error {
 		return nil
 	}
 
-	// Confirm
+	// Confirm before touching any files
 	if !c.NoConfirm {
 		// Clear any progress display before showing the confirm prompt
 		engine.metrics.ClearProgress()
@@ -172,6 +176,8 @@ func (c *ShrinkCmd) Run(ctx *kong.Context) error {
 			return nil
 		}
 	}
+
+	c.MoveSkippedMedia(skippedMedia)
 
 	// Setup context for graceful shutdown
 	runCtx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -205,8 +211,8 @@ func (c *ShrinkCmd) initDatabases() error {
 		}
 	}
 
-	// Initialize archive cache
-	if len(c.sqlDBs) > 0 {
+	// Initialize archive cache. A simulation must not modify the database.
+	if len(c.sqlDBs) > 0 && !c.Simulate {
 		// Initialize archive cache table
 		if err := db.InitArchiveCache(c.sqlDBs[0]); err != nil {
 			slog.Warn("Failed to initialize archive cache", "error", err)
@@ -275,9 +281,12 @@ func (c *ShrinkCmd) loadAllMedia() ([]models.ShrinkMedia, error) {
 // Media Filtering and Analysis
 // ============================================================================
 
-// filterByTools filters media based on available tools and requested categories
-func (c *ShrinkCmd) filterByTools(media []models.ShrinkMedia, registry *MediaRegistry, tools InstalledTools) []models.ShrinkMedia {
+// filterByTools filters media based on available tools and requested categories.
+// It also returns already-optimized files that should be moved after the user
+// confirms the operation.
+func (c *ShrinkCmd) filterByTools(media []models.ShrinkMedia, registry *MediaRegistry, tools InstalledTools) ([]models.ShrinkMedia, []models.ShrinkMedia) {
 	filtered := make([]models.ShrinkMedia, 0, len(media))
+	var skipped []models.ShrinkMedia
 
 	for _, m := range media {
 		// Ignore MediaType from DB, determine only by filterByTool
@@ -287,10 +296,12 @@ func (c *ShrinkCmd) filterByTools(media []models.ShrinkMedia, registry *MediaReg
 		if utils.IsOptimized(m.Ext) {
 			// Case 3: Already optimized format (.avif, .webp, .heic, AV1 containers)
 			// Mark as skipped in all DBs if it came from a DB (file still exists)
-			db.MarkSkipped(c.sqlDBs, m.Path)
+			if !c.Simulate {
+				db.MarkSkipped(c.sqlDBs, m.Path)
+			}
 			// Move to destination if --move is provided
 			if c.Move != "" {
-				c.MoveToSkipped(m.Path, nil)
+				skipped = append(skipped, m)
 			}
 			continue
 		}
@@ -329,7 +340,24 @@ func (c *ShrinkCmd) filterByTools(media []models.ShrinkMedia, registry *MediaReg
 		filtered = append(filtered, m)
 	}
 
-	return filtered
+	return filtered, skipped
+}
+
+// MoveSkippedMedia moves files that were skipped during analysis. Moves only
+// happen after confirmation and never during a simulation.
+func (c *ShrinkCmd) MoveSkippedMedia(skipped []models.ShrinkMedia) {
+	if c.Simulate || c.Move == "" || len(skipped) == 0 {
+		return
+	}
+
+	seen := make(map[string]bool, len(skipped))
+	for _, m := range skipped {
+		if m.Path == "" || seen[m.Path] {
+			continue
+		}
+		seen[m.Path] = true
+		c.MoveToSkipped(m.Path, m.PartFiles)
+	}
 }
 
 func (c *ShrinkCmd) SortByEfficiency(media []models.ShrinkMedia) {
@@ -592,6 +620,9 @@ func (c *ShrinkCmd) MoveToBroken(path string, partFiles []string) {
 
 	// Move multi-part archive files if present
 	for _, partFile := range partFiles {
+		if partFile == "" {
+			continue
+		}
 		if !filepath.IsAbs(partFile) {
 			partFile = filepath.Join(filepath.Dir(path), partFile)
 		}
@@ -649,6 +680,9 @@ func (c *ShrinkCmd) MoveToSkipped(path string, partFiles []string) {
 
 	// Move multi-part archive files if present
 	for _, partFile := range partFiles {
+		if partFile == "" {
+			continue
+		}
 		if !filepath.IsAbs(partFile) {
 			partFile = filepath.Join(filepath.Dir(path), partFile)
 		}

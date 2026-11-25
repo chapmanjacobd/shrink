@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/chapmanjacobd/shrink/internal/db"
+	"github.com/chapmanjacobd/shrink/internal/models"
 	"github.com/chapmanjacobd/shrink/internal/utils"
 )
 
@@ -74,6 +75,60 @@ func TestEdgeCases(t *testing.T) {
 		if !info.ModTime().Equal(modTime) {
 			t.Errorf("expected timestamp %v, got %v", modTime, info.ModTime())
 		}
+	}
+}
+
+func TestSimulateDoesNotMoveSkippedFiles(t *testing.T) {
+	tempDir := t.TempDir()
+	moveDir := filepath.Join(tempDir, "moved")
+	srcDir := filepath.Join(tempDir, "src")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	original := filepath.Join(srcDir, "already.opus")
+	if err := os.WriteFile(original, []byte("already optimized"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	args := []string{"--simulate", "--move", moveDir}
+	if err := runShrinkCmdDir(srcDir, tempDir, args); err != nil {
+		t.Fatalf("command failed: %v", err)
+	}
+
+	if _, err := os.Stat(original); os.IsNotExist(err) {
+		t.Errorf("simulation moved the original file")
+	}
+	if _, err := os.Stat(moveDir); err == nil {
+		entries, _ := os.ReadDir(moveDir)
+		if len(entries) > 0 {
+			t.Errorf("simulation created destination files: %v", entries)
+		}
+	}
+}
+
+func TestFilterByToolsDoesNotMoveFiles(t *testing.T) {
+	tempDir := t.TempDir()
+	original := filepath.Join(tempDir, "already.opus")
+	if err := os.WriteFile(original, []byte("already optimized"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := &ShrinkCmd{
+		unknownExtensions: make(map[string]UnknownExt),
+		skippedByTool:     make(map[string]int64),
+	}
+	cmd.Move = filepath.Join(tempDir, "moved")
+
+	media := []models.ShrinkMedia{{Path: original, Ext: ".opus"}}
+	filtered, skipped := cmd.filterByTools(media, nil, InstalledTools{})
+	if len(filtered) != 0 {
+		t.Fatalf("expected optimized file to be filtered, got %d", len(filtered))
+	}
+	if len(skipped) != 1 || skipped[0].Path != original {
+		t.Fatalf("expected optimized file to be queued for moving, got %+v", skipped)
+	}
+	if _, err := os.Stat(original); err != nil {
+		t.Errorf("filterByTools moved the file before confirmation: %v", err)
 	}
 }
 

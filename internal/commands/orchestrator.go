@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
-	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -54,6 +53,7 @@ type EngineConfig struct {
 	Timeout         TimeoutFlags
 	Move            string
 	ActiveTime      []*utils.TimeRange
+	Simulate        bool
 }
 
 // Engine coordinates the media analysis and processing lifecycle.
@@ -82,9 +82,19 @@ func NewEngine(ui UI, cfg *models.ProcessorConfig, engCfg EngineConfig, sqlDBs [
 // Media Analysis
 // ============================================================================
 
+// analysisResult is the outcome of analyzing a single media item.
+type analysisResult struct {
+	index    int
+	media    models.ShrinkMedia
+	skip     bool
+	broken   bool
+	failed   bool
+	skipMove bool
+}
+
 // analyzeMedia evaluates each media item to determine if it should be processed.
 // It processes files grouped by media type: Images, Text, Video, Audio, Archives.
-func (e *Engine) analyzeMedia(media []models.ShrinkMedia) []models.ShrinkMedia {
+func (e *Engine) analyzeMedia(media []models.ShrinkMedia) ([]models.ShrinkMedia, []models.ShrinkMedia) {
 	slog.Info("Starting media analysis", "total_files", len(media))
 
 	// Group media by type for sequential processing
@@ -115,14 +125,7 @@ func (e *Engine) analyzeMedia(media []models.ShrinkMedia) []models.ShrinkMedia {
 	}
 
 	// Results collection
-	allResults := make(map[int]struct {
-		media    models.ShrinkMedia
-		skip     bool
-		broken   bool
-		failed   bool
-		skipMove bool
-	})
-	var globalFailedJobs int64
+	allResults := make(map[int]analysisResult)
 
 	// Process each category sequentially
 	for _, cat := range categories {
@@ -132,15 +135,16 @@ func (e *Engine) analyzeMedia(media []models.ShrinkMedia) []models.ShrinkMedia {
 		}
 
 		slog.Info("Analyzing category", "category", cat, "count", len(indices))
-		categoryResults := e.analyzeCategory(media, indices, cat, &globalFailedJobs)
+		categoryResults := e.analyzeCategory(media, indices, cat)
 		maps.Copy(allResults, categoryResults)
 	}
 
-	// Move skipped files if --move is provided (cases 1 & 2: not processable, no savings)
+	// Collect skipped files that should be moved. The caller performs the
+	// actual moves after confirmation (and never during a simulation).
+	var skippedToMove []models.ShrinkMedia
 	for _, result := range allResults {
 		if result.skipMove && result.skip {
-			m := result.media
-			e.ui.MoveToSkipped(m.Path, m.PartFiles)
+			skippedToMove = append(skippedToMove, result.media)
 		}
 	}
 
@@ -163,266 +167,43 @@ func (e *Engine) analyzeMedia(media []models.ShrinkMedia) []models.ShrinkMedia {
 		}
 	}
 
-	slog.Info("Media analysis complete", "to_shrink", len(toShrink))
-	return toShrink
+	slog.Info("Media analysis complete", "to_shrink", len(toShrink), "skipped_to_move", len(skippedToMove))
+	return toShrink, skippedToMove
 }
 
 // analyzeCategory analyzes a group of files of the same media type.
-func (e *Engine) analyzeCategory(media []models.ShrinkMedia, indices []int, category string, globalFailedJobs *int64) map[int]struct {
-	media    models.ShrinkMedia
-	skip     bool
-	broken   bool
-	failed   bool
-	skipMove bool
-} {
-	// Determine analysis parallelism
+func (e *Engine) analyzeCategory(media []models.ShrinkMedia, indices []int, category string) map[int]analysisResult {
+	// Use a fixed worker pool. Dynamic resizing made it possible for all
+	// workers to exit while jobs were still queued, and resizing from another
+	// goroutine concurrently with WaitGroup.Wait is not supported.
 	targetConcurrency := e.engCfg.AnalysisThreads
 	if targetConcurrency <= 0 {
 		targetConcurrency = runtime.NumCPU() * 4
 	}
 	slog.Info("Analysis parallelism configured", "workers", targetConcurrency)
 
-	// Channel for distributing work
-	// Use bounded buffer to prevent memory issues with large directories
 	jobs := make(chan int, min(len(indices), 1000))
-	results := make(chan struct {
-		index    int
-		media    models.ShrinkMedia
-		skip     bool
-		broken   bool
-		failed   bool
-		skipMove bool
-	}, min(len(indices), 1000))
+	results := make(chan analysisResult, min(len(indices), 1000))
 
 	var wg sync.WaitGroup
 	var completedJobs atomic.Int64
-	var failedJobs atomic.Int64
 	var activeWorkers atomic.Int32
-	var totalWorkerSamples int64
-	var workerSum int64
-	var concurrency atomic.Int32
-	concurrency.Store(int32(targetConcurrency))
 
-	// Track recent failures with decay (for dynamic worker scaling)
-	// Failures decay by half every 5 minutes to avoid permanently penalizing
-	var recentFailures atomic.Uint64 // stores float64 bits
-
-	// Worker function
-	startWorker := func() {
-		wg.Go(func() {
+	worker := func() {
+		defer wg.Done()
+		for idx := range jobs {
 			activeWorkers.Add(1)
-			defer activeWorkers.Add(-1)
-
-			for {
-				if activeWorkers.Load() > concurrency.Load() {
-					return // Scale down
-				}
-				idx, ok := <-jobs
-				if !ok {
-					return
-				}
-
-				m := &media[idx]
-				processor := e.registry.GetProcessor(m)
-				skip := false
-				skipMove := false
-				broken := false
-				failed := false
-
-				if processor == nil {
-					slog.Warn("No processor found for file", "path", m.Path, "ext", m.Ext)
-					skip = true
-				} else {
-					// Get processor's category
-					m.Category = processor.Category()
-					// Check for 4K+ resolution videos and assign to separate category
-					// 4K UHD is 3840×2160, so we check for any dimension >= 2160
-					if m.Category == "Video" && (m.Height >= 2160 || m.Width >= 2160) {
-						m.Category = "Video4K"
-					}
-					e.metrics.RecordStarted(m.DisplayCategory(), m.Path)
-
-					// Estimate size and time
-					// For archives, check cache first for faster reloading
-					slog.Debug("Estimating size", "path", m.Path)
-					var info models.ProcessableInfo
-					if m.Category == "Archived" && len(e.sqlDBs) > 0 {
-						info = e.getArchiveEstimateWithCache(m, processor)
-					} else {
-						info = processor.EstimateSize(m, e.cfg)
-					}
-					slog.Debug("Estimate complete", "path", m.Path, "processable", info.IsProcessable)
-
-					if info.IsBroken {
-						m.IsBroken = true
-						m.PartFiles = info.PartFiles
-						broken = true
-					} else if !info.IsProcessable {
-						// Case 1: Not processable (e.g., archive with no shrinkable content)
-						e.metrics.RecordSkipped(m.DisplayCategory())
-						skip = true
-						skipMove = e.engCfg.Move != ""
-					} else {
-						// Use actual size if provided (e.g. multi-part archives)
-						if info.ActualSize > 0 {
-							m.Size = info.ActualSize
-						}
-
-						// Check if we should shrink
-						if !m.ShouldShrink(info.FutureSize, e.cfg) {
-							// Case 2: No savings expected
-							e.metrics.RecordSkipped(m.DisplayCategory())
-							skip = true
-							skipMove = e.engCfg.Move != ""
-						} else {
-							m.FutureSize = info.FutureSize
-							m.ProcessingTime = info.ProcessingTime
-							m.Savings = m.Size - info.FutureSize
-							// Record queued time for ETA calculation
-							e.metrics.RecordQueuedTime(m.DisplayCategory(), info.ProcessingTime)
-						}
-					}
-				}
-
-				// Check if estimation failed (archive timeout, etc.)
-				// Failed analyses should not be counted as completed
-				// Note: Don't mark as failed if already marked as skip (e.g., no processable content)
-				if m.Category == "Archived" && m.FutureSize == 0 && m.Size > 0 && !broken && !skip {
-					// Archive analysis failed (likely timeout) - skip but don't count as completed
-					failed = true
-					failedJobs.Add(1)
-					atomic.AddInt64(globalFailedJobs, 1)
-					// Increment recentFailures (stored as float64 bits)
-					oldBits := recentFailures.Load()
-					oldVal := math.Float64frombits(oldBits)
-					recentFailures.Store(math.Float64bits(oldVal + 1.0))
-					slog.Debug("Archive analysis failed, skipping", "path", m.Path)
-				}
-
-				results <- struct {
-					index    int
-					media    models.ShrinkMedia
-					skip     bool
-					broken   bool
-					failed   bool
-					skipMove bool
-				}{idx, *m, skip, broken, failed, skipMove}
-
-				if !failed {
-					completedJobs.Add(1)
-				}
-			}
-		})
-	}
-
-	// Start initial workers
-	for i := int32(0); i < concurrency.Load(); i++ {
-		startWorker()
-	}
-
-	// Dynamic scaling monitor
-	// Recalculates worker target only after sufficient time AND completions
-	// to avoid scaling decisions based on incomplete long-running jobs
-	monitorDone := make(chan struct{})
-	go func() {
-		ticker := time.NewTicker(500 * time.Millisecond)
-		defer ticker.Stop()
-
-		var lastCompleted int64
-		var lastFailed int64
-		var lastThroughput int64
-		direction := int32(1)
-		var accumulatedCompleted int64
-		lastRecalcTime := time.Now()
-		const failureHalfLife = 5.0 * 60.0          // 5 minutes in seconds
-		const decayFactor = 0.693 / failureHalfLife // ln(2) / halfLife for exponential decay
-
-		// Minimum thresholds before recalculating worker target
-		const minRecalcInterval = 2 * time.Second
-		const minCompletedForRecalc = 20
-
-		for {
-			select {
-			case <-ticker.C:
-				completed := completedJobs.Load()
-				failed := failedJobs.Load()
-				throughput := completed - lastCompleted
-				failedCount := failed - lastFailed
-				lastCompleted = completed
-				lastFailed = failed
-
-				// Accumulate completions since last recalc
-				accumulatedCompleted += throughput
-
-				// Only recalc if both time and completion thresholds are met
-				timeSinceRecalc := time.Since(lastRecalcTime)
-				if timeSinceRecalc < minRecalcInterval || accumulatedCompleted < minCompletedForRecalc {
-					// Still waiting for enough data - decay failures but don't scale
-					oldBits := recentFailures.Load()
-					recentFailCount := math.Float64frombits(oldBits)
-					if recentFailCount > 0 {
-						decay := math.Exp(-decayFactor * 0.5) // 0.5 seconds since last tick
-						recentFailures.Store(math.Float64bits(recentFailCount * decay))
-					}
-					continue
-				}
-
-				// Reset accumulation counter and timer for next cycle
-				accumulatedCompleted = 0
-				lastRecalcTime = time.Now()
-
-				current := concurrency.Load()
-
-				// Factor failures into scaling decision - aggressively reduce workers on failures
-				if failedCount > 0 {
-					// Immediately scale down when failures occur
-					direction = -2
-				} else if throughput < lastThroughput {
-					direction = -direction
-				} else if throughput == lastThroughput && throughput > 0 {
-					direction = 1
-				}
-
-				// Decay recent failures (exponential decay with 5-minute half-life)
-				// This prevents old errors from permanently limiting throughput
-				oldBits := recentFailures.Load()
-				recentFailCount := math.Float64frombits(oldBits)
-				if recentFailCount > 0 {
-					decay := math.Exp(-decayFactor * timeSinceRecalc.Seconds())
-					recentFailures.Store(math.Float64bits(recentFailCount * decay))
-				}
-
-				// Clamp down max workers based on recent (decayed) failure count
-				// Use decayed count so old errors gradually lose impact
-				maxWorkers := int32(160)
-				effectiveFailures := int(recentFailCount + 0.5) // Round to nearest int
-				if effectiveFailures > 0 {
-					// Aggressively reduce max workers as failures accumulate
-					// Each failure reduces max by 20, minimum 10 workers
-					// 1 failure = 280, 5 failures = 200, 10 failures = 100, 15 failures = 10
-					maxWorkers = max(10, 160-int32(effectiveFailures)*20)
-				}
-
-				newTarget := min(max(current+(direction*2), 1), maxWorkers)
-
-				concurrency.Store(newTarget)
-
-				active := activeWorkers.Load()
-				for active < newTarget {
-					startWorker()
-					active++
-				}
-				// Track worker statistics
-				atomic.AddInt64(&workerSum, int64(active))
-				atomic.AddInt64(&totalWorkerSamples, 1)
-				lastThroughput = throughput
-			case <-monitorDone:
-				return
-			}
+			results <- e.analyzeOne(media, idx)
+			completedJobs.Add(1)
+			activeWorkers.Add(-1)
 		}
-	}()
+	}
 
-	// Progress reporter
+	for range targetConcurrency {
+		wg.Add(1)
+		go worker()
+	}
+
 	progressDone := make(chan struct{})
 	go func() {
 		ticker := time.NewTicker(500 * time.Millisecond)
@@ -437,28 +218,16 @@ func (e *Engine) analyzeCategory(media []models.ShrinkMedia, indices []int, cate
 					status := fmt.Sprintf("\rAnalyzing %d/%d %s files", completed, len(indices), strings.ToLower(category))
 					if workers > 0 {
 						status += fmt.Sprintf(" (%d workers)", workers)
-					} else if totalWorkerSamples > 0 {
-						avgWorkers := float64(workerSum) / float64(totalWorkerSamples)
-						status += fmt.Sprintf(" (avg: %.1f workers)", avgWorkers)
 					}
 					fmt.Printf("%s\033[K", status)
 				}
 			case <-progressDone:
-				// Final update
-				completed := completedJobs.Load()
-				workers := activeWorkers.Load()
-				status := fmt.Sprintf("\rAnalyzed %d/%d %s files", completed, len(indices), strings.ToLower(category))
-				if workers == 0 && totalWorkerSamples > 0 {
-					avgWorkers := float64(workerSum) / float64(totalWorkerSamples)
-					status += fmt.Sprintf(" (avg: %.1f workers)", avgWorkers)
-				}
-				fmt.Printf("%s\033[K\n", status)
+				fmt.Printf("\rAnalyzed %d/%d %s files\033[K\n", completedJobs.Load(), len(indices), strings.ToLower(category))
 				return
 			}
 		}
 	}()
 
-	// Submit jobs
 	go func() {
 		for _, idx := range indices {
 			jobs <- idx
@@ -466,34 +235,99 @@ func (e *Engine) analyzeCategory(media []models.ShrinkMedia, indices []int, cate
 		close(jobs)
 	}()
 
-	// Wait for completion and collect results
 	go func() {
 		wg.Wait()
-		close(monitorDone)
 		close(progressDone)
 		close(results)
 	}()
 
-	// Collect results
-	resultMap := make(map[int]struct {
-		media    models.ShrinkMedia
-		skip     bool
-		broken   bool
-		failed   bool
-		skipMove bool
-	})
-
+	resultMap := make(map[int]analysisResult, len(indices))
 	for res := range results {
-		resultMap[res.index] = struct {
-			media    models.ShrinkMedia
-			skip     bool
-			broken   bool
-			failed   bool
-			skipMove bool
-		}{res.media, res.skip, res.broken, res.failed, res.skipMove}
+		resultMap[res.index] = res
+	}
+	return resultMap
+}
+
+// analyzeOne evaluates a single media item. It runs in a worker goroutine and
+// does not mutate shared state other than the item at its own index.
+func (e *Engine) analyzeOne(media []models.ShrinkMedia, idx int) analysisResult {
+	m := &media[idx]
+	result := analysisResult{index: idx, media: *m}
+
+	processor := e.registry.GetProcessor(m)
+	if processor == nil {
+		slog.Warn("No processor found for file", "path", m.Path, "ext", m.Ext)
+		result.skip = true
+		return result
 	}
 
-	return resultMap
+	m.Category = processor.Category()
+	// Check for 4K+ resolution videos and assign to a separate category.
+	// 4K UHD is 3840x2160, so we check for any dimension >= 2160.
+	if m.Category == "Video" && (m.Height >= 2160 || m.Width >= 2160) {
+		m.Category = "Video4K"
+	}
+	e.metrics.RecordStarted(m.DisplayCategory(), m.Path)
+
+	if m.Category == "Archived" && isSecondaryPart(m.Path) {
+		// Secondary parts belong to the primary archive. Moving them
+		// independently would break extraction.
+		e.metrics.RecordSkipped(m.DisplayCategory())
+		result.skip = true
+		result.media = *m
+		return result
+	}
+
+	// Estimate size and time. For archives, check the cache first.
+	slog.Debug("Estimating size", "path", m.Path)
+	var info models.ProcessableInfo
+	if m.Category == "Archived" && len(e.sqlDBs) > 0 {
+		info = e.getArchiveEstimateWithCache(m, processor)
+	} else {
+		info = processor.EstimateSize(m, e.cfg)
+	}
+	slog.Debug("Estimate complete", "path", m.Path, "processable", info.IsProcessable, "timeout", info.IsTimeout)
+
+	// A timeout is not a skip: the file was never successfully analyzed and
+	// must not be moved as if it had no shrinkable content.
+	if info.IsTimeout {
+		slog.Debug("Archive analysis timed out, skipping without moving", "path", m.Path)
+		result.failed = true
+		result.media = *m
+		return result
+	}
+
+	if info.IsBroken {
+		m.IsBroken = true
+		m.PartFiles = info.PartFiles
+		result.broken = true
+	} else if !info.IsProcessable {
+		// Case 1: Not processable (e.g., archive with no shrinkable content)
+		e.metrics.RecordSkipped(m.DisplayCategory())
+		result.skip = true
+		result.skipMove = e.engCfg.Move != ""
+	} else {
+		// Use actual size if provided (e.g. multi-part archives)
+		if info.ActualSize > 0 {
+			m.Size = info.ActualSize
+		}
+
+		if !m.ShouldShrink(info.FutureSize, e.cfg) {
+			// Case 2: No savings expected
+			e.metrics.RecordSkipped(m.DisplayCategory())
+			result.skip = true
+			result.skipMove = e.engCfg.Move != ""
+		} else {
+			m.FutureSize = info.FutureSize
+			m.ProcessingTime = info.ProcessingTime
+			m.Savings = m.Size - info.FutureSize
+			// Record queued time for ETA calculation
+			e.metrics.RecordQueuedTime(m.DisplayCategory(), info.ProcessingTime)
+		}
+	}
+
+	result.media = *m
+	return result
 }
 
 // ============================================================================
@@ -1080,7 +914,7 @@ func (e *Engine) getArchiveEstimateWithCache(m *models.ShrinkMedia, processor mo
 
 	// Update cache (use first available DB)
 	// Only cache if analysis was successful (no timeouts)
-	if len(e.sqlDBs) > 0 && !info.IsTimeout {
+	if !e.engCfg.Simulate && len(e.sqlDBs) > 0 && !info.IsTimeout {
 		// Convert part files to pipe-separated string for storage
 		partFilesStr := ""
 		if len(info.PartFiles) > 0 {
