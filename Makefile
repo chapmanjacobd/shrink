@@ -82,3 +82,10 @@ lint:
 
 install:
 	CGO_ENABLED=1 go install -tags fts5 ./cmd/shrink
+
+# Tag and push a release with the latest semver tag bump.
+# make release [LEVEL=patch|minor|major|vX.Y.Z] [RELEASE_FLAGS=...]
+release:
+	~/bin/go.release -x $(RELEASE_FLAGS) $(LEVEL)
+
+.PHONY: release
