@@ -131,8 +131,15 @@ func FolderSize(path string) int64 {
 	return size
 }
 
-// MoveFile moves a file from source to destination, handling cross-filesystem moves
+// MoveFile moves a file from source to destination, handling cross-filesystem moves.
+// It refuses to overwrite an existing destination.
 func MoveFile(src, dst string) error {
+	if src == dst {
+		return nil
+	}
+	if _, err := os.Stat(dst); err == nil {
+		return fmt.Errorf("destination already exists: %s", dst)
+	}
 	// Capture source timestamps before any operations
 	info, err := os.Stat(src)
 	if err != nil {
@@ -436,12 +443,17 @@ func ParsePercentOrBytesStrict(s string) (float64, error) {
 
 var OptimizedExtensions = []string{".av1.mkv", ".opus", ".mka", ".avif", ".oga", ".ogg", ".svg", ".svgz"}
 
-// IsOptimized checks if a file extension is already optimized
+// IsOptimized checks if a file extension is already optimized.
 func IsOptimized(ext string) bool {
-	ext = strings.ToLower(ext)
-	// Check for composite extensions like .av1.mkv or simple ones like .opus
+	return IsOptimizedPath(strings.ToLower(ext))
+}
+
+// IsOptimizedPath checks a full path so composite extensions such as
+// "video.av1.mkv" are detected. filepath.Ext would only return ".mkv".
+func IsOptimizedPath(path string) bool {
+	path = strings.ToLower(path)
 	for _, opt := range OptimizedExtensions {
-		if strings.HasSuffix(ext, opt) {
+		if strings.HasSuffix(path, opt) {
 			return true
 		}
 	}
@@ -480,7 +492,7 @@ var VideoExtensions = []string{
 	"st26", "stk", "stl", "stm", "stp", "str", "sup", "svag", "svs", "sw",
 	"tak", "tco", "thd", "tp", "ts", "tta", "ty", "ty+", "ub", "ul",
 	"ult", "umx", "uw", "v", "v210", "vag", "vc1", "rcv", "vob", "viv",
-	"vpk", "vqe", "vqf", "vql", "vt", "webm", "wmv", "wow", "wsd", "xl",
+	"vpk", "vqe", "vqf", "vql", "vt", "webm", "webp", "wmv", "wow", "wsd", "xl",
 	"xm", "xmgz", "xmr", "xmv", "xmz", "xpk", "xvag", "y4m", "yop", "yuv",
 	"yuv10",
 }

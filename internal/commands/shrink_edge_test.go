@@ -108,9 +108,12 @@ func TestSimulateDoesNotMoveSkippedFiles(t *testing.T) {
 
 func TestFilterByToolsDoesNotMoveFiles(t *testing.T) {
 	tempDir := t.TempDir()
-	original := filepath.Join(tempDir, "already.opus")
-	if err := os.WriteFile(original, []byte("already optimized"), 0o644); err != nil {
-		t.Fatal(err)
+	opusPath := filepath.Join(tempDir, "already.opus")
+	av1Path := filepath.Join(tempDir, "video.av1.mkv")
+	for _, path := range []string{opusPath, av1Path} {
+		if err := os.WriteFile(path, []byte("already optimized"), 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	cmd := &ShrinkCmd{
@@ -119,16 +122,21 @@ func TestFilterByToolsDoesNotMoveFiles(t *testing.T) {
 	}
 	cmd.Move = filepath.Join(tempDir, "moved")
 
-	media := []models.ShrinkMedia{{Path: original, Ext: ".opus"}}
+	media := []models.ShrinkMedia{
+		{Path: opusPath, Ext: ".opus"},
+		{Path: av1Path, Ext: ".mkv"},
+	}
 	filtered, skipped := cmd.filterByTools(media, nil, InstalledTools{})
 	if len(filtered) != 0 {
-		t.Fatalf("expected optimized file to be filtered, got %d", len(filtered))
+		t.Fatalf("expected optimized files to be filtered, got %d", len(filtered))
 	}
-	if len(skipped) != 1 || skipped[0].Path != original {
-		t.Fatalf("expected optimized file to be queued for moving, got %+v", skipped)
+	if len(skipped) != 2 {
+		t.Fatalf("expected both optimized files to be queued for moving, got %+v", skipped)
 	}
-	if _, err := os.Stat(original); err != nil {
-		t.Errorf("filterByTools moved the file before confirmation: %v", err)
+	for _, path := range []string{opusPath, av1Path} {
+		if _, err := os.Stat(path); err != nil {
+			t.Errorf("filterByTools moved %s before confirmation: %v", path, err)
+		}
 	}
 }
 

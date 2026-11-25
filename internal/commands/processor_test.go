@@ -39,6 +39,14 @@ func TestProcessorRegistry(t *testing.T) {
 		t.Errorf("expected AudioProcessor")
 	}
 
+	// WebP can be animated, so the video processor probes it and delegates
+	// static images back to the image processor.
+	m = &models.ShrinkMedia{Ext: ".webp"}
+	p = registry.GetProcessor(m)
+	if _, ok := p.(*VideoProcessor); !ok {
+		t.Errorf("expected VideoProcessor for WebP detection")
+	}
+
 	m = &models.ShrinkMedia{Category: "Image", MediaType: "image/jpeg", Ext: ".jpg"}
 	p = registry.GetProcessor(m)
 	if _, ok := p.(*ImageProcessor); !ok {

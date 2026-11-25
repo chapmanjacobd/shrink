@@ -219,6 +219,9 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *models.Shri
 	// We avoid -no-directory as it can sometimes cause issues with split archives on some platforms.
 	// We use the base name and set cmd.Dir to help unar find parts.
 	outputDir := filepath.Join(filepath.Dir(m.Path), filepath.Base(m.Path)+".extracted")
+	// Recreate the extraction directory so leftovers from a failed run cannot
+	// be mistaken for files produced by this run.
+	_ = os.RemoveAll(outputDir)
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
 		return models.ProcessResult{SourcePath: m.Path, PartFiles: partFiles, Error: err}
 	}
@@ -273,7 +276,9 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *models.Shri
 		ext := strings.ToLower(filepath.Ext(path))
 		fileSize := info.Size()
 
-		if utils.ImageExtensionMap[ext] && !utils.IsOptimized(ext) {
+		if utils.IsOptimizedPath(path) {
+			outputFiles = append(outputFiles, models.ProcessOutputFile{Path: path, Size: fileSize})
+		} else if utils.ImageExtensionMap[ext] && ext != ".webp" {
 			imgMedia := &models.ShrinkMedia{Path: path, Size: fileSize, Ext: ext, Category: "Image"}
 			info := imageProc.EstimateSize(imgMedia, cfg)
 			if imgMedia.ShouldShrink(info.FutureSize, cfg) {
@@ -553,7 +558,7 @@ func (p *ArchiveProcessor) estimateContent(content models.ShrinkMedia, cfg *mode
 	}
 
 	// Already-optimized media is extracted and kept as-is.
-	if ext != "" && utils.IsOptimized(ext) {
+	if utils.IsOptimizedPath(content.Path) {
 		return entrySize, 0, false
 	}
 

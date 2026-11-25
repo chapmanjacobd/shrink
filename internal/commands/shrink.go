@@ -246,7 +246,7 @@ func (c *ShrinkCmd) loadAllMedia() ([]models.ShrinkMedia, error) {
 
 	// Load from opened databases
 	for _, sqlDB := range c.sqlDBs {
-		records, err := db.LoadMediaFromDB(sqlDB, c.ForceShrink, c.VideoOnly, c.AudioOnly, c.ImageOnly, c.TextOnly)
+		records, err := db.LoadMediaFromDB(sqlDB, c.ForceShrink)
 		if err != nil {
 			return nil, err
 		}
@@ -301,7 +301,7 @@ func (c *ShrinkCmd) filterByTools(media []models.ShrinkMedia, registry *MediaReg
 		m.MediaType = ""
 
 		// Skip if already optimized
-		if utils.IsOptimized(m.Ext) {
+		if utils.IsOptimizedPath(m.Path) {
 			// Case 3: Already optimized format (.avif, .webp, .heic, AV1 containers)
 			// Mark as skipped in all DBs if it came from a DB (file still exists)
 			if !c.Simulate {
@@ -409,7 +409,7 @@ func (c *ShrinkCmd) PrintSummary(media []models.ShrinkMedia) {
 
 	// Print summary table
 	fmt.Println()
-	headers := []string{"Media Type", "Count", "Current", "Future", "Savings", "Future Size"}
+	headers := []string{"Media Type", "Count", "Current", "Future", "Savings", "Size Ratio"}
 	var rows [][]string
 
 	// Sort keys for consistent output

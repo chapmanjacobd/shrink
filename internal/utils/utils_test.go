@@ -103,6 +103,24 @@ func TestParsePercentOrBytes(t *testing.T) {
 	}
 }
 
+func TestIsOptimizedPath(t *testing.T) {
+	tests := []struct {
+		path string
+		want bool
+	}{
+		{"/media/video.av1.mkv", true},
+		{"/media/video.AV1.MKV", true},
+		{"/media/audio.opus", true},
+		{"/media/image.avif", true},
+		{"/media/video.mkv", false},
+	}
+	for _, tt := range tests {
+		if got := IsOptimizedPath(tt.path); got != tt.want {
+			t.Errorf("IsOptimizedPath(%q) = %v, want %v", tt.path, got, tt.want)
+		}
+	}
+}
+
 func TestParseDurationString(t *testing.T) {
 	got := ParseDurationString("1h30m")
 	if got != 90*time.Minute {
@@ -224,6 +242,29 @@ func containsMissing(s string) bool {
 
 func splitLines(s string) []string {
 	return strings.Split(strings.TrimSuffix(s, "\n"), "\n")
+}
+
+func TestMoveFileDoesNotOverwrite(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.txt")
+	dst := filepath.Join(dir, "dst.txt")
+	if err := os.WriteFile(src, []byte("source"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dst, []byte("destination"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := MoveFile(src, dst); err == nil {
+		t.Fatal("expected MoveFile to reject an existing destination")
+	}
+	data, err := os.ReadFile(dst)
+	if err != nil || string(data) != "destination" {
+		t.Fatalf("destination was modified: %q, %v", data, err)
+	}
+	if _, err := os.Stat(src); err != nil {
+		t.Errorf("source was removed: %v", err)
+	}
 }
 
 func TestFileExists(t *testing.T) {
