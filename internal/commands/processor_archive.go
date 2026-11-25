@@ -316,7 +316,7 @@ func (p *ArchiveProcessor) ExtractAndProcess(ctx context.Context, m *models.Shri
 
 			// Use ProbeMedia to get video count if needed
 			if category == "Video" || category == "Audio" {
-				if probed, err := ffmpeg.ProbeMedia(path); err == nil {
+				if probed, err := ffmpeg.ProbeMediaContext(ctx, path); err == nil {
 					media.VideoCount = len(probed.VideoStreams)
 					media.AudioCount = len(probed.AudioStreams)
 					media.Duration = probed.Duration

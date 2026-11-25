@@ -1,14 +1,18 @@
 package ffmpeg
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/chapmanjacobd/shrink/internal/utils"
 )
+
+const defaultProbeTimeout = 2 * time.Minute
 
 // FFProbeResult represents ffprobe JSON output
 type FFProbeResult struct {
@@ -47,13 +51,20 @@ type FFProbeFormat struct {
 	NbStreams int               `json:"nb_streams"`
 }
 
-// ProbeMedia probes a media file and returns metadata
+// ProbeMedia probes a media file and returns metadata.
 func ProbeMedia(path string) (*FFProbeResult, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), defaultProbeTimeout)
+	defer cancel()
+	return ProbeMediaContext(ctx, path)
+}
+
+// ProbeMediaContext probes a media file, honoring the caller's context.
+func ProbeMediaContext(ctx context.Context, path string) (*FFProbeResult, error) {
 	ffprobe := utils.GetCommandPath("ffprobe")
 	if ffprobe == "" {
 		return nil, fmt.Errorf("ffprobe not installed")
 	}
-	cmd := exec.Command(ffprobe,
+	cmd := exec.CommandContext(ctx, ffprobe,
 		"-v", "quiet",
 		"-print_format", "json",
 		"-show_format",
@@ -103,9 +114,16 @@ func ProbeMedia(path string) (*FFProbeResult, error) {
 	return &probe, nil
 }
 
-// GetImageDimensions uses ffprobe to get the actual width and height of an image
+// GetImageDimensions uses ffprobe to get the actual width and height of an image.
 func GetImageDimensions(path string) (int, int, error) {
-	probe, err := ProbeMedia(path)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultProbeTimeout)
+	defer cancel()
+	return GetImageDimensionsContext(ctx, path)
+}
+
+// GetImageDimensionsContext uses ffprobe, honoring the caller's context.
+func GetImageDimensionsContext(ctx context.Context, path string) (int, int, error) {
+	probe, err := ProbeMediaContext(ctx, path)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -128,7 +146,7 @@ func GetImageDimensions(path string) (int, int, error) {
 	return 0, 0, fmt.Errorf("no video stream found")
 }
 
-func (p *FFmpegProcessor) isAnimationFromProbe(probe *FFProbeResult) bool {
+func (p *FFmpegProcessor) isAnimationFromProbe(ctx context.Context, probe *FFProbeResult) bool {
 	if probe == nil {
 		return false
 	}
@@ -140,7 +158,7 @@ func (p *FFmpegProcessor) isAnimationFromProbe(probe *FFProbeResult) bool {
 	for _, s := range probe.VideoStreams {
 		frames := parseInt(s.NbFrames)
 		if frames == 0 && ffprobe != "" {
-			cmd := exec.Command(ffprobe,
+			cmd := exec.CommandContext(ctx, ffprobe,
 				"-v", "error",
 				"-count_frames",
 				"-select_streams", "v:0",
@@ -161,12 +179,12 @@ func (p *FFmpegProcessor) isAnimationFromProbe(probe *FFProbeResult) bool {
 	return false
 }
 
-func (p *FFmpegProcessor) countFrames(path string) int {
+func (p *FFmpegProcessor) countFrames(ctx context.Context, path string) int {
 	ffprobe := utils.GetCommandPath("ffprobe")
 	if ffprobe == "" {
 		return 0
 	}
-	cmd := exec.Command(ffprobe,
+	cmd := exec.CommandContext(ctx, ffprobe,
 		"-v", "fatal",
 		"-select_streams", "v:0",
 		"-count_frames",

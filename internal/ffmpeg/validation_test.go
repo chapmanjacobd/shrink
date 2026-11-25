@@ -1,6 +1,7 @@
 package ffmpeg
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -13,7 +14,7 @@ func TestValidateTranscode(t *testing.T) {
 	m := models.ShrinkMedia{Path: "orig.mp4", Size: 1000, Duration: 10.0}
 
 	// Case 1: Output file missing
-	res := p.validateTranscode(m, "nonexistent.mkv", nil)
+	res := p.validateTranscode(context.Background(), m, "nonexistent.mkv", nil)
 	if res.Success {
 		t.Errorf("expected failure for nonexistent output")
 	}
@@ -22,7 +23,7 @@ func TestValidateTranscode(t *testing.T) {
 	tempDir := t.TempDir()
 	emptyFile := filepath.Join(tempDir, "empty.mkv")
 	_ = os.WriteFile(emptyFile, []byte(""), 0o644)
-	res = p.validateTranscode(m, emptyFile, nil)
+	res = p.validateTranscode(context.Background(), m, emptyFile, nil)
 	if res.Success {
 		t.Errorf("expected failure for empty output")
 	}

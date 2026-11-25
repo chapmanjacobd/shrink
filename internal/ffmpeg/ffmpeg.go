@@ -33,7 +33,7 @@ func (p *FFmpegProcessor) Process(ctx context.Context, m *models.ShrinkMedia, cf
 	}
 
 	// Probe the file
-	probe, err := ProbeMedia(m.Path)
+	probe, err := ProbeMediaContext(ctx, m.Path)
 	if err != nil {
 		// Wrap ffprobe errors with a marker for detection
 		return models.ProcessResult{SourcePath: m.Path, Error: fmt.Errorf("ffprobe failed: %w", err)}
@@ -47,7 +47,7 @@ func (p *FFmpegProcessor) Process(ctx context.Context, m *models.ShrinkMedia, cf
 
 	// Handle animated images (GIF/webp with audio)
 	if m.Ext == ".gif" || m.Ext == ".webp" {
-		isAnimation := p.isAnimationFromProbe(probe)
+		isAnimation := p.isAnimationFromProbe(ctx, probe)
 		if !isAnimation {
 			// Process as static image
 			m.Category = "Image"
@@ -104,7 +104,7 @@ func (p *FFmpegProcessor) Process(ctx context.Context, m *models.ShrinkMedia, cf
 	}
 
 	// Build and execute FFmpeg command
-	args, effectiveOutputPath := p.buildFFmpegArgs(m.Path, outputPath, probe, videoStream, audioStream, albumArtStream, probe.SubtitleStreams)
+	args, effectiveOutputPath := p.buildFFmpegArgs(ctx, m.Path, outputPath, probe, videoStream, audioStream, albumArtStream, probe.SubtitleStreams)
 
 	// Setup systemd-run wrapper if configured (Linux only)
 	systemdCfg := utils.SystemdRunConfig{
@@ -143,13 +143,13 @@ func (p *FFmpegProcessor) Process(ctx context.Context, m *models.ShrinkMedia, cf
 	}
 
 	// Validate transcode (may return multiple results if splitting was used)
-	return p.validateTranscode(*m, effectiveOutputPath, probe)
+	return p.validateTranscode(ctx, *m, effectiveOutputPath, probe)
 }
 
 // buildFFmpegArgs constructs the FFmpeg command arguments.
 // It also returns the effective output path, which contains a %03d placeholder
 // when FFmpeg is asked to split the output.
-func (p *FFmpegProcessor) buildFFmpegArgs(inputPath, outputPath string, probe *FFProbeResult,
+func (p *FFmpegProcessor) buildFFmpegArgs(ctx context.Context, inputPath, outputPath string, probe *FFProbeResult,
 	videoStream, audioStream, albumArtStream *FFProbeStream, subtitleStreams []FFProbeStream,
 ) ([]string, string) {
 	effectiveOutputPath := outputPath
@@ -190,7 +190,7 @@ func (p *FFmpegProcessor) buildFFmpegArgs(inputPath, outputPath string, probe *F
 			)
 
 			// Build video filters
-			filters := p.buildVideoFilters(probe, videoStream)
+			filters := p.buildVideoFilters(ctx, probe, videoStream)
 			if len(filters) > 0 {
 				args = append(args, fmt.Sprintf("-vf:v:%d", videoOutIdx), strings.Join(filters, ","))
 			}
@@ -209,7 +209,7 @@ func (p *FFmpegProcessor) buildFFmpegArgs(inputPath, outputPath string, probe *F
 		// Silence detection for splitting
 		isSplit := p.config.Audio.AlwaysSplit || (videoStream == nil && p.config.Audio.SplitLongerThan > 0 && probe.Duration > p.config.Audio.SplitLongerThan)
 		if isSplit {
-			splits := p.detectSilence(inputPath)
+			splits := p.detectSilence(ctx, inputPath)
 			if len(splits) > 0 {
 				segmentTimes := strings.Join(splits, ",")
 				args = append(args, "-f", "segment", "-segment_times", segmentTimes)
@@ -240,13 +240,13 @@ func (p *FFmpegProcessor) buildFFmpegArgs(inputPath, outputPath string, probe *F
 }
 
 // buildVideoFilters constructs video filter chain
-func (p *FFmpegProcessor) buildVideoFilters(probe *FFProbeResult, stream *FFProbeStream) []string {
+func (p *FFmpegProcessor) buildVideoFilters(ctx context.Context, probe *FFProbeResult, stream *FFProbeStream) []string {
 	var filters []string
 
 	// FPS correction
 	fps := parseFPS(probe)
 	if fps > 240 {
-		frames := p.countFrames(probe.Path)
+		frames := p.countFrames(ctx, probe.Path)
 		if frames > 0 && probe.Duration > 0 {
 			actualFPS := float64(frames) / probe.Duration
 			filters = append(filters, fmt.Sprintf("fps=%f", actualFPS))
@@ -414,7 +414,7 @@ func (p *FFmpegProcessor) buildScaleFilter(stereoMode string, width, height int)
 
 // Helper functions
 
-func (p *FFmpegProcessor) detectSilence(path string) []string {
+func (p *FFmpegProcessor) detectSilence(ctx context.Context, path string) []string {
 	ffmpeg := utils.GetCommandPath("ffmpeg")
 	if ffmpeg == "" {
 		return nil
@@ -427,7 +427,7 @@ func (p *FFmpegProcessor) detectSilence(path string) []string {
 		"-vn", "-sn", "-f", "s16le", "-y", os.DevNull,
 	}
 
-	output, err := exec.Command(ffmpeg, args...).CombinedOutput()
+	output, err := exec.CommandContext(ctx, ffmpeg, args...).CombinedOutput()
 	if err != nil {
 		slog.Warn("Silence detection failed", "path", path, "error", err)
 		return nil

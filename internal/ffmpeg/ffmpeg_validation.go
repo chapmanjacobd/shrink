@@ -1,6 +1,7 @@
 package ffmpeg
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
@@ -12,7 +13,7 @@ import (
 )
 
 // validateTranscode validates the transcoded output
-func (p *FFmpegProcessor) validateTranscode(m models.ShrinkMedia, outputPath string, originalProbe *FFProbeResult) models.ProcessResult {
+func (p *FFmpegProcessor) validateTranscode(ctx context.Context, m models.ShrinkMedia, outputPath string, originalProbe *FFProbeResult) models.ProcessResult {
 	// Check if output is a split file pattern (contains %03d)
 	isSplit := strings.Contains(outputPath, "%03d")
 
@@ -33,7 +34,7 @@ func (p *FFmpegProcessor) validateTranscode(m models.ShrinkMedia, outputPath str
 			deleteTranscode = true
 		} else {
 			// Validate duration and dimensions
-			transcodeProbe, err := ProbeMedia(outputPath)
+			transcodeProbe, err := ProbeMediaContext(ctx, outputPath)
 			if err != nil {
 				deleteTranscode = true
 			} else if len(transcodeProbe.Streams) == 0 || transcodeProbe.Duration == 0 {
@@ -94,7 +95,7 @@ func (p *FFmpegProcessor) validateTranscode(m models.ShrinkMedia, outputPath str
 			break
 		}
 		// Validate dimensions for video split files
-		probe, err := ProbeMedia(match)
+		probe, err := ProbeMediaContext(ctx, match)
 		if err != nil || len(probe.Streams) == 0 {
 			hasInvalidFile = true
 			break

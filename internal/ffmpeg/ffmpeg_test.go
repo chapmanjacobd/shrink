@@ -321,7 +321,7 @@ func TestIsAnimationFromProbe(t *testing.T) {
 	cfg := &models.ProcessorConfig{}
 	processor := NewFFmpegProcessor(cfg)
 	probe, _ := ProbeMedia("test.gif")
-	isAnim := processor.isAnimationFromProbe(probe)
+	isAnim := processor.isAnimationFromProbe(context.Background(), probe)
 	if !isAnim {
 		t.Errorf("expected animation to be true")
 	}
@@ -395,7 +395,7 @@ func TestBuildVideoFilters(t *testing.T) {
 	probe := &FFProbeResult{}
 	stream := &FFProbeStream{Width: 1920, Height: 1080}
 
-	filters := p.buildVideoFilters(probe, stream)
+	filters := p.buildVideoFilters(context.Background(), probe, stream)
 	if len(filters) == 0 {
 		t.Errorf("expected video filters")
 	}
@@ -488,7 +488,7 @@ func TestCountFrames(t *testing.T) {
 	p := NewFFmpegProcessor(cfg)
 
 	// mock_ffprobe handles -count_frames by returning "10"
-	count := p.countFrames("test.gif")
+	count := p.countFrames(context.Background(), "test.gif")
 	if count != 10 {
 		t.Errorf("expected 10, got %d", count)
 	}
