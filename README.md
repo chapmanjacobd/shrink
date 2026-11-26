@@ -6,7 +6,7 @@ A high-performance media optimization tool written in Go. `shrink` automatically
 
 - Video: Transcodes to AV1 (using SVT-AV1) in an MKV container.
 - Audio: Transcodes to Opus.
-- Images: Converts to AVIF (using ImageMagick).
+- Images: Converts to AVIF (using ImageMagick). GeoTIFFs are recompressed to Cloud Optimized GeoTIFF (using GDAL) so their coordinate systems are preserved.
 - Ebooks: Optimizes EPUB/PDF files by compressing internal images and cleaning CSS (using Calibre).
 - Archives: Recursively extracts and processes contents of ZIP, RAR, 7z, and more (using unar).
 
@@ -33,6 +33,7 @@ go install -tags fts5 github.com/chapmanjacobd/shrink/cmd/shrink@latest
 | :--- | :--- |
 | FFmpeg | Video and Audio transcoding |
 | ImageMagick | Image conversion (specifically `magick`) |
+| GDAL | (Optional) GeoTIFF recompression (`gdal_translate`) |
 | Calibre | Ebook conversion (`ebook-convert`) |
 | unar | Archive extraction (`unar` and `lsar`) |
 | ocrmypdf | (Optional) OCR for PDF files |
@@ -126,6 +127,17 @@ shrink --active-time 12pm-1pm --active-time 6pm-11pm /path/to/media
 | --max-video-height | Maximum video height | `960` |
 | --max-video-width | Maximum video width | `1440` |
 | --delete-larger | Keep the transcode only when it is not larger than the original; `--force-shrink` overrides | `true` |
+
+### Image Flags
+
+| Flag | Description | Default |
+| :--- | :--- | :--- |
+| --max-image-size | Skip non-geospatial images larger than this (`0` disables) | `200MiB` |
+| --image-cache-limit | ImageMagick pixel cache limit per image for memory, map, and disk (`0` disables) | `1GiB` |
+| --max-image-pixels | Keep the original when an image has more decoded pixels than this (`0` disables) | `100000000` |
+| --geotiff-mode | `cog` recompresses GeoTIFFs to Cloud Optimized GeoTIFF, `skip` keeps them unchanged, `avif` converts them to AVIF and drops georeferencing | `cog` |
+
+ImageMagick stores large pixel caches in `/tmp` by default. On systems where `/tmp` is tmpfs, an unbounded cache consumes RAM and can fill the filesystem, so `shrink` sets memory, map, and disk limits on each ImageMagick call.
 
 ### Filter Flags
 

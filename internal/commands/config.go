@@ -91,6 +91,10 @@ type ImageFlags struct {
 	MaxImageWidth   int     `default:"2400" help:"Maximum image width" env:"SHRINK_MAX_IMAGE_WIDTH"`
 	MaxWidthBuffer  float64 `default:"0.05" help:"Buffer percentage for width upscaling" env:"SHRINK_MAX_WIDTH_BUFFER"`
 	MaxHeightBuffer float64 `default:"0.05" help:"Buffer percentage for height upscaling" env:"SHRINK_MAX_HEIGHT_BUFFER"`
+	MaxImageSize    string  `default:"200MiB" help:"Skip non-geospatial images larger than this (0 disables)" env:"SHRINK_MAX_IMAGE_SIZE"`
+	ImageCacheLimit string  `default:"1GiB" help:"ImageMagick pixel cache limit per image (0 disables)" env:"SHRINK_IMAGE_CACHE_LIMIT"`
+	MaxImagePixels  int64   `default:"100000000" help:"Maximum decoded pixels per image (0 disables)" env:"SHRINK_MAX_IMAGE_PIXELS"`
+	GeotiffMode     string  `default:"cog" enum:"cog,skip,avif" help:"GeoTIFF handling: recompress to COG with GDAL, skip, or convert to AVIF" env:"SHRINK_GEOTIFF_MODE"`
 }
 
 type TextFlags struct {
@@ -190,6 +194,15 @@ func (c *Config) validateConfig() error {
 	}
 	if err := validateSizeFlag("--target-image-size", c.TargetImageSize, false, true); err != nil {
 		return err
+	}
+	if err := validateSizeFlag("--max-image-size", c.MaxImageSize, false, false); err != nil {
+		return err
+	}
+	if err := validateSizeFlag("--image-cache-limit", c.ImageCacheLimit, false, false); err != nil {
+		return err
+	}
+	if c.MaxImagePixels < 0 {
+		return fmt.Errorf("--max-image-pixels cannot be negative")
 	}
 
 	bitrateFlags := []struct {
@@ -399,6 +412,10 @@ func (c *Config) buildImageConfig() models.ImageConfig {
 		TranscodingImageTime: c.TranscodingImageTime,
 		MaxImageWidth:        c.MaxImageWidth,
 		MaxImageHeight:       c.MaxImageHeight,
+		MaxImageBytes:        utils.ParseSize(c.MaxImageSize),
+		ImageCacheLimit:      utils.ParseSize(c.ImageCacheLimit),
+		MaxImagePixels:       c.MaxImagePixels,
+		GeotiffMode:          c.GeotiffMode,
 	}
 }
 

@@ -349,11 +349,12 @@ func (p *TextProcessor) processEbookImagesWithManifest(ctx context.Context, outp
 		}
 
 		outputPath := strings.TrimSuffix(img, ext) + ".avif"
-		args := []string{
+		args := imageMagickLimitArgs(cfg)
+		args = append(args,
 			img,
 			"-resize", fmt.Sprintf("%dx%d>", cfg.Image.MaxImageWidth, cfg.Image.MaxImageHeight),
 			outputPath,
-		}
+		)
 
 		// Setup systemd-run wrapper if configured (Linux only)
 		systemdCfg := utils.SystemdRunConfig{

@@ -52,6 +52,10 @@ type ImageConfig struct {
 	TranscodingImageTime float64
 	MaxImageWidth        int
 	MaxImageHeight       int
+	MaxImageBytes        int64  // Skip larger non-geospatial images (0 = no limit)
+	ImageCacheLimit      int64  // ImageMagick pixel cache limit per image (0 = no limit)
+	MaxImagePixels       int64  // Maximum decoded pixels per image (0 = no limit)
+	GeotiffMode          string // "cog", "skip", or "avif"
 }
 
 // TextConfig contains configuration for text/ebook processing
